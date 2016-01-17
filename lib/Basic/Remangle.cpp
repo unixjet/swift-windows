@@ -26,6 +26,7 @@
 #include <vector>
 #include <cstdlib>
 #include <unordered_map>
+#include <stdio.h>
 
 using namespace swift;
 using namespace Demangle;

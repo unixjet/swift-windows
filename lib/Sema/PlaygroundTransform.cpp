@@ -31,6 +31,7 @@
 
 #include <forward_list>
 #include <random>
+#include <stdio.h>
 
 using namespace swift;
 

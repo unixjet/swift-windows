@@ -17,6 +17,7 @@
 //
 //===----------------------------------------------------------------------===//
 
+#include <stdio.h>
 #include "swift/Subsystems.h"
 #include "swift/Basic/Demangle.h"
 #include "swift/Basic/LLVMInitialize.h"

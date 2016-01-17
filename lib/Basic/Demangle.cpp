@@ -24,6 +24,7 @@
 #include <functional>
 #include <vector>
 #include <cstdlib>
+#include <stdio.h>
 
 using namespace swift;
 using namespace Demangle;

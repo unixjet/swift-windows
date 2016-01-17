@@ -14,6 +14,7 @@
 //
 //===----------------------------------------------------------------------===//
 
+#include <stdio.h>
 #include "llvm/Support/MathExtras.h"
 #include "swift/Basic/Demangle.h"
 #include "swift/Basic/LLVM.h"
