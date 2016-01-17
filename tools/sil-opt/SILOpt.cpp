@@ -37,7 +37,7 @@
 #include "llvm/Support/Path.h"
 #include "llvm/Support/Signals.h"
 #include "llvm/Support/TargetSelect.h"
-#include <stdio.h>
+#include <cstdio>
 using namespace swift;
 
 namespace {

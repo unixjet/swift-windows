@@ -14,7 +14,6 @@
 //
 //===----------------------------------------------------------------------===//
 
-#include <stdio.h>
 #include "llvm/Support/MathExtras.h"
 #include "swift/Basic/Demangle.h"
 #include "swift/Basic/LLVM.h"
@@ -45,6 +44,8 @@
 #if SWIFT_OBJC_INTEROP
 #include <objc/runtime.h>
 #endif
+
+#include <cstdio>
 
 #if defined(__APPLE__) && defined(VM_MEMORY_SWIFT_METADATA)
 #define VM_TAG_FOR_SWIFT_METADATA VM_MAKE_TAG(VM_MEMORY_SWIFT_METADATA)

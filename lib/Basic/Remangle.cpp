@@ -24,9 +24,9 @@
 #include "swift/Strings.h"
 #include "llvm/ADT/StringRef.h"
 #include <vector>
+#include <cstdio>
 #include <cstdlib>
 #include <unordered_map>
-#include <stdio.h>
 
 using namespace swift;
 using namespace Demangle;

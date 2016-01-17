@@ -23,8 +23,8 @@
 #include "llvm/ADT/StringRef.h"
 #include <functional>
 #include <vector>
+#include <cstdio>
 #include <cstdlib>
-#include <stdio.h>
 
 using namespace swift;
 using namespace Demangle;

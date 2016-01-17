@@ -17,7 +17,6 @@
 //
 //===----------------------------------------------------------------------===//
 
-#include <stdio.h>
 #include "swift/Subsystems.h"
 #include "swift/Basic/Demangle.h"
 #include "swift/Basic/LLVMInitialize.h"
@@ -37,6 +36,7 @@
 #include "llvm/Support/MemoryBuffer.h"
 #include "llvm/Support/Path.h"
 #include "llvm/Support/Signals.h"
+#include <cstdio>
 using namespace swift;
 
 static llvm::cl::opt<std::string>
