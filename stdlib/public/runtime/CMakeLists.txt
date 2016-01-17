@@ -49,6 +49,12 @@ else()
       ${ICU_UC_INCLUDE_DIR} ${ICU_I18N_INCLUDE_DIR})
 endif()
 
+set(swift_runtime_port_sources)
+if("${CMAKE_SYSTEM_NAME}" STREQUAL "CYGWIN")
+  set(swift_runtime_port_sources
+      CygwinPort.cpp)
+endif()
+
 add_swift_library(swiftRuntime IS_STDLIB IS_STDLIB_CORE
   Casting.cpp
   Demangle.cpp
@@ -67,6 +73,7 @@ add_swift_library(swiftRuntime IS_STDLIB IS_STDLIB_CORE
   ${swift_runtime_dtrace_sources}
   ${swift_runtime_leaks_sources}
   ${swift_runtime_unicode_normalization_sources}
+  ${swift_runtime_port_sources}
   C_COMPILE_FLAGS ${swift_runtime_compile_flags}
   LINK_LIBRARIES ${swift_runtime_link_libraries}
   INSTALL_IN_COMPONENT stdlib)

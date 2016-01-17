@@ -46,6 +46,21 @@
 #include <atomic>
 #include <type_traits>
 
+
+#if defined(__CYGWIN__)
+struct dl_phdr_info
+{
+	void			 *dlpi_addr;
+	const char       *dlpi_name;
+};
+
+int dl_iterate_phdr(int(*callback)(struct dl_phdr_info *info, size_t size, void *data),
+					void *data);
+uint8_t *getSectionDataPE(void *handle, const char *section_name,
+                          unsigned long *section_size);
+#endif
+
+
 // FIXME: Clang defines max_align_t in stddef.h since 3.6.
 // Remove this hack when we don't care about older Clangs on all platforms.
 #ifdef __APPLE__
@@ -2294,10 +2309,12 @@ const {
   }
 }
 
-#if defined(__APPLE__) && defined(__MACH__)
+#if defined(__APPLE__) && defined(__MACH__) 
 #define SWIFT_PROTOCOL_CONFORMANCES_SECTION "__swift2_proto"
 #elif defined(__ELF__)
 #define SWIFT_PROTOCOL_CONFORMANCES_SECTION ".swift2_protocol_conformances_start"
+#elif defined(__CYGWIN__)
+#define SWIFT_PROTOCOL_CONFORMANCES_SECTION ".sw2prtc"
 #endif
 
 // std:once_flag token to install the dyld callback to enqueue images for
@@ -2340,7 +2357,7 @@ namespace {
 #  if __APPLE__
       assert((!Success && Data <= 0xFFFFFFFFU) ||
              (Success && Data > 0xFFFFFFFFU));
-#  elif __linux__ || __FreeBSD__
+#  elif __linux__ || __FreeBSD__ || __CYGWIN__
       assert((!Success && Data <= 0x0FFFU) ||
              (Success && Data > 0x0FFFU));
 #  else
@@ -2375,7 +2392,7 @@ namespace {
 #if __LP64__
 #  if __APPLE__
       return Data > 0xFFFFFFFFU;
-#  elif __linux__ || __FreeBSD__
+#  elif __linux__ || __FreeBSD__ || __CYGWIN__
       return Data > 0x0FFFU;
 #  else
 #    error "port me"
@@ -2492,6 +2509,31 @@ static int _addImageProtocolConformances(struct dl_phdr_info *info,
   dlclose(handle);
   return 0;
 }
+#elif defined(__CYGWIN__)
+static int _addImageProtocolConformances(struct dl_phdr_info *info,
+                                          size_t size, void * /*data*/) {
+  void *handle;
+  if (!info->dlpi_name || info->dlpi_name[0] == '\0') {
+    handle = dlopen(nullptr, RTLD_LAZY);
+  } else
+    handle = dlopen(info->dlpi_name, RTLD_LAZY | RTLD_NOLOAD);
+
+  unsigned long conformancesSize;
+  const uint8_t *conformances =
+    getSectionDataPE(handle, SWIFT_PROTOCOL_CONFORMANCES_SECTION,
+                     &conformancesSize);
+
+  if (!conformances) {
+    // if there are no conformances, don't hold this handle open.
+    dlclose(handle);
+    return 0;
+  }
+
+  _addImageProtocolConformancesBlock(conformances, conformancesSize);
+
+  dlclose(handle);
+  return 0;
+}
 #endif
 
 static void installCallbacksToInspectDylib() {
@@ -2502,7 +2544,7 @@ static void installCallbacksToInspectDylib() {
     // Dyld will invoke this on our behalf for all images that have already
     // been loaded.
     _dyld_register_func_for_add_image(_addImageProtocolConformances);
-  #elif defined(__ELF__)
+  #elif defined(__ELF__) || defined(__CYGWIN__)
     // Search the loaded dls. Unlike the above, this only searches the already
     // loaded ones.
     // FIXME: Find a way to have this continue to happen after.
