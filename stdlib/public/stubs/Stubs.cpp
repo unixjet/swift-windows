@@ -20,12 +20,6 @@
 #define _WITH_GETLINE
 #endif
 
-#if defined(__CYGWIN__)
-#include <stdio.h>
-typedef  void *locale_t;
-#define uselocale(x)  nullptr
-#endif
-
 #include <sys/resource.h>
 #include <sys/errno.h>
 #include <unistd.h>
@@ -35,13 +29,20 @@ typedef  void *locale_t;
 #include <cstdio>
 #include <cstdlib>
 #include <cstring>
-//#include <xlocale.h>
+#if defined(__CYGWIN__)
+// Cygwin does not support uselocal() and locale_t.
+// Instead, we will use the locale feature in stringstream.
+typedef void *locale_t;
+#include <sstream>
+#include <cmath>
+#define  fmodl(lhs, rhs)  std::fmod(lhs, rhs)
+#else
+#include <xlocale.h>
+#endif
 #include <limits>
 #include "llvm/ADT/StringExtras.h"
 #include "swift/Runtime/Debug.h"
 #include "swift/Basic/Lazy.h"
-
-extern "C" long double fmodl(long double, long double);
 
 static uint64_t uint64ToStringImpl(char *Buffer, uint64_t Value,
                                    int64_t Radix, bool Uppercase,
@@ -128,6 +129,8 @@ static locale_t getCLocale() {
 
 #if defined(__APPLE__)
 #define swift_snprintf_l snprintf_l
+#elif defined(__CYGWIN__)
+// In Cygwin, swift_snprintf_l() is not used.
 #else
 static int swift_snprintf_l(char *Str, size_t StrSize, locale_t Locale,
                             const char *Format, ...) {
@@ -138,7 +141,7 @@ static int swift_snprintf_l(char *Str, size_t StrSize, locale_t Locale,
 
   va_list Args;
   va_start(Args, Format);
-  int Result = vsnprintf(Str, StrSize, Format, Args);
+  int Result = std::vsnprintf(Str, StrSize, Format, Args);
   va_end(Args);
 
   uselocale(OldLocale);
@@ -159,9 +162,25 @@ static uint64_t swift_floatingPointToString(char *Buffer, size_t BufferLength,
     Precision = std::numeric_limits<T>::max_digits10;
   }
   
+#if defined(__CYGWIN__)
+  // Cygwin does not support uselocale(), but we can use the locale feature 
+  // in stringstrem object.
+  std::ostringstream ValueStream;
+  ValueStream.width(0);
+  ValueStream.precision(Precision);
+  ValueStream.imbue(std::locale::classic());
+  ValueStream << Value;
+  std::string  ValueString(ValueStream.str());
+  int i = ValueString.length();
+  if (size_t(i) < BufferLength) {
+    std::copy(ValueString.begin(), ValueString.end(), Buffer);
+    Buffer[i] = '\0';
+  }
+#else
   // Pass a null locale to use the C locale.
   int i = swift_snprintf_l(Buffer, BufferLength, /*locale=*/nullptr, Format,
                            Precision, Value);
+#endif
 
   if (i < 0)
     swift::crash(
@@ -324,16 +343,44 @@ __mulodi4(di_int a, di_int b, int* overflow)
 }
 #endif
 
+#if defined(__CYGWIN__)
+// Cygwin does not have strtoXX_l() functions.
+// These are wrapper functions only for C locale.
+static long double strtold_l(const char *nptr, char **EndPtr, locale_t) {
+  std::string lastLocale = setlocale(LC_ALL, "");
+  setlocale(LC_ALL, "C");
+  long double result = strtold(nptr, EndPtr);
+  setlocale(LC_ALL, lastLocale.c_str());
+  return result;
+}
+
+static double strtod_l(const char *nptr, char **EndPtr, locale_t) {
+  std::string lastLocale = setlocale(LC_ALL, "");
+  setlocale(LC_ALL, "C");
+  double result = strtod(nptr, EndPtr);
+  setlocale(LC_ALL, lastLocale.c_str());
+  return result;
+}
+
+static float strtof_l(const char *nptr, char **EndPtr, locale_t) {
+  std::string lastLocale = setlocale(LC_ALL, "");
+  setlocale(LC_ALL, "C");
+  float result = strtof(nptr, EndPtr);
+  setlocale(LC_ALL, lastLocale.c_str());
+  return result;
+}
+#endif
+
 // We can't return Float80, but we can receive a pointer to one, so
 // switch the return type and the out parameter on strtold.
 template <typename T>
 static const char *_swift_stdlib_strtoX_clocale_impl(
     const char * nptr, T* outResult, T huge,
-    T (*posixImpl)(const char *, char **)
+    T (*posixImpl)(const char *, char **, locale_t)
 ) {
   char *EndPtr;
   errno = 0;
-  const auto result = posixImpl(nptr, &EndPtr);
+  const auto result = posixImpl(nptr, &EndPtr, getCLocale());
   *outResult = result;
   if (result == huge || result == -huge || result == 0.0 || result == -0.0) {
       if (errno == ERANGE)
@@ -345,19 +392,19 @@ static const char *_swift_stdlib_strtoX_clocale_impl(
 extern "C" const char *_swift_stdlib_strtold_clocale(
   const char * nptr, void *outResult) {
   return _swift_stdlib_strtoX_clocale_impl(
-    nptr, static_cast<long double*>(outResult), HUGE_VALL, strtold);
+    nptr, static_cast<long double*>(outResult), HUGE_VALL, strtold_l);
 }
 
 extern "C" const char *_swift_stdlib_strtod_clocale(
     const char * nptr, double *outResult) {
   return _swift_stdlib_strtoX_clocale_impl(
-    nptr, outResult, HUGE_VAL, strtod);
+    nptr, outResult, HUGE_VAL, strtod_l);
 }
 
 extern "C" const char *_swift_stdlib_strtof_clocale(
     const char * nptr, float *outResult) {
   return _swift_stdlib_strtoX_clocale_impl(
-    nptr, outResult, HUGE_VALF, strtof);
+    nptr, outResult, HUGE_VALF, strtof_l);
 }
 
 extern "C" void _swift_stdlib_flockfile_stdout() {

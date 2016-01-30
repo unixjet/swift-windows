@@ -132,8 +132,8 @@ namespace swift {
   int _swift_dl_iterate_phdr(int (*Callback)(struct dl_phdr_info *info,
                                              size_t size, void *data),
                              void *data);
-  uint8_t *_swift_getSectionDataPE(void *handle, const char *section_name,
-                                   unsigned long *section_size);
+  uint8_t *_swift_getSectionDataPE(void *handle, const char *sectionName,
+                                   unsigned long *sectionSize);
 #endif
 
 } // end namespace swift

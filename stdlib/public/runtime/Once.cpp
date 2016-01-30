@@ -38,7 +38,7 @@ static_assert(sizeof(swift_once_t) <= sizeof(void*),
               "swift_once_t must be no larger than the platform word");
 
 #if defined(__CYGWIN__)
-static std::mutex mutex_;
+static std::mutex swiftOnceMutex;
 #endif
 
 /// Runs the given function with the given context argument exactly once.
@@ -49,15 +49,17 @@ void swift::swift_once(swift_once_t *predicate, void (*fn)(void *)) {
   dispatch_once_f(predicate, nullptr, fn);
 #else
 #if defined(__CYGWIN__)
-
-  mutex_.lock();
+  // FIXME: This implementation does a global lock, which is much worse than
+  // what we have on other platforms. Each swift_once should synchronize on the
+  // token.
+  swiftOnceMutex.lock();
   if (*predicate == 0) {
     *predicate = 1ul;
-    mutex_.unlock();
+    swiftOnceMutex.unlock();
 
     fn(nullptr);
   } else
-    mutex_.unlock();
+    swiftOnceMutex.unlock();
 
 #else
   // FIXME: We're relying here on the coincidence that libstdc++ uses pthread's
