@@ -96,7 +96,7 @@ static clang::CodeGenerator *createClangCodeGenerator(ASTContext &Context,
   }
   if (Opts.DebugInfoKind != IRGenDebugInfoKind::None) {
     CGO.DebugCompilationDir = Opts.DebugCompilationDir;
-    CGO.DwarfVersion = swift::DWARFVersion;
+    CGO.DwarfVersion = Opts.DWARFVersion;
     CGO.DwarfDebugFlags = Opts.DWARFDebugFlags;
   }
 
