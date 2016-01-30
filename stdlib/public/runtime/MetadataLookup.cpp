@@ -192,14 +192,9 @@ static int _addImageTypeMetadataRecords(struct dl_phdr_info *info,
     _swift_getSectionDataPE(handle, SWIFT_TYPE_METADATA_SECTION,
                            &recordsSize);
 
-  if (!records) {
-    // if there are no type metadata records, don't hold this handle open.
-    dlclose(handle);
-    return 0;
+  if (records) {
+    _addImageTypeMetadataRecordsBlock(records, recordsSize);
   }
-
-  _addImageTypeMetadataRecordsBlock(records, recordsSize);
-
   dlclose(handle);
   return 0;
 }
