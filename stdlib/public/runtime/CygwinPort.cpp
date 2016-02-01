@@ -19,11 +19,14 @@
 #include <stdint.h>
 #include <stdlib.h>
 #include <string.h>
+#include <mutex>
 #include <vector>
 #include <windows.h>
 #include <psapi.h>
 
 using namespace swift;
+
+static std::mutex swiftOnceMutex;
 
 int swift::_swift_dl_iterate_phdr(int (*Callback)(struct dl_phdr_info *info,
                                                   size_t size, void *data),
@@ -128,4 +131,19 @@ uint8_t *swift::_swift_getSectionDataPE(void *handle, const char *sectionName,
   }
 
   return nullptr;
+}
+
+void swift::_swift_once_f(unsigned long *predicate, void *context,
+                          void (*function)(void *)) {
+  // FIXME: This implementation does a global lock, which is much worse than
+  // what we have on other platforms. Each swift_once should synchronize on the
+  // token.
+  swiftOnceMutex.lock();
+  if (*predicate == 0) {
+    *predicate = 1ul;
+    swiftOnceMutex.unlock();
+
+    function(context);
+  } else
+    swiftOnceMutex.unlock();
 }
