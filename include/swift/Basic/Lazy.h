@@ -30,7 +30,7 @@ namespace swift {
 #elif defined(__CYGWIN__)
   // _swift_once_f() is declared in Private.h.
   // This prototype is copied instead including the header file.
-  void _swift_once_f(unsigned long *predicate, void *context,
+  void _swift_once_f(uintptr_t *predicate, void *context,
                      void (*function)(void *));
   using OnceToken_t = unsigned long;
 # define SWIFT_ONCE_F(TOKEN, FUNC, CONTEXT) \

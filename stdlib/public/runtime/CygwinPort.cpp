@@ -133,7 +133,7 @@ uint8_t *swift::_swift_getSectionDataPE(void *handle, const char *sectionName,
   return nullptr;
 }
 
-void swift::_swift_once_f(unsigned long *predicate, void *context,
+void swift::_swift_once_f(uintptr_t *predicate, void *context,
                           void (*function)(void *)) {
   // FIXME: This implementation does a global lock, which is much worse than
   // what we have on other platforms. Each swift_once should synchronize on the

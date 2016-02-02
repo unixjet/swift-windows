@@ -134,7 +134,7 @@ namespace swift {
                              void *data);
   uint8_t *_swift_getSectionDataPE(void *handle, const char *sectionName,
                                    unsigned long *sectionSize);
-  void _swift_once_f(unsigned long *predicate, void *context,
+  void _swift_once_f(uintptr_t *predicate, void *context,
                      void (*function)(void *));
 #endif
 
