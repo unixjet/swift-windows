@@ -32,6 +32,7 @@
 #include "llvm/Support/Path.h"
 #include "llvm/Support/Process.h"
 #include "llvm/Support/Program.h"
+#include <cstdio>
 
 using namespace swift;
 using namespace swift::driver;
@@ -259,6 +260,7 @@ ToolChain::constructInvocation(const CompileJobAction &job,
     } else {
       bool FoundPrimaryInput = false;
       for (auto inputPair : context.getTopLevelInputFiles()) {
+		char buf[50]; sprintf(buf, "%d", inputPair.first);
         if (!types::isPartOfSwiftCompilation(inputPair.first))
           continue;
 

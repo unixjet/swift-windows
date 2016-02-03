@@ -319,7 +319,7 @@ static llvm::TargetMachine *createTargetMachine(IRGenOptions &Opts,
   llvm::TargetMachine *TargetMachine
     = Target->createTargetMachine(Triple.str(), CPU,
                                   targetFeatures, TargetOpts, Reloc::PIC_,
-                                  CodeModel::Default, OptLevel);
+                                  CodeModel::Large, OptLevel);
   if (!TargetMachine) {
     Ctx.Diags.diagnose(SourceLoc(), diag::no_llvm_target,
                        Triple.str(), "no LLVM target machine");

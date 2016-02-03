@@ -347,13 +347,8 @@ static int _addImageProtocolConformances(struct dl_phdr_info *info,
     _swift_getSectionDataPE(handle, SWIFT_PROTOCOL_CONFORMANCES_SECTION,
                            &conformancesSize);
 
-  if (!conformances) {
-    // if there are no conformances, don't hold this handle open.
-    dlclose(handle);
-    return 0;
-  }
-
-  _addImageProtocolConformancesBlock(conformances, conformancesSize);
+  if (conformances)
+    _addImageProtocolConformancesBlock(conformances, conformancesSize);
 
   dlclose(handle);
   return 0;
