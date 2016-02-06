@@ -1,20 +1,20 @@
 /*
 
-In my opnion, there are three kinds of platform specific implementation in performing '_initializeCallbacksToInspectDylib'.
+In my opnion, there are three kinds of platform specific implementation factors in performing '_initializeCallbacksToInspectDylib()'.
 
 First, the function for seaching loaded dls/images/DLLs is diffrent for every platform.
-The function is different for every platform - _dyld_register_func_for_add_image(), dl_iterate_phdr(), android_iterate_libs(), _swift_dl_iterate_phdr (in __CYGWIN__). Some of these are supported by system library(__APPLE__, Linux) and others are implemented for swift.
-For that reason, there are conditional preprocessing in two '_initializeCallbacksToInspectDylib'.
+The functions are _dyld_register_func_for_add_image(), dl_iterate_phdr(), android_iterate_libs(), _swift_dl_iterate_phdr(). Some of these are supported by system library (Apple , Linux) and others are implemented for porting (Android, Cygwin).
+For that reason, there are conditional preprocessing in two '_initializeCallbacksToInspectDylib()'.
 
 Second, the callback function which calling by the searching function is different.
 Although the callback function name is same for each platform, the prototype is different. The reason why is because the different searching function specifies different prototype of callback.
 
 Finally, the method for inspecting a section of dl/image/DLL is different.
-This method is directly supported by system library (getsectiondata) in __APPLE__, or implemented with POSIX dlsym and linker script in Linux/Android, or implemented for swift in Cygwin. Except __APPLE_, they all use POSIX dlopen/dlclose for handling  dl/image/DLL.
+This method is directly supported by system library getsectiondata() in Apple, or implemented with POSIX dlsym() and linker script in Linux/Android, or implemented with accessing PE/COFF structure in Cygwin. Except Apple, they all use POSIX dlopen()/dlclose() for accessing a dl/image/DLL.
 
-I think it is most important to generalize two '_initializeCallbacksToInspectDylib' from where the duplication is begining for every platform.
+I think it is most important to generalize two '_initializeCallbacksToInspectDylib()' from where the duplication is begining for every platform.
 
-How about introducing general function _swift_inspectDylibs as follows?
+How about introducing general function _swift_inspectDylibs() as follows?
 
 */
 
