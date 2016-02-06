@@ -86,7 +86,7 @@ struct TwoWordPair {
   // too much.
 #if __arm__ || __i386__ || defined(__CYGWIN__)
 #if defined(__CYGWIN__)
-  using Return = unsigned __int128;
+  enum class Return : unsigned __int128 {};
 #else
   enum class Return : unsigned long long {};
 #endif
