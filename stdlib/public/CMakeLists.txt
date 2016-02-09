@@ -2,6 +2,10 @@
 # introducing static constructors or destructors.
 set(SWIFT_CORE_CXX_FLAGS)
 
+if(CMAKE_SYSTEM_NAME STREQUAL "CYGWIN")
+  list(APPEND SWIFT_CORE_CXX_FLAGS "-mcmodel=large")
+endif()
+
 check_cxx_compiler_flag("-Werror -Wglobal-constructors" CXX_SUPPORTS_GLOBAL_CONSTRUCTORS_WARNING)
 if(CXX_SUPPORTS_GLOBAL_CONSTRUCTORS_WARNING)
   list(APPEND SWIFT_CORE_CXX_FLAGS "-Wglobal-constructors")
@@ -10,10 +14,6 @@ endif()
 check_cxx_compiler_flag("-Wexit-time-destructors" CXX_SUPPORTS_EXIT_TIME_DESTRUCTORS_WARNING)
 if(CXX_SUPPORTS_EXIT_TIME_DESTRUCTORS_WARNING)
   list(APPEND SWIFT_CORE_CXX_FLAGS "-Wexit-time-destructors")
-endif()
-
-if(CMAKE_SYSTEM_NAME STREQUAL "CYGWIN")
-  list(APPEND SWIFT_CORE_CXX_FLAGS "-mcmodel=large")
 endif()
 
 if(SWIFT_BUILD_STDLIB)
