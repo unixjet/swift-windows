@@ -364,8 +364,8 @@ static void getResultStructure(
 static UIdent KindLiteralArray("source.lang.swift.literal.array");
 static UIdent KindLiteralBoolean("source.lang.swift.literal.boolean");
 static UIdent KindLiteralColor("source.lang.swift.literal.color");
+static UIdent KindLiteralImage("source.lang.swift.literal.image");
 static UIdent KindLiteralDictionary("source.lang.swift.literal.dictionary");
-static UIdent KindLiteralFloat("source.lang.swift.literal.float");
 static UIdent KindLiteralInteger("source.lang.swift.literal.integer");
 static UIdent KindLiteralNil("source.lang.swift.literal.nil");
 static UIdent KindLiteralString("source.lang.swift.literal.string");
@@ -380,10 +380,10 @@ getUIDForCodeCompletionLiteralKind(CodeCompletionLiteralKind kind) {
     return KindLiteralBoolean;
   case CodeCompletionLiteralKind::ColorLiteral:
     return KindLiteralColor;
+  case CodeCompletionLiteralKind::ImageLiteral:
+    return KindLiteralImage;
   case CodeCompletionLiteralKind::DictionaryLiteral:
     return KindLiteralDictionary;
-  case CodeCompletionLiteralKind::FloatLiteral:
-    return KindLiteralFloat;
   case CodeCompletionLiteralKind::IntegerLiteral:
     return KindLiteralInteger;
   case CodeCompletionLiteralKind::NilLiteral:
@@ -542,10 +542,10 @@ getCodeCompletionLiteralKindForUID(UIdent uid) {
     return CodeCompletionLiteralKind::BooleanLiteral;
   } else if (uid == KindLiteralColor) {
     return CodeCompletionLiteralKind::ColorLiteral;
+  } else if (uid == KindLiteralImage) {
+    return CodeCompletionLiteralKind::ImageLiteral;
   } else if (uid == KindLiteralDictionary) {
     return CodeCompletionLiteralKind::DictionaryLiteral;
-  } else if (uid == KindLiteralFloat) {
-    return CodeCompletionLiteralKind::FloatLiteral;
   } else if (uid == KindLiteralInteger) {
     return CodeCompletionLiteralKind::IntegerLiteral;
   } else if (uid == KindLiteralNil) {
@@ -697,6 +697,10 @@ CompletionKind CodeCompletion::SessionCache::getCompletionKind() {
   llvm::sys::ScopedLock L(mtx);
   return completionKind;
 }
+bool CodeCompletion::SessionCache::getCompletionHasExpectedTypes() {
+  llvm::sys::ScopedLock L(mtx);
+  return completionHasExpectedTypes;
+}
 const CodeCompletion::FilterRules &
 CodeCompletion::SessionCache::getFilterRules() {
   llvm::sys::ScopedLock L(mtx);
@@ -779,6 +783,7 @@ static void translateCodeCompletionOptions(OptionsDictionary &from,
   static UIdent KeyAddInnerOperators("key.codecomplete.addinneroperators");
   static UIdent KeyAddInitsToTopLevel("key.codecomplete.addinitstotoplevel");
   static UIdent KeyFuzzyMatching("key.codecomplete.fuzzymatching");
+  static UIdent KeyTopNonLiteral("key.codecomplete.showtopnonliteralresults");
   static UIdent KeyContextWeight("key.codecomplete.sort.contextweight");
   static UIdent KeyFuzzyWeight("key.codecomplete.sort.fuzzyweight");
   static UIdent KeyPopularityBonus("key.codecomplete.sort.popularitybonus");
@@ -802,6 +807,7 @@ static void translateCodeCompletionOptions(OptionsDictionary &from,
   from.valueForOption(KeyFuzzyWeight, to.fuzzyMatchWeight);
   from.valueForOption(KeyPopularityBonus, to.popularityBonus);
   from.valueForOption(KeyHideByName, to.hideByNameStyle);
+  from.valueForOption(KeyTopNonLiteral, to.showTopNonLiteralResults);
 }
 
 static void translateFilterRules(ArrayRef<FilterRule> rawFilterRules,
@@ -928,7 +934,8 @@ static void transformAndForwardResults(
   };
 
   CodeCompletion::CodeCompletionOrganizer organizer(
-      options, session->getCompletionKind());
+      options, session->getCompletionKind(),
+      session->getCompletionHasExpectedTypes());
 
   bool hasEarlyInnerResults =
       session->getCompletionKind() == CompletionKind::PostfixExpr;
@@ -1060,10 +1067,12 @@ void SwiftLangSupport::codeCompleteOpen(
   }
 
   CompletionKind completionKind = CompletionKind::None;
+  bool hasExpectedTypes = false;
 
   SwiftCodeCompletionConsumer swiftConsumer(
       [&](ArrayRef<CodeCompletionResult *> results, SwiftCompletionInfo &info) {
         completionKind = info.completionContext->CodeCompletionKind;
+        hasExpectedTypes = info.completionContext->HasExpectedTypeRelation;
         completions =
             extendCompletions(results, sink, info, nameToPopularity, CCOpts);
       });
@@ -1097,7 +1106,7 @@ void SwiftLangSupport::codeCompleteOpen(
   std::vector<std::string> argsCopy(extendedArgs.begin(), extendedArgs.end());
   SessionCacheRef session{new SessionCache(
       std::move(sink), std::move(bufferCopy), std::move(argsCopy),
-      completionKind, std::move(filterRules))};
+      completionKind, hasExpectedTypes, std::move(filterRules))};
   session->setSortedCompletions(std::move(completions));
 
   if (!CCSessions.set(name, offset, session)) {

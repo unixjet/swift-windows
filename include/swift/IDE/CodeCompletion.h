@@ -410,8 +410,8 @@ enum class CodeCompletionLiteralKind {
   BooleanLiteral,
   ColorLiteral,
   DictionaryLiteral,
-  FloatLiteral,
   IntegerLiteral,
+  ImageLiteral,
   NilLiteral,
   StringLiteral,
   Tuple,
@@ -420,6 +420,7 @@ enum class CodeCompletionLiteralKind {
 enum class CodeCompletionKeywordKind {
   None,
 #define KEYWORD(X) kw_##X,
+#define POUND_KEYWORD(X) pound_##X,
 #include "swift/Parse/Tokens.def"
 };
 
@@ -693,6 +694,7 @@ class CodeCompletionContext {
 public:
   CodeCompletionCache &Cache;
   CompletionKind CodeCompletionKind = CompletionKind::None;
+  bool HasExpectedTypeRelation = false;
 
   CodeCompletionContext(CodeCompletionCache &Cache)
       : Cache(Cache) {}

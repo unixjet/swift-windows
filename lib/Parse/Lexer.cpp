@@ -553,8 +553,8 @@ tok Lexer::kindOfIdentifier(StringRef Str, bool InSILMode) {
   // These keywords are only active in SIL mode.
   if ((Kind == tok::kw_sil || Kind == tok::kw_sil_stage ||
        Kind == tok::kw_sil_vtable || Kind == tok::kw_sil_global ||
-       Kind == tok::kw_sil_witness_table || Kind == tok::kw_sil_coverage_map ||
-       Kind == tok::kw_undef) &&
+       Kind == tok::kw_sil_witness_table || Kind == tok::kw_sil_default_witness_table ||
+       Kind == tok::kw_sil_coverage_map || Kind == tok::kw_undef) &&
       !InSILMode)
     Kind = tok::identifier;
   return Kind;
@@ -575,6 +575,48 @@ void Lexer::lexIdentifier() {
   return formToken(Kind, TokStart);
 }
 
+/// lexHash - Handle #], #! for shebangs, and the family of #identifiers.
+void Lexer::lexHash() {
+  const char *TokStart = CurPtr-1;
+  if (*CurPtr == ']') { // #]
+    CurPtr++;
+    return formToken(tok::r_square_lit, TokStart);
+  }
+  
+  // Allow a hashbang #! line at the beginning of the file.
+  if (CurPtr - 1 == BufferStart && *CurPtr == '!') {
+    CurPtr--;
+    if (BufferID != SourceMgr.getHashbangBufferID())
+      diagnose(CurPtr, diag::lex_hashbang_not_allowed);
+    skipHashbang();
+    return lexImpl();
+  }
+
+  // Scan for [a-z]+ to see what we match.
+  const char *tmpPtr = CurPtr;
+  while (clang::isLowercase(*tmpPtr))
+    ++tmpPtr;
+
+  // Map the character sequence onto
+  tok Kind = llvm::StringSwitch<tok>(StringRef(CurPtr, tmpPtr-CurPtr))
+#define KEYWORD(kw)
+#define POUND_KEYWORD(id) \
+  .Case(#id, tok::pound_##id)
+#include "swift/Parse/Tokens.def"
+  .Default(tok::pound);
+
+  // If we didn't find a match, then just return tok::pound.  This is highly
+  // dubious in terms of error recovery, but is useful for code completion and
+  // SIL parsing.
+  if (Kind == tok::pound)
+    return formToken(tok::pound, TokStart);
+
+  // If we found something specific, return it.
+  CurPtr = tmpPtr;
+  return formToken(Kind, TokStart);
+}
+
+
 /// Is the operator beginning at the given character "left-bound"?
 static bool isLeftBound(const char *tokBegin, const char *bufferBegin) {
   // The first character in the file is not left-bound.
@@ -594,13 +636,20 @@ static bool isLeftBound(const char *tokBegin, const char *bufferBegin) {
 
 /// Is the operator ending at the given character (actually one past the end)
 /// "right-bound"?
-static bool isRightBound(const char *tokEnd, bool isLeftBound) {
+///
+/// The code-completion point is considered right-bound.
+static bool isRightBound(const char *tokEnd, bool isLeftBound,
+                         const char *codeCompletionPtr) {
   switch (*tokEnd) {
   case ' ': case '\r': case '\n': case '\t': // whitespace
   case ')': case ']': case '}':              // closing delimiters
   case ',': case ';': case ':':              // expression separators
-  case '\0':                                 // whitespace / last char in file
     return false;
+
+  case '\0':
+    if (tokEnd == codeCompletionPtr)         // code-completion
+      return true;
+    return false;                            // whitespace / last char in file
 
   case '.':
     // Prefer the '^' in "x^.y" to be a postfix op, not binary, but the '^' in
@@ -637,7 +686,7 @@ void Lexer::lexOperatorIdentifier() {
   // It's binary if either both sides are bound or both sides are not bound.
   // Otherwise, it's postfix if left-bound and prefix if right-bound.
   bool leftBound = isLeftBound(TokStart, BufferStart);
-  bool rightBound = isRightBound(CurPtr, leftBound);
+  bool rightBound = isRightBound(CurPtr, leftBound, CodeCompletionPtr);
 
   // Match various reserved words.
   if (CurPtr-TokStart == 1) {
@@ -669,17 +718,16 @@ void Lexer::lexOperatorIdentifier() {
       const char *AfterHorzWhitespace = CurPtr;
       while (*AfterHorzWhitespace == ' ' || *AfterHorzWhitespace == '\t')
         ++AfterHorzWhitespace;
-      
-      // First, when we are code completing "x.<ESC>", then make sure to return
+
+      // First, when we are code completing "x. <ESC>", then make sure to return
       // a tok::period, since that is what the user is wanting to know about.
-      // FIXME: isRightBound should consider this to be right bound.
       if (*AfterHorzWhitespace == '\0' &&
           AfterHorzWhitespace == CodeCompletionPtr) {
         diagnose(TokStart, diag::expected_member_name);
         return formToken(tok::period, TokStart);
       }
-      
-      if (isRightBound(AfterHorzWhitespace, leftBound) &&
+
+      if (isRightBound(AfterHorzWhitespace, leftBound, CodeCompletionPtr) &&
           // Don't consider comments to be this.  A leading slash is probably
           // either // or /* and most likely occurs just in our testsuite for
           // expected-error lines.
@@ -1578,60 +1626,10 @@ Restart:
   case ';': return formToken(tok::semi,     TokStart);
   case ':': return formToken(tok::colon,    TokStart);
 
-  case '#': {
-    if (*CurPtr == ']') { // #]
-      CurPtr++;
-      return formToken(tok::r_square_lit, TokStart);
-    }
+  case '#':
+    return lexHash();
 
-    if (getSubstring(TokStart + 1, 2).equals("if") &&
-        isWhitespace(CurPtr[2])) {
-      CurPtr += 2;
-      return formToken(tok::pound_if, TokStart);
-    }
-    
-    if (getSubstring(TokStart + 1, 4).equals("else") &&
-        isWhitespace(CurPtr[4])) {
-      CurPtr += 4;
-      return formToken(tok::pound_else, TokStart);
-    }
-    
-    if (getSubstring(TokStart + 1, 6).equals("elseif") &&
-        isWhitespace(CurPtr[6])) {
-      CurPtr += 6;
-      return formToken(tok::pound_elseif, TokStart);
-    }
-
-    if (getSubstring(TokStart + 1, 5).equals("endif") &&
-        (isWhitespace(CurPtr[5]) || CurPtr[5] == '\0')) {
-      CurPtr += 5;
-      return formToken(tok::pound_endif, TokStart);
-    }
-
-    if (getSubstring(TokStart + 1, 4).equals("line") &&
-        isWhitespace(CurPtr[4])) {
-      CurPtr += 4;
-      return formToken(tok::pound_line, TokStart);
-    }
-    
-    if (getSubstring(TokStart + 1, 9).equals("available")) {
-      CurPtr += 9;
-      return formToken(tok::pound_available, TokStart);
-    }
-
-    // Allow a hashbang #! line at the beginning of the file.
-    if (CurPtr - 1 == BufferStart && *CurPtr == '!') {
-      CurPtr--;
-      if (BufferID != SourceMgr.getHashbangBufferID())
-        diagnose(CurPtr, diag::lex_hashbang_not_allowed);
-      skipHashbang();
-      goto Restart;
-    }
-
-    return formToken(tok::pound, TokStart);
-  }
-
-  // Operator characters.
+      // Operator characters.
   case '/':
     if (CurPtr[0] == '/') {  // "//"
       skipSlashSlashComment();

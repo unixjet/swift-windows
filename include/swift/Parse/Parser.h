@@ -71,6 +71,7 @@ class Parser {
 
   bool IsInputIncomplete = false;
   SourceLoc DelayedDeclEnd;
+  std::vector<Token> SplitTokens;
 
 public:
   SourceManager &SourceMgr;
@@ -106,13 +107,8 @@ public:
     
     /// InVarOrLetPattern has this value when parsing a pattern in which bound
     /// variables are implicitly immutable, but allowed to be marked mutable by
-    /// using a 'var' pattern.
+    /// using a 'var' pattern.  This happens in for-each loop patterns.
     IVOLP_ImplicitlyImmutable,
-
-    /// InVarOrLetPattern has this value when parsing a pattern where variables
-    /// must always be immutable, so you cannot mark a pattern as mutable with
-    /// 'var'. This happens in for-each patterns.
-    IVOLP_AlwaysImmutable,
     
     /// When InVarOrLetPattern has this value, bound variables are mutable, and
     /// nested let/var patterns are not permitted. This happens when parsing a
@@ -154,6 +150,10 @@ public:
   bool allowTopLevelCode() const {
     return SF.isScriptMode();
   }
+
+  const std::vector<Token> &getSplitTokens() { return SplitTokens; }
+
+  void markSplitToken(tok Kind, StringRef Txt);
 
   /// Returns true if the parser reached EOF with incomplete source input, due
   /// for example, a missing right brace.
@@ -833,6 +833,7 @@ public:
   bool parseSILVTable();
   bool parseSILGlobal();
   bool parseSILWitnessTable();
+  bool parseSILDefaultWitnessTable();
   bool parseSILCoverageMap();
 
   //===--------------------------------------------------------------------===//
@@ -938,16 +939,8 @@ public:
     /// \p SecondName is the name.
     SourceLoc SecondNameLoc;
 
-    /// The location of the ':', if present, indicating that a type is
-    /// provided.
-    SourceLoc ColonLoc;
-
     /// The location of the '...', if present.
     SourceLoc EllipsisLoc;
-
-    /// The location of the '=', if present, indicating that a default argument
-    /// is provided.
-    SourceLoc EqualLoc;
 
     /// The first name.
     Identifier FirstName;
@@ -960,6 +953,9 @@ public:
 
     /// The default argument for this parameter.
     ExprHandle *DefaultArg = nullptr;
+    
+    /// True if we emitted a parse error about this parameter.
+    bool isInvalid = false;
   };
 
   /// Describes the context in which the given parameter is being parsed.
@@ -1097,6 +1093,7 @@ public:
                                               bool isExprBasic);
   ParserResult<Expr> parseExprPostfix(Diag<> ID, bool isExprBasic);
   ParserResult<Expr> parseExprUnary(Diag<> ID, bool isExprBasic);
+  ParserResult<Expr> parseExprSelector();
   ParserResult<Expr> parseExprSuper();
   ParserResult<Expr> parseExprConfiguration();
   Expr *parseExprStringLiteral();
@@ -1164,13 +1161,14 @@ public:
 
   Expr *parseExprAnonClosureArg();
   ParserResult<Expr> parseExprList(tok LeftTok, tok RightTok);
+  bool isCollectionLiteralStartingWithLSquareLit();
   ParserResult<Expr> parseExprObjectLiteral();
   ParserResult<Expr> parseExprCallSuffix(ParserResult<Expr> fn,
                                          Identifier firstSelectorPiece
                                            = Identifier(),
                                          SourceLoc firstSelectorPieceLoc
                                            = SourceLoc());
-  ParserResult<Expr> parseExprCollection();
+  ParserResult<Expr> parseExprCollection(SourceLoc LSquareLoc = SourceLoc());
   ParserResult<Expr> parseExprArray(SourceLoc LSquareLoc, Expr *FirstExpr);
   ParserResult<Expr> parseExprDictionary(SourceLoc LSquareLoc, Expr *FirstKey);
 

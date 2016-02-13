@@ -184,6 +184,66 @@ static inline bool isCastNewProjectionKind(NewProjectionKind Kind) {
   }
 }
 
+/// Given a SIL value, capture its element index and the value of the aggregate
+/// that immediately contains it.
+///
+/// This lightweight utility maps a SIL address projection to an index.
+struct NewProjectionIndex {
+  SILValue Aggregate;
+  unsigned Index;
+
+  explicit NewProjectionIndex(SILValue V) :Index(~0U) {
+    switch (V->getKind()) {
+    default:
+      break;
+    case ValueKind::IndexAddrInst: {
+      IndexAddrInst *IA = cast<IndexAddrInst>(V);
+      if (getIntegerIndex(IA->getIndex(), Index))
+        Aggregate = IA->getBase();
+      break;
+    }
+    case ValueKind::StructElementAddrInst: {
+      StructElementAddrInst *SEA = cast<StructElementAddrInst>(V);
+      Index = SEA->getFieldNo();
+      Aggregate = SEA->getOperand();
+      break;
+    }
+    case ValueKind::RefElementAddrInst: {
+      RefElementAddrInst *REA = cast<RefElementAddrInst>(V);
+      Index = REA->getFieldNo();
+      Aggregate = REA->getOperand();
+      break;
+    }
+    case ValueKind::ProjectBoxInst: {
+      ProjectBoxInst *PBI = cast<ProjectBoxInst>(V);
+      // A box has only a single payload.
+      Index = 0;
+      Aggregate = PBI->getOperand();
+      break;
+    }
+    case ValueKind::TupleElementAddrInst: {
+      TupleElementAddrInst *TEA = cast<TupleElementAddrInst>(V);
+      Index = TEA->getFieldNo();
+      Aggregate = TEA->getOperand();
+      break;
+    }
+    case ValueKind::StructExtractInst: {
+      StructExtractInst *SEA = cast<StructExtractInst>(V);
+      Index = SEA->getFieldNo();
+      Aggregate = SEA->getOperand();
+      break;
+    }
+    case ValueKind::TupleExtractInst: {
+      TupleExtractInst *TEA = cast<TupleExtractInst>(V);
+      Index = TEA->getFieldNo();
+      Aggregate = TEA->getOperand();
+      break;
+    }
+    }
+  }
+  bool isValid() const { return (bool)Aggregate; }
+};
+
 /// An abstract representation of the index of a subtype of an aggregate
 /// type. This is a value type.
 ///
@@ -247,6 +307,17 @@ public:
   /// it. Otherwise, return nullptr.
   NullablePtr<SILInstruction>
   createAddressProjection(SILBuilder &B, SILLocation Loc, SILValue Base) const;
+
+  NullablePtr<SILInstruction>
+  createProjection(SILBuilder &B, SILLocation Loc, SILValue Base) const {
+    if (Base->getType().isAddress()) {
+      return createAddressProjection(B, Loc, Base);
+    } else if (Base->getType().isObject()) {
+      return createObjectProjection(B, Loc, Base);
+    } else {
+      llvm_unreachable("Unsupported SILValueCategory");
+    }
+  }
 
   /// Apply this projection to \p BaseType and return the relevant subfield's
   /// SILType if BaseField has less subtypes than projection's offset.
@@ -331,22 +402,24 @@ public:
     return !(*this == Other);
   }
 
+  /// Returns the operand of a struct, tuple or enum instruction which is
+  /// associated with this projection. Returns an invalid SILValue if \p I is
+  /// not a matching aggregate instruction.
+  SILValue getOperandForAggregate(SILInstruction *I) const;
+
   /// Convenience method for getting the raw underlying kind.
   NewProjectionKind getKind() const { return *Value.getKind(); }
 
-  static bool isAddressProjection(SILValue V) {
-    auto *I = dyn_cast<SILInstruction>(V);
-    if (!I)
-      return false;
-    return isAddressProjection(I);
-  }
-
   /// Returns true if this instruction projects from an address type to an
   /// address subtype.
-  static bool isAddressProjection(SILInstruction *I) {
-    switch (I->getKind()) {
+  static bool isAddressProjection(SILValue V) {
+    switch (V->getKind()) {
     default:
       return false;
+    case ValueKind::IndexAddrInst: {
+      unsigned Scalar;
+      return getIntegerIndex(cast<IndexAddrInst>(V)->getIndex(), Scalar);
+    }
     case ValueKind::StructElementAddrInst:
     case ValueKind::RefElementAddrInst:
     case ValueKind::ProjectBoxInst:
@@ -356,36 +429,23 @@ public:
     }
   }
 
-  static bool isObjectProjection(SILValue V) {
-    auto *I = dyn_cast<SILInstruction>(V);
-    if (!I)
-      return false;
-    return isObjectProjection(I);
-  }
-
   /// Returns true if this instruction projects from an object type to an object
   /// subtype.
-  static bool isObjectProjection(SILInstruction *I) {
-    switch (I->getKind()) {
+  static bool isObjectProjection(SILValue V) {
+    switch (V->getKind()) {
     default:
       return false;
     case ValueKind::StructExtractInst:
     case ValueKind::TupleExtractInst:
+    case ValueKind::UncheckedEnumDataInst:
       return true;
     }
   }
 
-  static bool isObjectToAddressProjection(SILValue V) {
-    auto *I = dyn_cast<SILInstruction>(V);
-    if (!I)
-      return false;
-    return isObjectToAddressProjection(I);
-  }
-
   /// Returns true if this instruction projects from an object type into an
   /// address subtype.
-  static bool isObjectToAddressProjection(SILInstruction *I) {
-    return isa<RefElementAddrInst>(I) || isa<ProjectBoxInst>(I);
+  static bool isObjectToAddressProjection(SILValue V) {
+    return isa<RefElementAddrInst>(V) || isa<ProjectBoxInst>(V);
   }
 
   /// Given a specific SILType, return all first level projections if it is an
@@ -432,6 +492,17 @@ public:
     }
   }
 
+  /// Form an aggregate of type BaseType using the SILValue Values. Returns the
+  /// aggregate on success if this is a case we handle or an empty SILValue
+  /// otherwise.
+  ///
+  /// This can be used with getFirstLevelProjections to project out/reform
+  /// values. We do not need to use the original projections here since to build
+  /// aggregate instructions the order is the only important thing.
+  static NullablePtr<SILInstruction>
+  createAggFromFirstLevelProjections(SILBuilder &B, SILLocation Loc,
+                                     SILType BaseType,
+                                     llvm::SmallVectorImpl<SILValue> &Values);
 private:
   /// Convenience method for getting the underlying index. Assumes that this
   /// projection is valid. Otherwise it asserts.
@@ -1308,6 +1379,8 @@ class ProjectionTree {
   llvm::SmallVector<ProjectionTreeNode *, 4> ProjectionTreeNodes;
   llvm::SmallVector<unsigned, 3> LeafIndices;
 
+  using LeafValueMapTy = llvm::DenseMap<unsigned, SILValue>;
+
 public:
   /// Construct a projection tree from BaseTy.
   ProjectionTree(SILModule &Mod, llvm::BumpPtrAllocator &Allocator,
@@ -1321,6 +1394,16 @@ public:
   /// Compute liveness and use information in this projection tree using Base.
   /// All debug instructions (debug_value, debug_value_addr) are ignored.
   void computeUsesAndLiveness(SILValue Base);
+
+  /// Create a root SILValue iout of the given leaf node values by walking on
+  /// the projection tree.
+  SILValue computeExplodedArgumentValue(SILBuilder &Builder,
+                                        SILLocation Loc, 
+                                        llvm::SmallVector<SILValue, 8> &LVs);
+  SILValue computeExplodedArgumentValueInner(SILBuilder &Builder,
+                                             SILLocation Loc, 
+                                             ProjectionTreeNode *Node,
+                                             LeafValueMapTy &LeafValues);
 
   /// Return the module associated with this tree.
   SILModule &getModule() const { return Mod; }

@@ -59,6 +59,11 @@ option(SWIFT_INCLUDE_DOCS
     "Create targets for building docs."
     TRUE)
 
+set(SWIFT_ANALYZE_CODE_COVERAGE FALSE CACHE STRING
+    "Build Swift with code coverage instrumenting enabled [FALSE, NOT-MERGED, MERGED]")
+set_property(CACHE SWIFT_ANALYZE_CODE_COVERAGE PROPERTY
+    STRINGS FALSE "NOT-MERGED" "MERGED")
+
 set(SWIFT_VERSION "3.0" CACHE STRING
     "The user-visible version of the Swift compiler")
 set(SWIFT_VENDOR "" CACHE STRING
@@ -399,6 +404,11 @@ if("${CMAKE_SYSTEM_NAME}" STREQUAL "Linux")
     configure_sdk_unix(LINUX "Linux" "linux" "linux" "x86_64" "x86_64-unknown-linux-gnu")
     set(SWIFT_HOST_VARIANT_ARCH "x86_64")
     set(SWIFT_PRIMARY_VARIANT_ARCH_default "x86_64")
+  # FIXME: This only matches ARMv6l (by far the most common variant).
+  elseif("${CMAKE_SYSTEM_PROCESSOR}" STREQUAL "armv6l")
+    configure_sdk_unix(LINUX "Linux" "linux" "linux" "armv6" "armv6-unknown-linux-gnueabihf")
+    set(SWIFT_HOST_VARIANT_ARCH "armv6")
+    set(SWIFT_PRIMARY_VARIANT_ARCH_default "armv6")
   # FIXME: This only matches ARMv7l (by far the most common variant).
   elseif("${CMAKE_SYSTEM_PROCESSOR}" STREQUAL "armv7l")
     configure_sdk_unix(LINUX "Linux" "linux" "linux" "armv7" "armv7-unknown-linux-gnueabihf")
@@ -664,7 +674,7 @@ if(SWIFT_BUILD_TOOLS)
 endif()
 add_subdirectory(utils)
 add_subdirectory(stdlib)
-if(SWIFT_BUILD_PERF_TESTSUITE)
+if(SWIFT_BUILD_PERF_TESTSUITE AND "${CMAKE_SYSTEM_NAME}" STREQUAL "Darwin")
   add_subdirectory(benchmark)
 endif()
 if(SWIFT_INCLUDE_TESTS)
@@ -694,21 +704,3 @@ if(XCODE)
   add_custom_target(Miscellaneous
       SOURCES ${SWIFT_TOPLEVEL_HEADERS})
 endif()
-
-# Configure CPack.
-set(CPACK_GENERATOR "TGZ")
-set(CPACK_PACKAGE_RELOCATABLE "false")
-set(CPACK_PACKAGE_VENDOR "LLVM Project")
-set(CPACK_INCLUDE_TOPLEVEL_DIRECTORY "OFF")
-set(CPACK_SET_DESTDIR "ON")
-
-set(CPACK_PACKAGE_NAME "swift")
-set(CPACK_SYSTEM_NAME "macosx")
-
-# FIXME: Real version number.
-execute_process(COMMAND date "+%Y%m%d"
-  OUTPUT_VARIABLE CPACK_PACKAGE_VERSION
-  OUTPUT_STRIP_TRAILING_WHITESPACE)
-
-# CPack must be included *after* its configuration variables are set.
-include(CPack)

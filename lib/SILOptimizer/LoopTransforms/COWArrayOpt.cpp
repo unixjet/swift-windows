@@ -52,7 +52,7 @@ COWViewCFGFunction("view-cfg-before-cow-for", llvm::cl::init(""),
 /// either refer to the next element (indexed) or a subelement.
 static SILValue getAccessPath(SILValue V, SmallVectorImpl<unsigned>& Path) {
   V = stripCasts(V);
-  ProjectionIndex PI(V);
+  NewProjectionIndex PI(V);
   if (!PI.isValid() || V->getKind() == ValueKind::IndexAddrInst)
     return V;
 
@@ -201,7 +201,7 @@ protected:
         continue;
       }
 
-      ProjectionIndex PI(UseInst);
+      NewProjectionIndex PI(UseInst);
       // Do not form a path from an IndexAddrInst without otherwise
       // distinguishing it from subelement addressing.
       if (!PI.isValid() || V->getKind() == ValueKind::IndexAddrInst) {
@@ -262,7 +262,7 @@ static bool isRelease(SILInstruction *Inst, SILValue RetainedValue,
   // We don't want to match the release with both retains in the example below.
   //
   //   retain %a  <--|
-  //   retain %a     | Match.   <-| Dont't match.
+  //   retain %a     | Match.   <-| Don't match.
   //   release %a <--|          <-|
   //
   if (auto *R = dyn_cast<ReleaseValueInst>(Inst))
@@ -1433,7 +1433,7 @@ bool COWArrayOpt::hoistMakeMutable(ArraySemanticsCall MakeMutable) {
 
   // We can hoist address projections (even if they are only conditionally
   // executed).
-  auto ArrayAddrBase = stripAddressProjections(CurrentArrayAddr);
+  auto ArrayAddrBase = stripUnaryAddressProjections(CurrentArrayAddr);
   SILBasicBlock *ArrayAddrBaseBB = ArrayAddrBase->getParentBB();
 
   if (ArrayAddrBaseBB && !DomTree->dominates(ArrayAddrBaseBB, Preheader)) {

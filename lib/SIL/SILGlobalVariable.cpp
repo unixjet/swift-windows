@@ -25,7 +25,7 @@ SILGlobalVariable *SILGlobalVariable::create(SILModule &M, SILLinkage linkage,
   // allow the name to have an empty string.
   llvm::StringMapEntry<SILGlobalVariable*> *entry = nullptr;
   if (!name.empty()) {
-    entry = &*M.GlobalVariableTable.insert(std::make_pair(name, nullptr)).first;
+    entry = &*M.GlobalVariableMap.insert(std::make_pair(name, nullptr)).first;
     assert(!entry->getValue() && "global variable already exists");
     name = entry->getKey();
   }
@@ -64,7 +64,7 @@ void SILGlobalVariable::setInitializer(SILFunction *InitF) {
 }
 
 SILGlobalVariable::~SILGlobalVariable() {
-  getModule().GlobalVariableTable.erase(Name);
+  getModule().GlobalVariableMap.erase(Name);
 }
 
 // FIXME
@@ -113,12 +113,24 @@ static bool analyzeStaticInitializer(SILFunction *F, SILInstruction *&Val,
         }
       }
 
+      // Objective-C selector string literals cannot be used in static
+      // initializers.
+      if (auto *stringLit = dyn_cast<StringLiteralInst>(&I)) {
+        switch (stringLit->getEncoding()) {
+        case StringLiteralInst::Encoding::UTF8:
+        case StringLiteralInst::Encoding::UTF16:
+          continue;
+
+        case StringLiteralInst::Encoding::ObjCSelector:
+          return false;
+        }
+      }
+
       if (I.getKind() != ValueKind::ReturnInst &&
           I.getKind() != ValueKind::StructInst &&
           I.getKind() != ValueKind::TupleInst &&
           I.getKind() != ValueKind::IntegerLiteralInst &&
-          I.getKind() != ValueKind::FloatLiteralInst &&
-          I.getKind() != ValueKind::StringLiteralInst)
+          I.getKind() != ValueKind::FloatLiteralInst)
         return false;
     }
   }

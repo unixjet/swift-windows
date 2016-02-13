@@ -22,6 +22,7 @@
 #include "swift/AST/Substitution.h"
 #include "swift/AST/Type.h"
 #include "swift/AST/Types.h"
+#include "swift/AST/TypeAlignments.h"
 #include "llvm/ADT/ArrayRef.h"
 #include "llvm/ADT/DenseMap.h"
 #include "llvm/ADT/FoldingSet.h"
@@ -89,7 +90,7 @@ enum class ProtocolConformanceState {
 ///
 /// ProtocolConformance is an abstract base class, implemented by subclasses
 /// for the various kinds of conformance (normal, specialized, inherited).
-class ProtocolConformance {
+class alignas(1 << DeclAlignInBits) ProtocolConformance {
   /// The kind of protocol conformance.
   ProtocolConformanceKind Kind;
 
@@ -455,7 +456,7 @@ public:
   }
 };
 
-/// Specalized protocol conformance, which projects a generic protocol
+/// Specialized protocol conformance, which projects a generic protocol
 /// conformance to one of the specializations of the generic type.
 ///
 /// For example:

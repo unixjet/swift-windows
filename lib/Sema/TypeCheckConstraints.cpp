@@ -683,11 +683,8 @@ namespace {
       // Type check the type parameters in an UnresolvedSpecializeExpr.
       if (auto us = dyn_cast<UnresolvedSpecializeExpr>(expr)) {
         for (TypeLoc &type : us->getUnresolvedParams()) {
-          if (TC.validateType(type, DC)) {
-            TC.diagnose(us->getLAngleLoc(),
-                        diag::while_parsing_as_left_angle_bracket);
+          if (TC.validateType(type, DC))
             return nullptr;
-          }
         }
         
         // If this is a reference type a specialized type, form a TypeExpr.
@@ -1629,6 +1626,10 @@ bool TypeChecker::typeCheckBinding(Pattern *&pattern, Expr *&initializer,
   if (pattern->hasType()) {
     contextualType = pattern->getType();
     contextualPurpose = CTP_Initialization;
+
+    // If we already had an error, don't repeat the problem.
+    if (contextualType->is<ErrorType>())
+      return true;
   }
     
   // Type-check the initializer.
@@ -1870,7 +1871,7 @@ Type ConstraintSystem::computeAssignDestType(Expr *dest, SourceLoc equalLoc) {
   }
 
   Type destTy = simplifyType(dest->getType());
-  if (destTy->is<ErrorType>())
+  if (destTy->is<ErrorType>() || destTy->getRValueType()->is<UnresolvedType>())
     return Type();
 
   // If we have already resolved a concrete lvalue destination type, return it.

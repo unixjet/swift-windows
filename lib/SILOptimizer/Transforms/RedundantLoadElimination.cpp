@@ -155,30 +155,6 @@ static bool isRLEInertInstruction(SILInstruction *Inst) {
   }
 }
 
-/// Returns true if the given basic block is reachable from the entry block.
-///
-/// TODO: this is very inefficient, can we make use of the domtree.
-static bool isReachable(SILBasicBlock *Block) {
-  SmallPtrSet<SILBasicBlock *, 16> Visited;
-  llvm::SmallVector<SILBasicBlock *, 16> Worklist;
-  SILBasicBlock *EntryBB = &*Block->getParent()->begin();
-  Worklist.push_back(EntryBB);
-  Visited.insert(EntryBB);
-
-  while (!Worklist.empty()) {
-    auto *CurBB = Worklist.back();
-    Worklist.pop_back();
-
-    if (CurBB == Block)
-      return true;
-
-    for (auto &Succ : CurBB->getSuccessors())
-      if (!Visited.insert(Succ).second)
-        Worklist.push_back(Succ);
-  }
-  return false;
-}
-
 //===----------------------------------------------------------------------===//
 //                       Basic Block Location State
 //===----------------------------------------------------------------------===//
@@ -228,7 +204,7 @@ private:
   llvm::SmallBitVector ForwardSetOut;
 
   /// A bit vector for which the ith bit represents the ith LSLocation in
-  /// LocationVault. If we ignore all unknown write, whats the maximum set
+  /// LocationVault. If we ignore all unknown write, what's the maximum set
   /// of available locations at the current position in the basic block.
   llvm::SmallBitVector ForwardSetMax;
 
@@ -324,7 +300,9 @@ public:
     ForwardSetIn.resize(LocationNum, false);
     ForwardSetOut.resize(LocationNum, optimistic);
 
-    ForwardSetMax.resize(LocationNum, true);
+    // If we are running an optimistic data flow, set forward max to true
+    // initially.
+    ForwardSetMax.resize(LocationNum, optimistic);
 
     BBGenSet.resize(LocationNum, false);
     BBKillSet.resize(LocationNum, false);
@@ -454,7 +432,7 @@ private:
 
   /// Contains a map between LSLocation to their index in the LocationVault.
   /// Use for fast lookup.
-  llvm::DenseMap<LSLocation, unsigned> LocToBitIndex;
+  LSLocationIndexMap LocToBitIndex;
 
   /// Keeps a map between the accessed SILValue and the location.
   LSLocationBaseMap BaseToLocIndex;
@@ -469,7 +447,7 @@ private:
   llvm::DenseMap<LSValue, unsigned> ValToBitIndex;
 
   /// A map from each BasicBlock to its BlockState.
-  llvm::SmallDenseMap<SILBasicBlock *, BlockState, 4> BBToLocState;
+  llvm::SmallDenseMap<SILBasicBlock *, BlockState, 16> BBToLocState;
 
 public:
   RLEContext(SILFunction *F, SILPassManager *PM, AliasAnalysis *AA,
@@ -1369,12 +1347,19 @@ bool RLEContext::run() {
   bool MultiIteration = Kind == ProcessKind::ProcessMultipleIterations ?
                         true : false;
 
+  // These are a list of basic blocks that we actually processed.
+  // We do not process unreachable block, instead we set their liveouts to nil.
+  llvm::DenseSet<SILBasicBlock *> BBToProcess;
+  for (auto X : PO->getPostOrder()) 
+    BBToProcess.insert(X);
+
   // For all basic blocks in the function, initialize a BB state. Since we
   // know all the locations accessed in this function, we can resize the bit
   // vector to the appropriate size.
   for (auto &B : *Fn) {
     BBToLocState[&B] = BlockState();
-    BBToLocState[&B].init(&B, LocationVault.size(), MultiIteration && isReachable(&B));
+    BBToLocState[&B].init(&B, LocationVault.size(), MultiIteration &&
+                          BBToProcess.find(&B) != BBToProcess.end());
   }
 
   if (MultiIteration)

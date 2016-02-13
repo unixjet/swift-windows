@@ -420,7 +420,7 @@ public:
 
     auto *DebugScope = F.getDebugScope();
     require(DebugScope, "All SIL functions must have a debug scope");
-    require(DebugScope && DebugScope->SILFn == &F,
+    require(DebugScope->Parent.get<SILFunction *>() == &F,
             "Scope of SIL function points to different function");
   }
 
@@ -509,25 +509,14 @@ public:
     }
   }
 
-  /// Return the SIL function of a SILDebugScope's ancestor.
-  static SILFunction *getFunction(const SILDebugScope *DS) {
-    if (DS->InlinedCallSite)
-      return getFunction(DS->InlinedCallSite);
-    if (DS->Parent)
-      return getFunction(DS->Parent);
-    return DS->SILFn;
-  }
-
   void checkInstructionsSILLocation(SILInstruction *I) {
     // Check the debug scope.
     auto *DS = I->getDebugScope();
-    if (DS && !maybeScopeless(*I)) {
+    if (DS && !maybeScopeless(*I))
       require(DS, "instruction has a location, but no scope");
-      require(getFunction(DS) == I->getFunction(),
-              "parent scope of instruction points to a different function");
-    }
-    require(!DS || DS->InlinedCallSite || DS->SILFn == I->getFunction(),
-            "scope of a non-inlined instruction points to different function");
+
+    require(!DS || DS->getParentFunction() == I->getFunction(),
+            "debug scope of instruction belongs to a different function");
 
     // Check the location kind.
     SILLocation L = I->getLoc();
@@ -3118,6 +3107,33 @@ void SILWitnessTable::verify(const SILModule &M) const {
 #endif
 }
 
+/// Verify that a default witness table follows invariants.
+void SILDefaultWitnessTable::verify(const SILModule &M) const {
+#ifndef NDEBUG
+  assert(!isDeclaration() &&
+         "Default witness table declarations should not exist.");
+  assert(!getProtocol()->hasFixedLayout() &&
+         "Default witness table declarations for fixed-layout protocols should "
+         "not exist.");
+  assert(getProtocol()->getParentModule() == M.getSwiftModule() &&
+         "Default witness table declarations must appear in the same "
+         "module as their protocol.");
+
+  // All default witness tables have public conformances, thus default
+  // witness tables should not reference SILFunctions without
+  // public/public_external linkage.
+  for (const Entry &E : getEntries()) {
+    SILFunction *F = E.getWitness();
+    assert(!isLessVisibleThan(F->getLinkage(), SILLinkage::Public) &&
+           "Default witness tables should not reference internal "
+           "or private functions.");
+    assert(F->getLoweredFunctionType()->getRepresentation() ==
+           SILFunctionTypeRepresentation::WitnessMethod &&
+           "Default witnesses must have witness_method representation.");
+  }
+#endif
+}
+
 /// Verify that a global variable follows invariants.
 void SILGlobalVariable::verify() const {
 #ifndef NDEBUG
@@ -3174,6 +3190,19 @@ void SILModule::verify() const {
     if (!wtableConformances.insert(conformance).second) {
       llvm::errs() << "Witness table redefined: ";
       conformance->printName(llvm::errs());
+      assert(false && "triggering standard assertion failure routine");
+    }
+    wt.verify(*this);
+  }
+
+  // Check all default witness tables.
+  DEBUG(llvm::dbgs() << "*** Checking default witness tables for duplicates ***\n");
+  llvm::DenseSet<const ProtocolDecl *> defaultWitnessTables;
+  for (const SILDefaultWitnessTable &wt : getDefaultWitnessTables()) {
+    DEBUG(llvm::dbgs() << "Default Witness Table:\n"; wt.dump());
+    if (!defaultWitnessTables.insert(wt.getProtocol()).second) {
+      llvm::errs() << "Default witness table redefined: ";
+      wt.dump();
       assert(false && "triggering standard assertion failure routine");
     }
     wt.verify(*this);

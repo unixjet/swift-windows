@@ -22,6 +22,7 @@
 #include "swift/AST/Ownership.h"
 #include "swift/AST/Requirement.h"
 #include "swift/AST/Type.h"
+#include "swift/AST/TypeAlignments.h"
 #include "swift/AST/Identifier.h"
 #include "swift/Basic/ArrayRefView.h"
 #include "swift/Basic/UUID.h"
@@ -741,7 +742,7 @@ public:
   /// the context of the extension above will produce substitutions T
   /// -> Int and U -> String suitable for mapping the type of
   /// \c SomeArray.
-  TypeSubstitutionMap getMemberSubstitutions(DeclContext *dc);
+  TypeSubstitutionMap getMemberSubstitutions(const DeclContext *dc);
 
   /// Retrieve the type of the given member as seen through the given base
   /// type, substituting generic arguments where necessary.
@@ -779,7 +780,7 @@ public:
   /// substitute in the types from the given base type (this) to produce
   /// the resulting member type.
   Type getTypeOfMember(ModuleDecl *module, Type memberType,
-                       DeclContext *memberDC);
+                       const DeclContext *memberDC);
 
   /// Return T if this type is Optional<T>; otherwise, return the null type.
   Type getOptionalObjectType();
@@ -2350,16 +2351,6 @@ public:
 
   GenericParamList &getGenericParams() const { return *Params; }
 
-  /// Substitute the given generic arguments into this polymorphic
-  /// function type and return the resulting non-polymorphic type.
-  FunctionType *substGenericArgs(ModuleDecl *M, ArrayRef<Type> args);
-
-  /// Substitute the given generic arguments into this polymorphic
-  /// function type and return the resulting non-polymorphic type.
-  ///
-  /// The order of Substitutions must match the order of generic archetypes.
-  FunctionType *substGenericArgs(ModuleDecl *M, ArrayRef<Substitution> subs);
-
   // Implement isa/cast/dyncast/etc.
   static bool classof(const TypeBase *T) {
     return T->getKind() == TypeKind::PolymorphicFunction;
@@ -2702,16 +2693,6 @@ public:
     return getWithType(fn(getType()));
   }
 
-  /// Replace references to substitutable types with new, concrete types and
-  /// return the substituted result.
-  ///
-  /// The API is comparable to Type::subst.
-  SILParameterInfo subst(ModuleDecl *module, TypeSubstitutionMap &substitutions,
-                         SubstOptions options) const {
-    Type type = getType().subst(module, substitutions, options);
-    return getWithType(type->getCanonicalType());
-  }
-
   void profile(llvm::FoldingSetNodeID &id) {
     id.AddPointer(Ty.getPointer());
     id.AddInteger((unsigned)Convention);
@@ -2796,16 +2777,6 @@ public:
   template <typename F>
   SILResultInfo map(F &&fn) const {
     return getWithType(fn(getType()));
-  }
-
-  /// Replace references to substitutable types with new, concrete types and
-  /// return the substituted result.
-  ///
-  /// The API is comparable to Type::subst.
-  SILResultInfo subst(ModuleDecl *module, TypeSubstitutionMap &substitutions,
-                      SubstOptions options) const {
-    Type type = getType().subst(module, substitutions, options);
-    return getWithType(type->getCanonicalType());
   }
 
   void profile(llvm::FoldingSetNodeID &id) {
@@ -3182,7 +3153,7 @@ DEFINE_EMPTY_CAN_TYPE_WRAPPER(SILBlockStorageType, Type)
 
 /// A type with a special syntax that is always sugar for a library type.
 ///
-/// The prime examples are arrays (T[] -> Array<T>) and
+/// The prime examples are arrays ([T] -> Array<T>) and
 /// optionals (T? -> Optional<T>).
 class SyntaxSugarType : public TypeBase {
   Type Base;
@@ -3733,11 +3704,6 @@ public:
   static bool classof(const TypeBase *T) {
     return T->getKind() == TypeKind::Archetype;
   }
-  
-  /// Convert an archetype to a dependent generic parameter type using the
-  /// given mapping of primary archetypes to generic parameter types.
-  Type getAsDependentType(
-                    const llvm::DenseMap<ArchetypeType *, Type> &archetypeMap);
   
   /// getIsRecursive - The archetype type refers back to itself.
   bool getIsRecursive() { return this->isRecursive; }

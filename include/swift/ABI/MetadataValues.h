@@ -94,54 +94,6 @@ enum : unsigned {
   /// Number of words reserved in generic metadata patterns.
   NumGenericMetadataPrivateDataWords = 16,
 };
-
-/// Records information about a type's fields.
-struct FieldRecordFlags {
-protected:
-  using int_type = unsigned;
-  int_type Data;
-
-  enum : int_type {
-    InternalExternalMask = 0x00000001U,
-    InternalExternalShift = 0,
-    OwnershipMask = 0x00000006U,
-    OwnershipShift = 1,
-  };
-
-public:
-  FieldRecordFlags() : Data(0) {}
-
-  /// True if this field has a type defined in the same image
-  /// as the type that contains it.
-  constexpr bool isInternal() const {
-    return ((Data >> InternalExternalShift) & InternalExternalMask) == 0;
-  }
-
-  /// True if this field has a type that is defined in another
-  /// image as the type that contains it.
-  constexpr bool isExternal() const {
-    return !isInternal();
-  }
-
-  /// Get the ownership semantics if the field has a reference type.
-  constexpr Ownership getOwnership() const {
-    return Ownership((Data >> OwnershipShift) & OwnershipMask);
-  }
-
-  void setInternal(bool internal) {
-    if (internal)
-      Data &= ~InternalExternalMask;
-    else
-      Data |= InternalExternalMask;
-  }
-
-  void setOwnership(Ownership ownership) {
-    Data &= ~OwnershipMask;
-    Data |= int_type(ownership) << OwnershipShift;
-  }
-
-  int_type getValue() const { return Data; }
-};
   
 /// Kinds of type metadata/protocol conformance records.
 enum class TypeMetadataRecordKind : unsigned {
@@ -167,10 +119,10 @@ enum class TypeMetadataRecordKind : unsigned {
   /// and classes could be emitted as UniqueDirectType.
   UniqueIndirectClass,
   
-  /// The conformance is for a generic type.
-  /// getGenericPattern() points to the generic metadata pattern used to
-  /// form instances of the type.
-  UniqueGenericPattern,
+  /// The conformance is for a generic or resilient type.
+  /// getNominalTypeDescriptor() points to the nominal type descriptor shared
+  /// by all metadata instantiations of this type.
+  UniqueNominalTypeDescriptor,
   
   /// The conformance is for a nongeneric class type.
   /// getDirectType() points to the unique class object.
@@ -297,7 +249,9 @@ class ProtocolDescriptorFlags {
 
     SpecialProtocolMask  = 0x000003C0U,
     SpecialProtocolShift = 6,
-    
+
+    IsResilient       =   1U <<  10U,
+
     /// Reserved by the ObjC runtime.
     _ObjCReserved        = 0xFFFF0000U,
   };
@@ -324,6 +278,9 @@ public:
   withSpecialProtocol(SpecialProtocol sp) const {
     return ProtocolDescriptorFlags((Data & ~SpecialProtocolMask)
                                      | (int_type(sp) << SpecialProtocolShift));
+  }
+  constexpr ProtocolDescriptorFlags withResilient(bool s) const {
+    return ProtocolDescriptorFlags((Data & ~IsResilient) | (s ? IsResilient : 0));
   }
   
   /// Was the protocol defined in Swift 1 or 2?
@@ -361,6 +318,9 @@ public:
                                  >> SpecialProtocolShift));
   }
   
+  /// Can new requirements with default witnesses be added resiliently?
+  bool isResilient() const { return Data & IsResilient; }
+
   int_type getIntValue() const {
     return Data;
   }

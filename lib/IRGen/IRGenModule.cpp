@@ -38,6 +38,7 @@
 #include "llvm/IR/Type.h"
 #include "llvm/ADT/PointerUnion.h"
 #include "llvm/Support/ErrorHandling.h"
+#include "llvm/Support/MD5.h"
 
 #include "GenEnum.h"
 #include "GenType.h"
@@ -127,7 +128,8 @@ IRGenModule::IRGenModule(IRGenModuleDispatcher &dispatcher, SourceFile *SF,
     Triple(Triple), TargetMachine(TargetMachine),
     SILMod(SILMod), OutputFilename(OutputFilename), dispatcher(dispatcher),
     TargetInfo(SwiftTargetInfo::get(*this)),
-    DebugInfo(0), ObjCInterop(Context.LangOpts.EnableObjCInterop),
+    DebugInfo(0), ModuleHash(nullptr),
+    ObjCInterop(Context.LangOpts.EnableObjCInterop),
     Types(*new TypeConverter(*this))
 {
   dispatcher.addGenModule(SF, this);
@@ -194,7 +196,9 @@ IRGenModule::IRGenModule(IRGenModuleDispatcher &dispatcher, SourceFile *SF,
     Int8PtrTy,              // optional objc class methods
     Int8PtrTy,              // objc properties
     Int32Ty,                // size
-    Int32Ty                 // flags
+    Int32Ty,                // flags
+    Int16Ty,                // minimum witness count
+    Int16Ty                 // default witness count
   });
   
   ProtocolDescriptorPtrTy = ProtocolDescriptorStructTy->getPointerTo();
@@ -278,6 +282,11 @@ IRGenModule::IRGenModule(IRGenModuleDispatcher &dispatcher, SourceFile *SF,
   ProtocolConformanceRecordPtrTy
     = ProtocolConformanceRecordTy->getPointerTo(DefaultAS);
 
+  NominalTypeDescriptorTy
+    = llvm::StructType::create(LLVMContext, "swift.type_descriptor");
+  NominalTypeDescriptorPtrTy
+    = NominalTypeDescriptorTy->getPointerTo(DefaultAS);
+
   TypeMetadataRecordTy
     = createStructType(*this, "swift.type_metadata_record", {
       RelativeAddressTy,
@@ -286,18 +295,9 @@ IRGenModule::IRGenModule(IRGenModuleDispatcher &dispatcher, SourceFile *SF,
   TypeMetadataRecordPtrTy
     = TypeMetadataRecordTy->getPointerTo(DefaultAS);
 
-  FieldDescriptorTy = createStructType(*this, "swift.field_descriptor", {
-    Int32Ty, // Number of fields that follow
-    Int32Ty, // Size of fields that follow
-    // Tail-allocated FieldRecordTy elements
-  });
-
-  FieldRecordTy = createStructType(*this, "swift.field_record", {
-    Int32Ty,           // Flags
-    RelativeAddressTy, // Offset to metadata or mangled name for external type
-    RelativeAddressTy, // Offset to field name
-  });
-  FieldRecordPtrTy = FieldRecordTy->getPointerTo(DefaultAS);
+  FieldDescriptorTy
+    = llvm::StructType::create(LLVMContext, "swift.field_descriptor");
+  FieldDescriptorPtrTy = FieldDescriptorTy->getPointerTo(DefaultAS);
 
   FixedBufferTy = nullptr;
   for (unsigned i = 0; i != MaxNumValueWitnesses; ++i)
@@ -468,6 +468,34 @@ llvm::Constant *IRGenModule::get##ID##Fn() {               \
                       RETURNS, ARGS, ATTRS);               \
 }
 #include "RuntimeFunctions.def"
+
+std::pair<llvm::GlobalVariable *, llvm::Constant *>
+IRGenModule::createStringConstant(StringRef Str,
+  bool willBeRelativelyAddressed, StringRef sectionName) {
+  // If not, create it.  This implicitly adds a trailing null.
+  auto init = llvm::ConstantDataArray::getString(LLVMContext, Str);
+  auto global = new llvm::GlobalVariable(Module, init->getType(), true,
+                                         llvm::GlobalValue::PrivateLinkage,
+                                         init);
+  // FIXME: ld64 crashes resolving relative references to coalesceable symbols.
+  // rdar://problem/22674524
+  // If we intend to relatively address this string, don't mark it with
+  // unnamed_addr to prevent it from going into the cstrings section and getting
+  // coalesced.
+  if (!willBeRelativelyAddressed)
+    global->setUnnamedAddr(true);
+
+  if (!sectionName.empty())
+    global->setSection(sectionName);
+
+  // Drill down to make an i8*.
+  auto zero = llvm::ConstantInt::get(SizeTy, 0);
+  llvm::Constant *indices[] = { zero, zero };
+  auto address = llvm::ConstantExpr::getInBoundsGetElementPtr(
+    global->getValueType(), global, indices);
+
+  return { global, address };
+}
 
 llvm::Constant *IRGenModule::getEmptyTupleMetadata() {
   if (EmptyTupleMetadata)
@@ -793,6 +821,34 @@ void IRGenModule::cleanupClangCodeGenMetadata() {
 }
 
 void IRGenModule::finalize() {
+  const char *ModuleHashVarName = "llvm.swift_module_hash";
+  if (Opts.OutputKind == IRGenOutputKind::ObjectFile &&
+      !Module.getGlobalVariable(ModuleHashVarName)) {
+    // Create a global variable into which we will store the hash of the
+    // module (used for incremental compilation).
+    // We have to create the variable now (before we emit the global lists).
+    // But we want to calculate the hash later because later we can do it
+    // multi-threaded.
+    llvm::MD5::MD5Result zero = { 0 };
+    ArrayRef<uint8_t> ZeroArr(zero, sizeof(llvm::MD5::MD5Result));
+    auto *ZeroConst = llvm::ConstantDataArray::get(Module.getContext(), ZeroArr);
+    ModuleHash = new llvm::GlobalVariable(Module, ZeroConst->getType(), true,
+                                          llvm::GlobalValue::PrivateLinkage,
+                                          ZeroConst, ModuleHashVarName);
+    switch (TargetInfo.OutputObjectFormat) {
+    case llvm::Triple::MachO:
+      // On Darwin the linker ignores the __LLVM segment.
+      ModuleHash->setSection("__LLVM,__swift_modhash");
+      break;
+    case llvm::Triple::ELF:
+      ModuleHash->setSection(".swift_modhash");
+      break;
+    default:
+      llvm_unreachable("Don't know how to emit the module hash for the selected"
+                       "object format.");
+    }
+    addUsedGlobal(ModuleHash);
+  }
   emitLazyPrivateDefinitions();
   emitAutolinkInfo();
   emitGlobalLists();
@@ -865,30 +921,3 @@ IRGenModule *IRGenModuleDispatcher::getGenModule(SILFunction *f) {
   return getPrimaryIGM();
 }
 
-StringRef IRGenModule::getFieldMetadataSectionName() {
-  switch (TargetInfo.OutputObjectFormat) {
-    case llvm::Triple::MachO:
-      return "__DATA, __swift2_field_names, regular, no_dead_strip";
-      break;
-    case llvm::Triple::ELF:
-      return ".swift2_field_names";
-      break;
-    default:
-      llvm_unreachable("Don't know how to emit field name table for "
-                       "the selected object format.");
-  }
-}
-
-StringRef IRGenModule::getFieldNamesSectionName() {
-  switch (TargetInfo.OutputObjectFormat) {
-    case llvm::Triple::MachO:
-      return "__DATA, __swift2_field_metadata, regular, no_dead_strip";
-      break;
-    case llvm::Triple::ELF:
-      return ".swift2_field_metadata";
-      break;
-    default:
-      llvm_unreachable("Don't know how to emit field metadata table for "
-                       "the selected object format.");
-  }
-}

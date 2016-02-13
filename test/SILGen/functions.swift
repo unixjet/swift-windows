@@ -97,7 +97,7 @@ class SomeGeneric<T> {
 }
 
 // CHECK-LABEL: sil hidden @_TF9functions5calls{{.*}} : $@convention(thin) (Builtin.Int64, Builtin.Int64, Builtin.Int64) -> ()
-func calls(i: Int, j: Int, k: Int) {
+func calls(i:Int, j:Int, k:Int) {
   var i = i
   var j = j
   var k = k

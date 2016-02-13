@@ -17,6 +17,8 @@
 #include "ConstraintSystem.h"
 #include "llvm/Support/SaveAndRestore.h"
 #include "swift/AST/ASTWalker.h"
+#include "swift/AST/TypeWalker.h"
+#include "swift/AST/TypeMatcher.h"
 
 using namespace swift;
 using namespace constraints;
@@ -678,6 +680,7 @@ namespace {
     CC_OneGenericArgumentMismatch,     ///< All arguments except one match, guessing generic binding.
     CC_ArgumentNearMismatch,    ///< Argument list mismatch, near miss.
     CC_ArgumentMismatch,        ///< Argument list mismatch.
+    CC_GenericNonsubstitutableMismatch, ///< Arguments match each other, but generic binding not substitutable.
     CC_ArgumentLabelMismatch,   ///< Argument label mismatch.
     CC_ArgumentCountMismatch,   ///< This candidate has wrong # arguments.
     CC_GeneralMismatch          ///< Something else is wrong.
@@ -803,11 +806,13 @@ namespace {
     struct FailedArgumentInfo {
       int argumentNumber = -1;      ///< Arg # at the call site.
       Type parameterType = Type();  ///< Expected type at the decl site.
+      DeclContext *declContext = nullptr; ///< Context at the candidate declaration.
       
       bool isValid() const { return argumentNumber != -1; }
       
       bool operator!=(const FailedArgumentInfo &other) {
         if (argumentNumber != other.argumentNumber) return true;
+        if (declContext != other.declContext) return true;
         // parameterType can be null, and isEqual doesn't handle this.
         if (!parameterType || !other.parameterType)
           return parameterType.getPointer() != other.parameterType.getPointer();
@@ -835,7 +840,7 @@ namespace {
     /// obviously mismatching candidates and compute a "closeness" for the
     /// resultant set.
     std::pair<CandidateCloseness, CalleeCandidateInfo::FailedArgumentInfo>
-    evaluateCloseness(Type candArgListType, ArrayRef<CallArgParam> actualArgs);
+    evaluateCloseness(DeclContext *dc, Type candArgListType, ArrayRef<CallArgParam> actualArgs);
       
     void filterList(ArrayRef<CallArgParam> actualArgs);
     void filterList(Type actualArgsType) {
@@ -859,6 +864,11 @@ namespace {
     /// problem, e.g. that there are too few parameters specified or that
     /// argument labels don't match up, diagnose that error and return true.
     bool diagnoseAnyStructuralArgumentError(Expr *fnExpr, Expr *argExpr);
+    
+    /// If the candidate set has been narrowed to a single parameter or single
+    /// archetype that has argument type errors, diagnose that error and
+    /// return true.
+    bool diagnoseGenericParameterErrors(Expr *badArgExpr);
     
     /// Emit a diagnostic and return true if this is an error condition we can
     /// handle uniformly.  This should be called after filtering the candidate
@@ -974,11 +984,71 @@ static bool argumentMismatchIsNearMiss(Type argType, Type paramType) {
   return false;
 }
 
+/// Given a parameter type that may contain generic type params and an actual
+/// argument type, decide whether the param and actual arg have the same shape
+/// and equal fixed type portions, and return by reference each archetype and
+/// the matching portion of the actual arg type where that archetype appears.
+static bool findGenericSubstitutions(DeclContext *dc, Type paramType, Type actualArgType,
+                                     SmallVector<ArchetypeType *, 4> &archetypes,
+                                     SmallVector<Type, 4> &substitutions) {
+  class GenericVisitor : public TypeMatcher<GenericVisitor> {
+    DeclContext *dc;
+    SmallVector<ArchetypeType *, 4> &archetypes;
+    SmallVector<Type, 4> &substitutions;
+
+  public:
+    GenericVisitor(DeclContext *dc,
+                   SmallVector<ArchetypeType *, 4> &archetypes,
+                   SmallVector<Type, 4> &substitutions)
+    : dc(dc), archetypes(archetypes), substitutions(substitutions) {}
+    
+    bool mismatch(TypeBase *paramType, TypeBase *argType) {
+      return paramType->isEqual(argType);
+    }
+    
+    bool mismatch(SubstitutableType *paramType, TypeBase *argType) {
+      Type type = paramType;
+      if (dc && type->isTypeParameter())
+        type = ArchetypeBuilder::mapTypeIntoContext(dc, paramType);
+      
+      if (auto archetype = type->getAs<ArchetypeType>()) {
+        for (unsigned i = 0, c = archetypes.size(); i < c; i++) {
+          if (archetypes[i]->isEqual(archetype))
+            return substitutions[i]->isEqual(argType);
+        }
+        archetypes.push_back(archetype);
+        substitutions.push_back(argType);
+        return true;
+      }
+      return false;
+    }
+  };
+  
+  // If paramType contains any substitutions already, find them and add them
+  // to our list before matching the two types to find more.
+  paramType.findIf([&](Type type) -> bool {
+    if (auto substitution = dyn_cast<SubstitutedType>(type.getPointer())) {
+      Type original = substitution->getOriginal();
+      if (dc && original->isTypeParameter())
+        original = ArchetypeBuilder::mapTypeIntoContext(dc, original);
+      
+      if (auto archetype = original->getAs<ArchetypeType>()) {
+        archetypes.push_back(archetype);
+        substitutions.push_back(substitution->getReplacementType());
+      }
+    }
+    return false;
+  });
+  
+  GenericVisitor visitor(dc, archetypes, substitutions);
+  return visitor.match(paramType, actualArgType);
+}
+
 /// Determine how close an argument list is to an already decomposed argument
 /// list.  If the closeness is a miss by a single argument, then this returns
 /// information about that failure.
 std::pair<CandidateCloseness, CalleeCandidateInfo::FailedArgumentInfo>
-CalleeCandidateInfo::evaluateCloseness(Type candArgListType,
+CalleeCandidateInfo::evaluateCloseness(DeclContext *dc, Type candArgListType,
                   ArrayRef<CallArgParam> actualArgs) {
   auto candArgs = decomposeArgParamType(candArgListType);
 
@@ -1023,6 +1093,11 @@ CalleeCandidateInfo::evaluateCloseness(Type candArgListType,
   // type variables for all generics and solve it with the given argument types.
   Type singleArchetype = nullptr;
   Type matchingArgType = nullptr;
+
+  // Number of args of generic archetype which are mismatched because
+  // isSubstitutableFor() has failed. If all mismatches are of this type, we'll
+  // return a different closeness for better diagnoses.
+  unsigned nonSubstitutableArgs = 0;
   
   // We classify an argument mismatch as being a "near" miss if it is a very
   // likely match due to a common sort of problem (e.g. wrong flags on a
@@ -1053,27 +1128,56 @@ CalleeCandidateInfo::evaluateCloseness(Type candArgListType,
       // more parameters.
       // We can still do something more sophisticated with this.
       // FIXME: Use TC.isConvertibleTo?
-      if (rArgType->isEqual(paramType))
+
+      SmallVector<ArchetypeType *, 4> archetypes;
+      SmallVector<Type, 4> substitutions;
+      bool matched;
+      if (paramType->is<UnresolvedType>())
+        matched = false;
+      else
+        matched = findGenericSubstitutions(dc, paramType, rArgType,
+                                           archetypes, substitutions);
+      
+      if (matched && archetypes.size() == 0)
         continue;
-      if (paramType->is<ArchetypeType>() && !rArgType->hasTypeVariable()) {
+      if (matched && archetypes.size() == 1 && !rArgType->hasTypeVariable()) {
+        auto archetype = archetypes[0];
+        auto substitution = substitutions[0];
+        
         if (singleArchetype) {
-          if (!paramType->isEqual(singleArchetype))
+          if (!archetype->isEqual(singleArchetype))
             // Multiple archetypes, too complicated.
             return { CC_ArgumentMismatch, {}};
-          if (rArgType->isEqual(matchingArgType)) {
-            continue;
+          
+          if (substitution->isEqual(matchingArgType)) {
+            if (nonSubstitutableArgs == 0)
+              continue;
+            ++nonSubstitutableArgs;
+            // Fallthrough, this is nonsubstitutable, so mismatches as well.
           } else {
-            paramType = matchingArgType;
-            // Fallthrough as mismatched arg, comparing nearness to archetype
-            // bound type.
+            if (nonSubstitutableArgs == 0) {
+              paramType = matchingArgType;
+              // Fallthrough as mismatched arg, comparing nearness to archetype
+              // bound type.
+            } else if (nonSubstitutableArgs == 1) {
+              // If we have only one nonSubstitutableArg so far, then this different
+              // type might be the one that we should be substituting for instead.
+              // Note that failureInfo is already set correctly for that case.
+              if (CS->TC.isSubstitutableFor(substitution, archetype, CS->DC)) {
+                mismatchesAreNearMisses = argumentMismatchIsNearMiss(matchingArgType, substitution);
+                matchingArgType = substitution;
+                continue;
+              }
+            }
           }
         } else {
-          auto archetype = paramType->getAs<ArchetypeType>();
-          if (CS->TC.isSubstitutableFor(rArgType, archetype, CS->DC)) {
-            matchingArgType = rArgType;
-            singleArchetype = paramType;
+          matchingArgType = substitution;
+          singleArchetype = archetype;
+
+          if (CS->TC.isSubstitutableFor(substitution, archetype, CS->DC)) {
             continue;
           }
+          ++nonSubstitutableArgs;
         }
       }
       
@@ -1084,6 +1188,8 @@ CalleeCandidateInfo::evaluateCloseness(Type candArgListType,
       
       failureInfo.argumentNumber = argNo;
       failureInfo.parameterType = paramType;
+      if (paramType->hasTypeParameter())
+        failureInfo.declContext = dc;
     }
   }
   
@@ -1109,6 +1215,9 @@ CalleeCandidateInfo::evaluateCloseness(Type candArgListType,
     // Return information about the single failing argument.
     return { closeness, failureInfo };
   }
+    
+  if (nonSubstitutableArgs == mismatchingArgs)
+    return { CC_GenericNonsubstitutableMismatch, failureInfo };
   
   auto closeness = mismatchesAreNearMisses ? CC_ArgumentNearMismatch
                                            : CC_ArgumentMismatch;
@@ -1292,7 +1401,9 @@ void CalleeCandidateInfo::filterList(ArrayRef<CallArgParam> actualArgs) {
     // If this isn't a function or isn't valid at this uncurry level, treat it
     // as a general mismatch.
     if (!inputType) return { CC_GeneralMismatch, {}};
-    return evaluateCloseness(inputType, actualArgs);
+    Decl *decl = candidate.getDecl();
+    return evaluateCloseness(decl ? decl->getInnermostDeclContext() : nullptr,
+                             inputType, actualArgs);
   });
 }
 
@@ -1374,9 +1485,35 @@ CalleeCandidateInfo::CalleeCandidateInfo(Type baseType,
     
     candidates.push_back({ decl, uncurryLevel });
 
+    // If we have a base type for this member, try to perform substitutions into
+    // it to get a simpler and more concrete type.
+    //
     if (baseType) {
-      auto substType = baseType->getTypeOfMember(CS->DC->getParentModule(),
-                                                 decl, nullptr);
+      auto substType = baseType;
+      // If this is a DeclViaUnwrappingOptional, then we're actually looking
+      // through an optional to get the member, and baseType is an Optional or
+      // Metatype<Optional>.
+      if (cand.getKind() == OverloadChoiceKind::DeclViaUnwrappedOptional) {
+        bool isMeta = false;
+        if (auto MTT = substType->getAs<MetatypeType>()) {
+          isMeta = true;
+          substType = MTT->getInstanceType();
+        }
+
+        // Look through optional or IUO to get the underlying type the decl was
+        // found in.
+        substType = substType->getAnyOptionalObjectType();
+        if (isMeta && substType)
+          substType = MetatypeType::get(substType);
+      } else if (cand.getKind() != OverloadChoiceKind::Decl) {
+        // Otherwise, if it is a remapping we can't handle, don't try to compute
+        // a substitution.
+        substType = Type();
+      }
+
+      if (substType)
+        substType = substType->getTypeOfMember(CS->DC->getParentModule(),
+                                               decl, nullptr);
       if (substType)
         candidates.back().entityType = substType;
     }
@@ -1622,6 +1759,43 @@ bool CalleeCandidateInfo::diagnoseAnyStructuralArgumentError(Expr *fnExpr,
     return true;
   }
   return false;
+}
+
+/// If the candidate set has been narrowed to a single parameter or single
+/// archetype that has argument type errors, diagnose that error and
+/// return true.
+bool CalleeCandidateInfo::diagnoseGenericParameterErrors(Expr *badArgExpr) {
+  Type argType = badArgExpr->getType();
+  
+  // FIXME: For protocol argument types, could add specific error
+  // similar to could_not_use_member_on_existential.
+  if (argType->hasTypeVariable() || argType->is<ProtocolType>() ||
+      argType->is<ProtocolCompositionType>())
+    return false;
+  
+  bool foundFailure = false;
+  SmallVector<ArchetypeType *, 4> archetypes;
+  SmallVector<Type, 4> substitutions;
+  
+  if (!findGenericSubstitutions(failedArgument.declContext, failedArgument.parameterType,
+                                argType, archetypes, substitutions))
+    return false;
+
+  for (unsigned i = 0, c = archetypes.size(); i < c; i++) {
+    auto archetype = archetypes[i];
+    auto argType = substitutions[i];
+    
+    // FIXME: Add specific error for not subclass, if the archetype has a superclass?
+    
+    for (auto proto : archetype->getConformsTo()) {
+      if (!CS->TC.conformsToProtocol(argType, proto, CS->DC, ConformanceCheckOptions(TR_InExpression))) {
+        CS->TC.diagnose(badArgExpr->getLoc(), diag::cannot_convert_argument_value_protocol,
+                        argType, proto->getDeclaredType());
+        foundFailure = true;
+      }
+    }
+  }
+  return foundFailure;
 }
 
 /// Emit a diagnostic and return true if this is an error condition we can
@@ -2490,6 +2664,7 @@ namespace {
     llvm::DenseMap<TypeLoc*, std::pair<Type, bool>> TypeLocTypes;
     llvm::DenseMap<Pattern*, Type> PatternTypes;
     llvm::DenseMap<ParamDecl*, Type> ParamDeclTypes;
+    llvm::DenseMap<CollectionExpr*, Expr*> CollectionSemanticExprs;
     ExprTypeSaverAndEraser(const ExprTypeSaverAndEraser&) = delete;
     void operator=(const ExprTypeSaverAndEraser&) = delete;
   public:
@@ -2507,8 +2682,8 @@ namespace {
             if (isa<ModuleDecl>(declRef->getDecl()))
               return { false, expr };
           
-          // Don't strip type info off OtherConstructorDeclRefExpr, because CSGen
-          // doesn't know how to reconstruct it.
+          // Don't strip type info off OtherConstructorDeclRefExpr, because
+          // CSGen doesn't know how to reconstruct it.
           if (isa<OtherConstructorDeclRefExpr>(expr))
             return { false, expr };
           
@@ -2535,6 +2710,15 @@ namespace {
                 TS->ParamDeclTypes[P] = P->getType();
                 P->overwriteType(Type());
               }
+          
+          // If we have a CollectionExpr with a type checked SemanticExpr,
+          // remove it so we can recalculate a new semantic form.
+          if (auto *CE = dyn_cast<CollectionExpr>(expr)) {
+            if (auto SE = CE->getSemanticExpr()) {
+              TS->CollectionSemanticExprs[CE] = SE;
+              CE->setSemanticExpr(nullptr);
+            }
+          }
           
           expr->setType(nullptr);
           expr->clearLValueAccessKind();
@@ -2583,6 +2767,9 @@ namespace {
       for (auto paramDeclElt : ParamDeclTypes)
         paramDeclElt.first->overwriteType(paramDeclElt.second);
       
+      for (auto CSE : CollectionSemanticExprs)
+        CSE.first->setSemanticExpr(CSE.second);
+      
       // Done, don't do redundant work on destruction.
       ExprTypes.clear();
       TypeLocTypes.clear();
@@ -2597,6 +2784,10 @@ namespace {
     // we go digging through failed constraints, and expect their locators to
     // still be meaningful.
     ~ExprTypeSaverAndEraser() {
+      for (auto CSE : CollectionSemanticExprs)
+        if (!CSE.first->getType())
+          CSE.first->setSemanticExpr(CSE.second);
+
       for (auto exprElt : ExprTypes)
         if (!exprElt.first->getType())
           exprElt.first->setType(exprElt.second);
@@ -2613,7 +2804,6 @@ namespace {
       for (auto paramDeclElt : ParamDeclTypes)
         if (!paramDeclElt.first->hasType())
           paramDeclElt.first->setType(paramDeclElt.second);
-
     }
   };
 }
@@ -2729,6 +2919,7 @@ typeCheckChildIndependently(Expr *subExpr, Type convertType,
       if (FT->isAutoClosure())
         convertType = FT->getResult();
 
+    // Replace archetypes and type parameters with UnresolvedType.
     if (convertType->hasTypeVariable() || convertType->hasArchetype() ||
         convertType->isTypeParameter())
       convertType = replaceArchetypesAndTypeVarsWithUnresolved(convertType);
@@ -3434,8 +3625,10 @@ bool FailureDiagnosis::visitSubscriptExpr(SubscriptExpr *SE) {
     }
     
     // Explode out multi-index subscripts to find the best match.
+    Decl *decl = cand.getDecl();
     auto indexResult =
-      calleeInfo.evaluateCloseness(cand.getArgumentType(), decomposedIndexType);
+      calleeInfo.evaluateCloseness(decl ? decl->getInnermostDeclContext() : nullptr,
+                                   cand.getArgumentType(), decomposedIndexType);
     if (selfConstraint > indexResult.first)
       return {selfConstraint, {}};
     return indexResult;
@@ -3543,6 +3736,15 @@ static bool callArgHasTrailingClosure(Expr *E) {
   return false;
 }
 
+/// Return true if this function name is a comparison operator.  This is a
+/// simple heuristic used to guide comparison related diagnostics.
+static bool isNameOfStandardComparisonOperator(StringRef opName) {
+  return opName == "=="  || opName == "!=" ||
+         opName == "===" || opName == "!==" ||
+         opName == "<"   || opName == ">" ||
+         opName == "<="  || opName == ">=";
+}
+
 bool FailureDiagnosis::visitApplyExpr(ApplyExpr *callExpr) {
   // Type check the function subexpression to resolve a type for it if possible.
   auto fnExpr = typeCheckChildIndependently(callExpr->getFn());
@@ -3640,7 +3842,8 @@ bool FailureDiagnosis::visitApplyExpr(ApplyExpr *callExpr) {
   if ((calleeInfo.closeness == CC_OneArgumentMismatch ||
        calleeInfo.closeness == CC_OneArgumentNearMismatch ||
        calleeInfo.closeness == CC_OneGenericArgumentMismatch ||
-       calleeInfo.closeness == CC_OneGenericArgumentNearMismatch) &&
+       calleeInfo.closeness == CC_OneGenericArgumentNearMismatch ||
+       calleeInfo.closeness == CC_GenericNonsubstitutableMismatch) &&
       calleeInfo.failedArgument.isValid()) {
     // Map the argument number into an argument expression.
     TCCOptions options = TCC_ForceRecheck;
@@ -3663,9 +3866,14 @@ bool FailureDiagnosis::visitApplyExpr(ApplyExpr *callExpr) {
     // Re-type-check the argument with the expected type of the candidate set.
     // This should produce a specific and tailored diagnostic saying that the
     // type mismatches with expectations.
-    if (!typeCheckChildIndependently(badArgExpr,
-                                     calleeInfo.failedArgument.parameterType,
+    Type paramType = calleeInfo.failedArgument.parameterType;
+    if (!typeCheckChildIndependently(badArgExpr, paramType,
                                      CTP_CallArgument, options))
+      return true;
+
+    // If that fails, it could be that the argument doesn't conform to an
+    // archetype.
+    if (calleeInfo.diagnoseGenericParameterErrors(badArgExpr))
       return true;
   }
       
@@ -3734,10 +3942,7 @@ bool FailureDiagnosis::visitApplyExpr(ApplyExpr *callExpr) {
     // diagnostic.
     if (isa<NilLiteralExpr>(rhsExpr->getValueProvidingExpr()) &&
         !isUnresolvedOrTypeVarType(lhsType)) {
-      if (overloadName == "=="  || overloadName == "!=" ||
-          overloadName == "===" || overloadName == "!==" ||
-          overloadName == "<"   || overloadName == ">" ||
-          overloadName == "<="  || overloadName == ">=") {
+      if (isNameOfStandardComparisonOperator(overloadName)) {
         diagnose(callExpr->getLoc(), diag::comparison_with_nil_illegal, lhsType)
           .highlight(lhsExpr->getSourceRange());
         return true;
@@ -3961,8 +4166,6 @@ bool FailureDiagnosis::visitInOutExpr(InOutExpr *IOE) {
           return true;
         }
       }
-      
-      
     } else if (contextualType->is<InOutType>()) {
       contextualType = contextualType->getInOutObjectType();
     } else {
@@ -4558,6 +4761,7 @@ bool FailureDiagnosis::visitUnresolvedMemberExpr(UnresolvedMemberExpr *E) {
   case CC_OneArgumentNearMismatch:
   case CC_OneGenericArgumentMismatch:
   case CC_OneGenericArgumentNearMismatch:
+  case CC_GenericNonsubstitutableMismatch:
   case CC_SelfMismatch:        // Self argument mismatches.
   case CC_ArgumentNearMismatch:// Argument list mismatch.
   case CC_ArgumentMismatch:    // Argument list mismatch.
@@ -4831,7 +5035,7 @@ void ConstraintSystem::diagnoseFailureForExpr(Expr *expr) {
     return;
 
   // If no one could find a problem with this expression or constraint system,
-  // then it must be well-formed... but is ambiguous.  Handle this by diagnosic
+  // then it must be well-formed... but is ambiguous.  Handle this by diagnostic
   // various cases that come up.
   diagnosis.diagnoseAmbiguity(expr);
 }

@@ -49,6 +49,7 @@ SILValue SILValueProjection::createExtract(SILValue Base,
   // from our list of address projections.
   SILValue LastExtract = Base;
   SILBuilder Builder(Inst);
+  Builder.setCurrentDebugScope(Inst->getFunction()->getDebugScope());
 
   // We use an auto-generated SILLocation for now.
   // TODO: make the sil location more precise.
@@ -165,6 +166,7 @@ SILValue LSValue::reduce(LSLocation &Base, SILModule *M,
       Vals.push_back(Values[X].materialize(InsertPt));
     }
     SILBuilder Builder(InsertPt);
+    Builder.setCurrentDebugScope(InsertPt->getFunction()->getDebugScope());
     
     // We use an auto-generated SILLocation for now.
     // TODO: make the sil location more precise.
@@ -304,6 +306,10 @@ void LSLocation::enumerateLSLocation(SILModule *M, SILValue Mem,
                                      LSLocationIndexMap &IndexMap,
                                      LSLocationBaseMap &BaseMap,
                                      TypeExpansionAnalysis *TypeCache) {
+  // We have processed this SILValue before.
+  if (BaseMap.find(Mem) != BaseMap.end())
+    return;
+
   // Construct a Location to represent the memory written by this instruction.
   SILValue UO = getUnderlyingObject(Mem);
   LSLocation L(UO, NewProjectionPath::getProjectionPath(UO, Mem));
@@ -311,10 +317,6 @@ void LSLocation::enumerateLSLocation(SILModule *M, SILValue Mem,
   // If we cant figure out the Base or Projection Path for the memory location,
   // simply ignore it for now.
   if (!L.isValid())
-    return;
-
-  // We have processed this SILValue before.
-  if (BaseMap.find(Mem) != BaseMap.end())
     return;
 
   // Record the SILValue to location mapping.

@@ -47,8 +47,7 @@ f0(i, i,
 
 
 // Position mismatch
-f5(f4)  // expected-error {{cannot invoke 'f5' with an argument list of type '((Int) -> Int)'}}
-// expected-note @-1 {{expected an argument list of type '(T)'}}
+f5(f4)  // expected-error {{argument type '(Int) -> Int' does not conform to expected type 'P2'}}
 
 // Tuple element not convertible.
 f0(i,
@@ -69,14 +68,37 @@ f4(i, d) // expected-error {{extra argument in call}}
 // Missing member.
 i.wobble() // expected-error{{value of type 'Int' has no member 'wobble'}}
 
+// Generic member does not conform.
+extension Int {
+  func wibble<T: P2>(x: T, _ y: T) -> T { return x }
+  func wubble<T>(x: Int -> T) -> T { return x(self) }
+}
+i.wibble(3, 4) // expected-error {{argument type 'Int' does not conform to expected type 'P2'}}
+
+// Generic member args correct, but return type doesn't match.
+struct A : P2 {
+  func wonka() {}
+}
+let a = A()
+for j in i.wibble(a, a) { // expected-error {{type 'A' does not conform to protocol 'SequenceType'}}
+}
+
+// Generic as part of function/tuple types
+func f6<T:P2>(g: Void -> T) -> (c: Int, i: T) {
+  return (c: 0, i: g())
+}
+func f7() -> (c: Int, v: A) {
+  let g: Void -> A = { return A() }
+  return f6(g) // expected-error {{cannot convert return expression of type '(c: Int, i: A)' to return type '(c: Int, v: A)'}}
+}
+
 // <rdar://problem/19658691> QoI: Incorrect diagnostic for calling nonexistent members on literals
 1.doesntExist(0)  // expected-error {{value of type 'Int' has no member 'doesntExist'}}
 [1, 2, 3].doesntExist(0)  // expected-error {{value of type '[Int]' has no member 'doesntExist'}}
 "awfawf".doesntExist(0)   // expected-error {{value of type 'String' has no member 'doesntExist'}}
 
 // Does not conform to protocol.
-f5(i)  // expected-error {{cannot invoke 'f5' with an argument list of type '(Int)'}}
-// expected-note @-1 {{expected an argument list of type '(T)'}}
+f5(i)  // expected-error {{argument type 'Int' does not conform to expected type 'P2'}}
 
 // Make sure we don't leave open existentials when diagnosing.
 // <rdar://problem/20598568>
@@ -260,9 +282,10 @@ func rdar21784170() {
 }
 
 // <rdar://problem/21829141> BOGUS: unexpected trailing closure
-func expect<T, U>(_: T) -> (U.Type) -> () { return { ty in () } } // expected-note{{found this candidate}}
-func expect<T, U>(_: T, _: Int = 1) -> (U.Type) -> () { return { ty in () } } // expected-note{{found this candidate}}
-expect(Optional(3))(Optional<Int>.self) // expected-error{{ambiguous use of 'expect'}}
+func expect<T, U>(_: T) -> (U.Type) -> Int { return { a in 0 } }
+func expect<T, U>(_: T, _: Int = 1) -> (U.Type) -> String { return { a in "String" } }
+let expectType1 = expect(Optional(3))(Optional<Int>.self)
+let expectType1Check: Int = expectType1
 
 // <rdar://problem/19804707> Swift Enum Scoping Oddity
 func rdar19804707() {
@@ -441,7 +464,6 @@ zip(numbers, numbers).filter { $0.2 > 1 }  // expected-error {{value of tuple ty
 
 // <rdar://problem/20868864> QoI: Cannot invoke 'function' with an argument list of type 'type'
 func foo20868864(callback: ([String]) -> ()) { }
-
 func rdar20868864(s: String) {
   var s = s
   foo20868864 { (strings: [String]) in
@@ -482,7 +504,9 @@ let _: Color = .overload(1)  // expected-error {{ambiguous reference to member '
 // expected-note @-1 {{overloads for 'overload' exist with these partially matching parameter lists: (a: Int), (b: Int)}}
 let _: Color = .frob(1.0, &i) // expected-error {{cannot convert value of type 'Double' to expected argument type 'Int'}}
 let _: Color = .frob(1, i)  // expected-error {{passing value of type 'Int' to an inout parameter requires explicit '&'}}
+let _: Color = .frob(1, b: i)  // expected-error {{passing value of type 'Int' to an inout parameter requires explicit '&'}}
 let _: Color = .frob(1, &d) // expected-error {{cannot convert value of type 'Double' to expected argument type 'Int'}}
+let _: Color = .frob(1, b: &d) // expected-error {{cannot convert value of type 'Double' to expected argument type 'Int'}}
 var someColor : Color = .red // expected-error {{type 'Color' has no member 'red'}}
 someColor = .red  // expected-error {{type 'Color' has no member 'red'}}
 
@@ -598,7 +622,7 @@ func r22470302(c: r22470302Class) {
 // <rdar://problem/21928143> QoI: Pointfree reference to generic initializer in generic context does not compile
 extension String {
   @available(*, unavailable, message="calling this is unwise")
-  func unavail<T : SequenceType where T.Generator.Element == String> // expected-note {{'unavail' has been explicitly marked unavailable here}}
+  func unavail<T : SequenceType where T.Generator.Element == String> // expected-note 2 {{'unavail' has been explicitly marked unavailable here}}
     (a : T) -> String {}
 }
 extension Array {
@@ -607,8 +631,7 @@ extension Array {
   }
   
   func h() -> String {
-    return "foo".unavail([0])  // expected-error {{cannot invoke 'unavail' with an argument list of type '([Int])'}}
-    // expected-note @-1 {{expected an argument list of type '(T)'}}
+    return "foo".unavail([0])  // expected-error {{'unavail' is unavailable: calling this is unwise}}
   }
 }
 
@@ -652,7 +675,7 @@ example21890157.property = "confusing"  // expected-error {{value of optional ty
 struct UnaryOp {}
 
 _ = -UnaryOp() // expected-error {{unary operator '-' cannot be applied to an operand of type 'UnaryOp'}}
-// expected-note @-1 {{overloads for '-' exist with these partially matching parameter lists: (Float), (Double),}}
+// expected-note @-1 {{overloads for '-' exist with these partially matching parameter lists: (Float), (Double)}}
 
 
 // <rdar://problem/23433271> Swift compiler segfault in failure diagnosis

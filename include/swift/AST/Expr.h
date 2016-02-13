@@ -21,6 +21,7 @@
 #include "swift/AST/ConcreteDeclRef.h"
 #include "swift/AST/DeclNameLoc.h"
 #include "swift/AST/ProtocolConformanceRef.h"
+#include "swift/AST/TypeAlignments.h"
 #include "swift/AST/TypeLoc.h"
 #include "swift/AST/Availability.h"
 
@@ -753,7 +754,7 @@ public:
     return Segments.front()->getStartLoc();
   }
   SourceLoc getEndLoc() const {
-    return Segments.front()->getEndLoc();
+    return Segments.back()->getEndLoc();
   }
   
   static bool classof(const Expr *E) {
@@ -761,7 +762,7 @@ public:
   }
 };
   
-/// MagicIdentifierLiteralExpr - A magic identifier like __FILE__ which expands
+/// MagicIdentifierLiteralExpr - A magic identifier like #file which expands
 /// out to a literal at SILGen time.
 class MagicIdentifierLiteralExpr : public LiteralExpr {
 public:
@@ -3693,6 +3694,44 @@ public:
 
   Expr *getSemanticExpr() const { return SemanticExpr; }
   void setSemanticExpr(Expr *SE) { SemanticExpr = SE; }
+};
+
+/// Produces the Objective-C selector of the referenced method.
+///
+/// \code
+/// #selector(UIView.insertSubview(_:aboveSubview:))
+/// \endcode
+class ObjCSelectorExpr : public Expr {
+  SourceLoc KeywordLoc;
+  SourceLoc LParenLoc;
+  Expr *SubExpr;
+  SourceLoc RParenLoc;
+  AbstractFunctionDecl *Method = nullptr;
+
+public:
+  ObjCSelectorExpr(SourceLoc keywordLoc, SourceLoc lParenLoc,
+                   Expr *subExpr, SourceLoc rParenLoc)
+    : Expr(ExprKind::ObjCSelector, /*Implicit=*/false),
+      KeywordLoc(keywordLoc), LParenLoc(lParenLoc), SubExpr(subExpr),
+      RParenLoc(rParenLoc) { }
+
+  Expr *getSubExpr() const { return SubExpr; }
+  void setSubExpr(Expr *expr) { SubExpr = expr; }
+
+  /// Retrieve the Objective-C method to which this expression refers.
+  AbstractFunctionDecl *getMethod() const { return Method; }
+
+  /// Set the Objective-C method to which this expression refers.
+  void setMethod(AbstractFunctionDecl *method) { Method = method; }
+
+  SourceLoc getLoc() const { return KeywordLoc; }
+  SourceRange getSourceRange() const {
+    return SourceRange(KeywordLoc, RParenLoc);
+  }
+
+  static bool classof(const Expr *E) {
+    return E->getKind() == ExprKind::ObjCSelector;
+  }
 };
 
 #undef SWIFT_FORWARD_SOURCE_LOCS_TO

@@ -520,10 +520,22 @@ void Module::lookupMember(SmallVectorImpl<ValueDecl*> &results,
   }
 }
 
+void Module::lookupObjCMethods(
+       ObjCSelector selector,
+       SmallVectorImpl<AbstractFunctionDecl *> &results) const {
+  FORWARD(lookupObjCMethods, (selector, results));
+}
+
 void BuiltinUnit::lookupValue(Module::AccessPathTy accessPath, DeclName name,
                               NLKind lookupKind,
                               SmallVectorImpl<ValueDecl*> &result) const {
   getCache().lookupValue(name.getBaseName(), lookupKind, *this, result);
+}
+
+void BuiltinUnit::lookupObjCMethods(
+       ObjCSelector selector,
+       SmallVectorImpl<AbstractFunctionDecl *> &results) const {
+  // No @objc methods in the Builtin module.
 }
 
 DerivedFileUnit::DerivedFileUnit(Module &M)
@@ -559,6 +571,17 @@ void DerivedFileUnit::lookupVisibleDecls(Module::AccessPathTy accessPath,
   for (auto D : DerivedDecls) {
     if (Id.empty() || D->getName() == Id)
       consumer.foundDecl(D, DeclVisibilityKind::VisibleAtTopLevel);
+  }
+}
+
+void DerivedFileUnit::lookupObjCMethods(
+       ObjCSelector selector,
+       SmallVectorImpl<AbstractFunctionDecl *> &results) const {
+  for (auto D : DerivedDecls) {
+    if (auto func = dyn_cast<AbstractFunctionDecl>(D)) {
+      if (func->isObjC() && func->getObjCSelector() == selector)
+        results.push_back(func);
+    }
   }
 }
 
@@ -607,6 +630,15 @@ void SourceFile::lookupClassMember(Module::AccessPathTy accessPath,
   getCache().lookupClassMember(accessPath, name, results, *this);
 }
 
+void SourceFile::lookupObjCMethods(
+       ObjCSelector selector,
+       SmallVectorImpl<AbstractFunctionDecl *> &results) const {
+  // FIXME: Make sure this table is complete, somehow.
+  auto known = ObjCMethods.find(selector);
+  if (known == ObjCMethods.end()) return;
+  results.append(known->second.begin(), known->second.end());
+}
+
 void Module::getLocalTypeDecls(SmallVectorImpl<TypeDecl*> &Results) const {
   FORWARD(getLocalTypeDecls, (Results));
 }
@@ -634,7 +666,7 @@ DeclContext *BoundGenericType::getGenericParamContext(
   if (!gpContext)
     return getDecl();
 
-  assert(gpContext->getDeclaredTypeOfContext()->getAnyNominal() == getDecl() &&
+  assert(gpContext->isNominalTypeOrNominalTypeExtensionContext() == getDecl() &&
          "not a valid context");
   return gpContext;
 }
@@ -1606,25 +1638,30 @@ StringRef LoadedFile::getFilename() const {
   return "";
 }
 
+static const clang::Module *
+getClangModule(llvm::PointerUnion<const Module *, const void *> Union) {
+  return static_cast<const clang::Module *>(Union.get<const void *>());
+}
+
 StringRef ModuleEntity::getName() const {
   assert(!Mod.isNull());
   if (auto SwiftMod = Mod.dyn_cast<const Module*>())
     return SwiftMod->getName().str();
-  return Mod.get<const clang::Module*>()->Name;
+  return getClangModule(Mod)->Name;
 }
 
 std::string ModuleEntity::getFullName() const {
   assert(!Mod.isNull());
   if (auto SwiftMod = Mod.dyn_cast<const Module*>())
     return SwiftMod->getName().str();
-  return Mod.get<const clang::Module*>()->getFullModuleName();
+  return getClangModule(Mod)->getFullModuleName();
 }
 
 bool ModuleEntity::isSystemModule() const {
   assert(!Mod.isNull());
   if (auto SwiftMod = Mod.dyn_cast<const Module*>())
     return SwiftMod->isSystemModule();
-  return Mod.get<const clang::Module*>()->IsSystem;
+  return getClangModule(Mod)->IsSystem;
 }
 
 bool ModuleEntity::isBuiltinModule() const {

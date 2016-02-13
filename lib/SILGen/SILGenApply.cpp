@@ -1358,7 +1358,7 @@ public:
     // Determine whether we'll need to use an allocating constructor (vs. the
     // initializing constructor).
     auto nominal = ctorRef->getDecl()->getDeclContext()
-                     ->getDeclaredTypeOfContext()->getAnyNominal();
+                     ->isNominalTypeOrNominalTypeExtensionContext();
     bool useAllocatingCtor;
     
     // Value types only have allocating initializers.
@@ -2209,7 +2209,7 @@ namespace {
                                  &init, destTL);
     }
 
-    /// Deactive this special destination.  Must always be called
+    /// Deactivate this special destination.  Must always be called
     /// before destruction.
     void deactivate(SILGenFunction &gen) {
       assert(isValid() && "deactivating an invalid destination");

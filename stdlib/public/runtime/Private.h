@@ -26,6 +26,7 @@ namespace swift {
   struct ProtocolDescriptor;
 
 #if SWIFT_HAS_ISA_MASKING
+  SWIFT_RUNTIME_EXPORT
   extern "C" uintptr_t swift_isaMask;
 #endif
 
@@ -114,7 +115,7 @@ namespace swift {
   const Metadata *
   _matchMetadataByMangledTypeName(const llvm::StringRef metadataNameRef,
                                   const Metadata *metadata,
-                                  const GenericMetadata *pattern);
+                                  const NominalTypeDescriptor *ntd);
 
   const Metadata *
   _searchConformancesByMangledTypeName(const llvm::StringRef typeName);

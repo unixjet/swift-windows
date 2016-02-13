@@ -75,11 +75,7 @@ public:
     return F.getModule().getTypeLowering(T);
   }
 
-  void setCurrentDebugScope(const SILDebugScope *DS) {
-    assert((DS->InlinedCallSite || DS->SILFn == &getFunction()) &&
-         "non-inlined scope belongs to different function");
-    CurDebugScope = DS;
-  }
+  void setCurrentDebugScope(const SILDebugScope *DS) { CurDebugScope = DS; }
   const SILDebugScope *getCurrentDebugScope() const { return CurDebugScope; }
 
   SILDebugLocation *getOrCreateDebugLocation(SILLocation Loc,

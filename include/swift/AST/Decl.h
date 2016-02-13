@@ -18,21 +18,16 @@
 #define SWIFT_DECL_H
 
 #include "swift/AST/CaptureInfo.h"
+#include "swift/AST/ClangNode.h"
 #include "swift/AST/DefaultArgumentKind.h"
+#include "swift/AST/ExprHandle.h"
 #include "swift/AST/GenericSignature.h"
 #include "swift/AST/LazyResolver.h"
+#include "swift/AST/TypeAlignments.h"
 #include "swift/Basic/OptionalEnum.h"
 #include "swift/Basic/Range.h"
 #include "llvm/ADT/DenseSet.h"
 #include "llvm/ADT/SmallPtrSet.h"
-
-namespace clang {
-  class Decl;
-  class MacroInfo;
-  class Module;
-  class SourceLocation;
-  class SourceRange;
-}
 
 namespace swift {
   enum class AccessSemantics : unsigned char;
@@ -73,55 +68,6 @@ namespace swift {
   class SubscriptDecl;
   class ValueDecl;
   class VarDecl;
-
-/// Represents a clang declaration, macro, or module.
-class ClangNode {
-  llvm::PointerUnion3<const clang::Decl *, const clang::MacroInfo *,
-                      const clang::Module *> Ptr;
-
-public:
-  ClangNode() = default;
-  ClangNode(const clang::Decl *D) : Ptr(D) {}
-  ClangNode(const clang::MacroInfo *MI) : Ptr(MI) {}
-  ClangNode(const clang::Module *Mod) : Ptr(Mod) {}
-
-  bool isNull() const { return Ptr.isNull(); }
-  explicit operator bool() const { return !isNull(); }
-
-  const clang::Decl *getAsDecl() const {
-    return Ptr.dyn_cast<const clang::Decl *>();
-  }
-  const clang::MacroInfo *getAsMacro() const {
-    return Ptr.dyn_cast<const clang::MacroInfo *>();
-  }
-  const clang::Module *getAsModule() const {
-    return Ptr.dyn_cast<const clang::Module *>();
-  }
-
-  const clang::Decl *castAsDecl() const {
-    return Ptr.get<const clang::Decl *>();
-  }
-  const clang::MacroInfo *castAsMacro() const {
-    return Ptr.get<const clang::MacroInfo *>();
-  }
-  const clang::Module *castAsModule() const {
-    return Ptr.get<const clang::Module *>();
-  }
-
-  /// Returns the module either the one wrapped directly, the one from a
-  /// clang::ImportDecl or null if it's neither.
-  const clang::Module *getClangModule() const;
-
-  clang::SourceLocation getLocation() const;
-  clang::SourceRange getSourceRange() const;
-
-  void *getOpaqueValue() const { return Ptr.getOpaqueValue(); }
-  static inline ClangNode getFromOpaqueValue(void *VP) {
-    ClangNode N;
-    N.Ptr = decltype(Ptr)::getFromOpaqueValue(VP);
-    return N;
-  }
-};
   
 enum class DeclKind : uint8_t {
 #define DECL(Id, Parent) Id,
@@ -810,6 +756,8 @@ public:
   /// \returns the unparsed comment attached to this declaration.
   RawComment getRawComment() const;
 
+  Optional<StringRef> getGroupName() const;
+
   /// \returns the brief comment attached to this declaration.
   StringRef getBriefComment() const;
 
@@ -1063,6 +1011,11 @@ public:
     AsWrittenString = Str;
   }
 
+  /// Further analyze the written string, if it's not empty, to collect the first
+  /// type, the second type and the requirement kind.
+  Optional<std::tuple<StringRef, StringRef, RequirementReprKind>>
+  getAsAnalyzedWrittenString() const;
+
   SourceRange getSourceRange() const {
     return SourceRange(Types[0].getSourceRange().Start,
                        Types[1].getSourceRange().End);
@@ -1093,19 +1046,11 @@ class GenericParamList {
   SourceLoc TrailingWhereLoc;
   unsigned FirstTrailingWhereArg;
 
-  /// The builder used to build archetypes for this list.
-  ArchetypeBuilder *Builder;
-
   GenericParamList(SourceLoc LAngleLoc,
                    ArrayRef<GenericTypeParamDecl *> Params,
                    SourceLoc WhereLoc,
                    MutableArrayRef<RequirementRepr> Requirements,
                    SourceLoc RAngleLoc);
-  
-  void getAsGenericSignatureElements(ASTContext &C,
-                         llvm::DenseMap<ArchetypeType*, Type> &archetypeMap,
-                         SmallVectorImpl<GenericTypeParamType*> &genericParams,
-                         SmallVectorImpl<Requirement> &requirements) const;
   
   // Don't copy.
   GenericParamList(const GenericParamList &) = delete;
@@ -1257,11 +1202,6 @@ public:
     return getAllArchetypes().slice(0, getNumPrimaryArchetypes());
   }
   
-  /// \brief Retrieves the list containing only the associated archetypes.
-  ArrayRef<ArchetypeType *> getAssociatedArchetypes() const {
-    return getAllArchetypes().slice(getNumPrimaryArchetypes());
-  }
-
   /// \brief Sets all archetypes *without* copying the source array.
   void setAllArchetypes(ArrayRef<ArchetypeType *> AA) {
     assert(AA.size() >= size()
@@ -1339,17 +1279,7 @@ public:
       ++depth;
     return depth;
   }
-  
-  /// Get the generic parameter list as a GenericSignature in which the generic
-  /// parameters have been canonicalized.
-  ///
-  /// \param archetypeMap   This DenseMap is populated with a mapping of
-  ///                       context primary archetypes to dependent generic
-  ///                       types.
-  GenericSignature *getAsCanonicalGenericSignature(
-                           llvm::DenseMap<ArchetypeType*, Type> &archetypeMap,
-                           ASTContext &C) const;
-  
+
   /// Derive a type substitution map for this generic parameter list from a
   /// matching substitution vector.
   TypeSubstitutionMap getSubstitutionMap(ArrayRef<Substitution> Subs) const;
@@ -1361,14 +1291,6 @@ public:
                       SmallVectorImpl<ArchetypeType*> &archetypes);
 
   ArrayRef<Substitution> getForwardingSubstitutions(ASTContext &C);
-
-  void setBuilder(ArchetypeBuilder *builder) {
-    Builder = builder;
-  }
-
-  ArchetypeBuilder *getBuilder() const {
-    return Builder;
-  }
 
   /// Collect the nested archetypes of an archetype into the given
   /// collection.
@@ -1874,18 +1796,36 @@ public:
 /// the initializer can be null if there is none.
 class PatternBindingEntry {
   Pattern *ThePattern;
-  llvm::PointerIntPair<Expr *, 1, bool> InitAndChecked;
-  
+
+  enum class Flags {
+    Checked = 1 << 0,
+    Removed = 1 << 1
+  };
+
+  // When the initializer is removed we don't actually clear the pointer
+  // because we might need to get initializer's source range. Since the
+  // initializer is ASTContext-allocated it is safe.
+  llvm::PointerIntPair<Expr *, 2, OptionSet<Flags>> InitCheckedAndRemoved;
+
 public:
   PatternBindingEntry(Pattern *P, Expr *E)
-    : ThePattern(P), InitAndChecked(E, false) {}
+    : ThePattern(P), InitCheckedAndRemoved(E, {}) {}
 
   Pattern *getPattern() const { return ThePattern; }
   void setPattern(Pattern *P) { ThePattern = P; }
-  Expr *getInit() const { return InitAndChecked.getPointer(); }
-  void setInit(Expr *E) { InitAndChecked.setPointer(E); }
-  bool isInitializerChecked() const { return InitAndChecked.getInt(); }
-  void setInitializerChecked() { InitAndChecked.setInt(true); }
+  Expr *getInit() const {
+    return (InitCheckedAndRemoved.getInt().contains(Flags::Removed))
+      ? nullptr : InitCheckedAndRemoved.getPointer();
+  }
+  SourceRange getOrigInitRange() const;
+  void setInit(Expr *E);
+  bool isInitializerChecked() const {
+    return InitCheckedAndRemoved.getInt().contains(Flags::Checked);
+  }
+  void setInitializerChecked() {
+    InitCheckedAndRemoved.setInt(
+      InitCheckedAndRemoved.getInt() | Flags::Checked);
+  }
 };
 
 /// \brief This decl contains a pattern and optional initializer for a set
@@ -1923,11 +1863,7 @@ public:
                                     StaticSpellingKind StaticSpelling,
                                     SourceLoc VarLoc,
                                     Pattern *Pat, Expr *E,
-                                    DeclContext *Parent) {
-    return create(Ctx, StaticLoc, StaticSpelling, VarLoc,
-                  PatternBindingEntry(Pat, E), Parent);
-  }
-
+                                    DeclContext *Parent);
 
   SourceLoc getStartLoc() const {
     return StaticLoc.isValid() ? StaticLoc : VarLoc;
@@ -1945,6 +1881,10 @@ public:
     return getPatternList()[i].getInit();
   }
   
+  SourceRange getOrigInitRange(unsigned i) const {
+    return getPatternList()[i].getOrigInitRange();
+  }
+
   void setInit(unsigned i, Expr *E) {
     getMutablePatternList()[i].setInit(E);
   }
@@ -2596,7 +2536,7 @@ public:
   SourceLoc getStartLoc() const { return KeywordLoc; }
   SourceRange getSourceRange() const;
 
-  void setIsRecursive() { AssociatedTypeDeclBits.Recursive = true; }
+  void setIsRecursive();
   bool isRecursive() { return AssociatedTypeDeclBits.Recursive; }
 
   /// Whether the declaration is currently being validated.
@@ -4000,7 +3940,7 @@ public:
 
   /// Whether the declaration is later overridden in the module
   ///
-  /// Overriddes are resolved during type checking; only query this field after
+  /// Overrides are resolved during type checking; only query this field after
   /// the whole module has been checked
   bool isOverridden() const { return AbstractStorageDeclBits.Overridden; }
 
@@ -4192,6 +4132,7 @@ public:
 class ParamDecl : public VarDecl {
   Identifier ArgumentName;
   SourceLoc ArgumentNameLoc;
+  SourceLoc LetVarInOutLoc;
 
   /// This is the type specified, including location information.
   TypeLoc typeLoc;
@@ -4206,11 +4147,11 @@ class ParamDecl : public VarDecl {
   /// resolve the type.
   bool IsTypeLocImplicit = false;
   
-  /// Information about a symbolic default argument, like __FILE__.
+  /// Information about a symbolic default argument, like #file.
   DefaultArgumentKind defaultArgumentKind = DefaultArgumentKind::None;
   
 public:
-  ParamDecl(bool isLet, SourceLoc argumentNameLoc, 
+  ParamDecl(bool isLet, SourceLoc letVarInOutLoc, SourceLoc argumentNameLoc,
             Identifier argumentName, SourceLoc parameterNameLoc,
             Identifier parameterName, Type ty, DeclContext *dc);
 
@@ -4227,6 +4168,8 @@ public:
   /// The resulting source location will be valid if the argument name
   /// was specified separately from the parameter name.
   SourceLoc getArgumentNameLoc() const { return ArgumentNameLoc; }
+
+  SourceLoc getLetVarInOutLoc() const { return LetVarInOutLoc; }
   
   TypeLoc &getTypeLoc() { return typeLoc; }
   TypeLoc getTypeLoc() const { return typeLoc; }
@@ -4676,7 +4619,7 @@ public:
 
   /// Whether the declaration is later overridden in the module
   ///
-  /// Overriddes are resolved during type checking; only query this field after
+  /// Overrides are resolved during type checking; only query this field after
   /// the whole module has been checked
   bool isOverridden() const { return AbstractFunctionDeclBits.Overridden; }
 

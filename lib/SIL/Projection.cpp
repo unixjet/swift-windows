@@ -16,6 +16,7 @@
 #include "swift/SIL/SILBuilder.h"
 #include "swift/SIL/InstructionUtils.h"
 #include "swift/SIL/DebugUtils.h"
+#include "swift/SIL/SILUndef.h"
 #include "llvm/ADT/None.h"
 #include "llvm/Support/Debug.h"
 
@@ -339,20 +340,19 @@ Optional<NewProjectionPath> NewProjectionPath::getProjectionPath(SILValue Start,
     return llvm::NoneType::None;
 
   auto Iter = End;
-  bool NextAddrIsIndex = false;
   while (Start != Iter) {
     NewProjection AP(Iter);
     if (!AP.isValid())
       break;
     P.Path.push_back(AP);
-    NextAddrIsIndex = AP.getKind() == NewProjectionKind::Index;
     Iter = cast<SILInstruction>(*Iter).getOperand(0);
   }
 
   // Return None if we have an empty projection list or if Start == Iter.
-  // If the next project is index_addr, then Start and End actually point to
-  // disjoint locations (the value at Start has an implicit index_addr #0).
-  if (P.empty() || Start != Iter || NextAddrIsIndex)
+  // We do not worry about th implicit #0 in case of index_addr, as the
+  // NewProjectionPath never allow paths to be compared as a list of indices.
+  // Only the encoded type+index pair will be compared.
+  if (P.empty() || Start != Iter)
     return llvm::NoneType::None;
 
   // Reverse to get a path from base to most-derived.
@@ -1532,6 +1532,53 @@ ProjectionPath::expandTypeIntoNodeProjectionPaths(SILType B, SILModule *Mod,
   } while (!Worklist.empty());
 }
 
+NullablePtr<SILInstruction>
+NewProjection::
+createAggFromFirstLevelProjections(SILBuilder &B, SILLocation Loc,
+                                   SILType BaseType,
+                                   llvm::SmallVectorImpl<SILValue> &Values) {
+  if (BaseType.getStructOrBoundGenericStruct()) {
+    return B.createStruct(Loc, BaseType, Values);
+  }
+
+  if (BaseType.is<TupleType>()) {
+    return B.createTuple(Loc, BaseType, Values);
+  }
+
+  return nullptr;
+}
+
+SILValue NewProjection::getOperandForAggregate(SILInstruction *I) const {
+  switch (getKind()) {
+    case NewProjectionKind::Struct:
+      if (isa<StructInst>(I))
+        return I->getOperand(getIndex());
+      break;
+    case NewProjectionKind::Tuple:
+      if (isa<TupleInst>(I))
+        return I->getOperand(getIndex());
+      break;
+    case NewProjectionKind::Index:
+      break;
+    case NewProjectionKind::Enum:
+      if (EnumInst *EI = dyn_cast<EnumInst>(I)) {
+        if (EI->getElement() == getEnumElementDecl(I->getType())) {
+          assert(EI->hasOperand() && "expected data operand");
+          return EI->getOperand();
+        }
+      }
+      break;
+    case NewProjectionKind::Class:
+    case NewProjectionKind::Box:
+    case NewProjectionKind::Upcast:
+    case NewProjectionKind::RefCast:
+    case NewProjectionKind::BitwiseCast:
+      // There is no SIL instruction to create a class or box by aggregating
+      // values.
+      break;
+  }
+  return SILValue();
+}
 
 
 //===----------------------------------------------------------------------===//
@@ -1759,6 +1806,57 @@ ProjectionTree::ProjectionTree(SILModule &Mod, llvm::BumpPtrAllocator &BPA,
 ProjectionTree::~ProjectionTree() {
   for (auto *N : ProjectionTreeNodes)
     N->~ProjectionTreeNode();
+}
+
+SILValue
+ProjectionTree::computeExplodedArgumentValueInner(SILBuilder &Builder,
+                                                  SILLocation Loc,
+                                                  ProjectionTreeNode *Node,
+                                                  LeafValueMapTy &LeafValues) {
+  // Use the child node value if the child is alive.
+  if (Node->ChildProjections.empty()) {
+    auto Iter = LeafValues.find(Node->getIndex());
+    if (Iter != LeafValues.end())
+      return Iter->second;
+    // Return undef for dead node.
+    return SILUndef::get(Node->getType(), Mod);
+  }
+
+  // This is an aggregate node, construct its value from its children
+  // recursively. 
+  //
+  // NOTE: We do not expect to have too many levels of nesting, so
+  // recursion should be fine.
+  llvm::SmallVector<SILValue, 8> ChildValues;
+  for (unsigned ChildIdx : Node->ChildProjections) {
+    ProjectionTreeNode *Child = getNode(ChildIdx);
+    ChildValues.push_back(computeExplodedArgumentValueInner(Builder, Loc, Child,
+                                                            LeafValues));
+  }
+
+  // Form and return the aggregate.
+  NullablePtr<swift::SILInstruction> AI =
+      Projection::createAggFromFirstLevelProjections(Builder, Loc,
+                                                     Node->getType(),
+                                                     ChildValues);
+
+  assert(AI.get() && "Failed to get a part of the debug value");
+  return SILValue(AI.get());
+}
+
+SILValue
+ProjectionTree::computeExplodedArgumentValue(SILBuilder &Builder, 
+                                             SILLocation Loc,
+                                             llvm::SmallVector<SILValue, 8> &LeafValues) {
+  // Construct the leaf index to leaf value map.
+  llvm::DenseMap<unsigned, SILValue> LeafIndexToValue;
+  for (unsigned i = 0; i < LeafValues.size(); ++i) {
+    LeafIndexToValue[LeafIndices[i]] = LeafValues[i];
+  }
+
+  // Compute the full root node debug node by walking down the projection tree.
+  return computeExplodedArgumentValueInner(Builder, Loc, getRoot(),
+                                           LeafIndexToValue);
 }
 
 void

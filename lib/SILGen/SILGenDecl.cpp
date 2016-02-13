@@ -966,7 +966,6 @@ void SILGenFunction::visitPatternBindingDecl(PatternBindingDecl *PBD) {
 /// (which has type Builtin.Int1) represents the result of this check.
 SILValue SILGenFunction::emitOSVersionRangeCheck(SILLocation loc,
                                                  const VersionRange &range) {
-
   // Emit constants for the checked version range.
   clang::VersionTuple Vers = range.getLowerEndpoint();
   unsigned major = Vers.getMajor();
@@ -1032,10 +1031,18 @@ void SILGenFunction::emitStmtCondition(StmtCondition Cond,
     }
     case StmtConditionElement::CK_Availability:
       // Check the running OS version to determine whether it is in the range
-      // specified by E.
-      auto *avail = elt.getAvailability();
-      booleanTestValue = emitOSVersionRangeCheck(loc,
-                                                 avail->getAvailableRange());
+      // specified by elt.
+      VersionRange OSVersion = elt.getAvailability()->getAvailableRange();
+      assert(!OSVersion.isEmpty());
+
+      if (OSVersion.isAll()) {
+        // If there's no check for the current platform, this condition is
+        // trivially true.
+        SILType i1 = SILType::getBuiltinIntegerType(1, getASTContext());
+        booleanTestValue = B.createIntegerLiteral(loc, i1, true);
+      } else {
+        booleanTestValue = emitOSVersionRangeCheck(loc, OSVersion);
+      }
       break;
     }
 
@@ -1154,8 +1161,10 @@ void SILGenModule::emitExternalDefinition(Decl *d) {
     for (auto c : cast<NominalTypeDecl>(d)->getLocalConformances(
                     ConformanceLookupKind::All,
                     nullptr, /*sorted=*/true)) {
-      if (Types.protocolRequiresWitnessTable(c->getProtocol()) &&
-          c->isComplete() && isa<NormalProtocolConformance>(c))
+      auto *proto = c->getProtocol();
+      if (Lowering::TypeConverter::protocolRequiresWitnessTable(proto) &&
+          isa<NormalProtocolConformance>(c) &&
+          c->isComplete())
         emitExternalWitnessTable(c);
     }
     break;
@@ -1297,7 +1306,8 @@ public:
                                                          ForDefinition))
   {
     // Not all protocols use witness tables.
-    if (!SGM.Types.protocolRequiresWitnessTable(Conformance->getProtocol()))
+    if (!Lowering::TypeConverter::protocolRequiresWitnessTable(
+        Conformance->getProtocol()))
       Conformance = nullptr;
   }
 
@@ -1342,9 +1352,7 @@ public:
   }
 
   void addOutOfLineBaseProtocol(ProtocolDecl *baseProtocol) {
-    // Only include the witness if the base protocol requires it.
-    if (!SGM.Types.protocolRequiresWitnessTable(baseProtocol))
-      return;
+    assert(Lowering::TypeConverter::protocolRequiresWitnessTable(baseProtocol));
 
     auto foundBaseConformance
       = Conformance->getInheritedConformances().find(baseProtocol);
@@ -1468,7 +1476,7 @@ public:
 
     for (auto *protocol : protos) {
       // Only reference the witness if the protocol requires it.
-      if (!SGM.Types.protocolRequiresWitnessTable(protocol))
+      if (!Lowering::TypeConverter::protocolRequiresWitnessTable(protocol))
         continue;
 
       ProtocolConformanceRef conformance(protocol);
@@ -1689,9 +1697,13 @@ getOrCreateReabstractionThunk(GenericParamList *thunkContextParams,
 
     // Substitute context parameters out of the "from" and "to" types.
     auto fromInterfaceType
-      = Types.getInterfaceTypeOutOfContext(fromType, thunkContextParams);
+        = ArchetypeBuilder::mapTypeOutOfContext(
+            M.getSwiftModule(), thunkContextParams, fromType)
+                ->getCanonicalType();
     auto toInterfaceType
-      = Types.getInterfaceTypeOutOfContext(toType, thunkContextParams);
+        = ArchetypeBuilder::mapTypeOutOfContext(
+            M.getSwiftModule(), thunkContextParams, toType)
+                ->getCanonicalType();
 
     mangler.mangleType(fromInterfaceType, /*uncurry*/ 0);
     mangler.mangleType(toInterfaceType, /*uncurry*/ 0);

@@ -1642,7 +1642,8 @@ public:
         // }
         if (auto VD = dyn_cast_or_null<VarDecl>(Cursor->getAsDecl())) {
           if (auto Getter = VD->getGetter()) {
-            if (Getter->getAccessorKeywordLoc().isInvalid()) {
+            if (!Getter->isImplicit() &&
+                Getter->getAccessorKeywordLoc().isInvalid()) {
               LineAndColumn = ParentLineAndColumn;
               continue;
             }
@@ -1898,7 +1899,7 @@ class FormatWalker: public ide::SourceEntityWalker {
           if (EleStart.isInvalid()) {
             EleStart = TE->getElement(I)->getStartLoc();
           }
-          addPair(TE->getElement(I)->getEndLoc(), EleStart, tok::comma);
+          addPair(TE->getElement(I)->getEndLoc(), FindAlignLoc(EleStart), tok::comma);
         }
       }
 
@@ -1916,8 +1917,9 @@ class FormatWalker: public ide::SourceEntityWalker {
         // Function parameters are siblings.
         for (auto P : AFD->getParameterLists()) {
           for (auto param : *P) {
-            addPair(param->getEndLoc(),
-                    FindAlignLoc(param->getStartLoc()), tok::comma);
+           if (!param->isSelfParameter())
+              addPair(param->getEndLoc(), FindAlignLoc(param->getStartLoc()),
+                      tok::comma);
           }
         }
       }

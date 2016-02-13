@@ -328,9 +328,13 @@ public:
 
   /// All alloc_ref instructions which allocate the object on the stack.
   llvm::SmallPtrSet<SILInstruction *, 8> StackAllocs;
+  /// With closure captures it is actually possible to have two function
+  /// arguments that both have the same name. Until this is fixed, we need to
+  /// also hash the ArgNo here.
+  typedef std::pair<unsigned, std::pair<const SILDebugScope *, StringRef>>
+      StackSlotKey;
   /// Keeps track of the mapping of source variables to -O0 shadow copy allocas.
-  llvm::SmallDenseMap<std::pair<const SILDebugScope *, StringRef>, Address, 8>
-      ShadowStackSlots;
+  llvm::SmallDenseMap<StackSlotKey, Address, 8> ShadowStackSlots;
   llvm::SmallDenseMap<Decl *, SmallString<4>, 8> AnonymousVariables;
   unsigned NumAnonVars = 0;
 
@@ -569,7 +573,7 @@ public:
   /// shadow copies, we lose the precise lifetime.
   llvm::Value *emitShadowCopy(llvm::Value *Storage,
                               const SILDebugScope *Scope,
-                              StringRef Name,
+                              StringRef Name, unsigned ArgNo,
                               Alignment Align = Alignment(0)) {
     auto Ty = Storage->getType();
     if (IGM.Opts.Optimize ||
@@ -581,7 +585,7 @@ public:
     if (Align.isZero())
       Align = IGM.getPointerAlignment();
 
-    auto &Alloca = ShadowStackSlots[{Scope, Name}];
+    auto &Alloca = ShadowStackSlots[{ArgNo, {Scope, Name}}];
     if (!Alloca.isValid())
       Alloca = createAlloca(Ty, Align, Name+".addr");
     Builder.CreateStore(Storage, Alloca.getAddress(), Align);
@@ -589,13 +593,13 @@ public:
   }
 
   llvm::Value *emitShadowCopy(Address Storage, const SILDebugScope *Scope,
-                              StringRef Name) {
-    return emitShadowCopy(Storage.getAddress(), Scope, Name,
+                              StringRef Name, unsigned ArgNo) {
+    return emitShadowCopy(Storage.getAddress(), Scope, Name, ArgNo,
                           Storage.getAlignment());
   }
 
-  void emitShadowCopy(ArrayRef<llvm::Value *> vals, const SILDebugScope *scope,
-                      StringRef name,
+  void emitShadowCopy(ArrayRef<llvm::Value *> vals, const SILDebugScope *Scope,
+                      StringRef Name, unsigned ArgNo,
                       llvm::SmallVectorImpl<llvm::Value *> &copy) {
     // Only do this at -O0.
     if (IGM.Opts.Optimize) {
@@ -606,7 +610,7 @@ public:
     // Single or empty values.
     if (vals.size() <= 1) {
       for (auto val : vals)
-        copy.push_back(emitShadowCopy(val, scope, name));
+        copy.push_back(emitShadowCopy(val, Scope, Name, ArgNo));
       return;
     }
 
@@ -622,7 +626,7 @@ public:
     auto layout = IGM.DataLayout.getStructLayout(aggregateType);
     Alignment align(layout->getAlignment());
 
-    auto alloca = createAlloca(aggregateType, align, name + ".debug");
+    auto alloca = createAlloca(aggregateType, align, Name + ".debug");
     size_t i = 0;
     for (auto val : vals) {
       auto addr = Builder.CreateStructGEP(alloca, i,
@@ -928,7 +932,7 @@ emitPHINodesForBBArgs(IRGenSILFunction &IGF,
     if (!silBB->empty()) {
       SILInstruction &I = *silBB->begin();
       auto DS = I.getDebugScope();
-      assert(DS && (DS->SILFn == IGF.CurSILFn || DS->InlinedCallSite));
+      assert(DS);
       IGF.IGM.DebugInfo->setCurrentLoc(IGF.Builder, DS, I.getLoc());
     }
   }
@@ -1363,14 +1367,8 @@ void IRGenSILFunction::emitSILFunction() {
                                     activePoint.as<SILBasicBlock>());
   });
   
-  // FIXME: Or if this is a witness. DebugInfo doesn't have an interface to
-  // correctly handle the generic parameters of a witness, which can come from
-  // both the requirement and witness contexts.
-  if (IGM.DebugInfo &&
-      CurSILFn->getRepresentation()
-        != SILFunctionTypeRepresentation::WitnessMethod) {
+  if (IGM.DebugInfo)
     IGM.DebugInfo->emitFunction(*CurSILFn, CurFn);
-  }
 
   // Map the entry bb.
   LoweredBBs[&*CurSILFn->begin()] = LoweredBB(&*CurFn->begin(), {});
@@ -1439,7 +1437,7 @@ void IRGenSILFunction::emitSILFunction() {
       auto next = std::next(SILFunction::iterator(bb));
       if (next != CurSILFn->end()) {
         auto nextBB = LoweredBBs[&*next].bb;
-        assert(curBB->getNextNode() == nextBB &&
+        assert(&*std::next(curBB->getIterator()) == nextBB &&
                "lost source SIL order?");
       }
     }
@@ -1517,10 +1515,11 @@ void IRGenSILFunction::emitFunctionArgDebugInfo(SILBasicBlock *BB) {
     // other argument. It is only used for sorting.
     unsigned ArgNo =
         countArgs(CurSILFn->getDeclContext()) + 1 + BB->getBBArgs().size();
-    IGM.DebugInfo->emitVariableDeclaration(
-        Builder,
-        emitShadowCopy(ErrorResultSlot.getAddress(), getDebugScope(), Name),
-        DTI, getDebugScope(), Name, ArgNo, IndirectValue, ArtificialValue);
+    auto Storage = emitShadowCopy(ErrorResultSlot.getAddress(), getDebugScope(),
+                                  Name, ArgNo);
+    IGM.DebugInfo->emitVariableDeclaration(Builder, Storage, DTI,
+                                           getDebugScope(), Name, ArgNo,
+                                           IndirectValue, ArtificialValue);
   }
 }
 
@@ -1586,9 +1585,6 @@ void IRGenSILFunction::visitSILBasicBlock(SILBasicBlock *BB) {
         InCleanupBlock = false;
       }
 
-      assert((!DS || (DS->SILFn == CurSILFn || DS->InlinedCallSite)) &&
-             "insn was not inlined, but belongs to a different function");
-
       // Until SILDebugScopes are properly serialized, bare functions
       // are allowed to not have a scope.
       if (!DS) {
@@ -1599,8 +1595,7 @@ void IRGenSILFunction::visitSILBasicBlock(SILBasicBlock *BB) {
 
       // Ignore scope-less instructions and have IRBuilder reuse the
       // previous location and scope.
-      if (DS && !KeepCurrentLocation &&
-          !(ILoc.isInPrologue() && ILoc.getKind() == SILLocation::CleanupKind))
+      if (DS && !KeepCurrentLocation)
         IGM.DebugInfo->setCurrentLoc(Builder, DS, ILoc);
 
       // Function argument handling.
@@ -1614,16 +1609,9 @@ void IRGenSILFunction::visitSILBasicBlock(SILBasicBlock *BB) {
           // after the initialization.
           if (!DS)
             DS = CurSILFn->getDebugScope();
-          IGM.DebugInfo->clearLoc(Builder);
+          PrologueLocation AutoRestore(IGM.DebugInfo, Builder);
           emitFunctionArgDebugInfo(BB);
-          IGM.DebugInfo->setCurrentLoc(Builder, DS, ILoc);
           ArgsEmitted = true;
-        } else {
-          // There may be instructions without a valid location
-          // following the prologue. We need to associate them at
-          // least with the function scope or LLVM won't know were
-          // the prologue ends.
-          IGM.DebugInfo->setCurrentLoc(Builder, CurSILFn->getDebugScope());
         }
       }
     }
@@ -2275,18 +2263,28 @@ static llvm::Constant *getAddrOfString(IRGenModule &IGM, StringRef string,
   case swift::StringLiteralInst::Encoding::UTF8:
     return IGM.getAddrOfGlobalString(string);
 
-  case swift::StringLiteralInst::Encoding::UTF16:
+  case swift::StringLiteralInst::Encoding::UTF16: {
     // This is always a GEP of a GlobalVariable with a nul terminator.
     auto addr = IGM.getAddrOfGlobalUTF16String(string);
 
     // Cast to Builtin.RawPointer.
     return llvm::ConstantExpr::getBitCast(addr, IGM.Int8PtrTy);
   }
+
+  case swift::StringLiteralInst::Encoding::ObjCSelector:
+    llvm_unreachable("cannot get the address of an Objective-C selector");
+  }
   llvm_unreachable("bad string encoding");
 }
 
 void IRGenSILFunction::visitStringLiteralInst(swift::StringLiteralInst *i) {
-  auto addr = getAddrOfString(IGM, i->getValue(), i->getEncoding());
+  llvm::Value *addr;
+
+  // Emit a load of a selector.
+  if (i->getEncoding() == swift::StringLiteralInst::Encoding::ObjCSelector)
+    addr = emitObjCSelectorRefLoad(i->getValue());
+  else
+    addr = getAddrOfString(IGM, i->getValue(), i->getEncoding());
 
   Explosion e;
   e.add(addr);
@@ -3133,9 +3131,9 @@ void IRGenSILFunction::visitDebugValueInst(DebugValueInst *i) {
   // Put the value into a stack slot at -Onone.
   llvm::SmallVector<llvm::Value *, 8> Copy; 
   Explosion e = getLoweredExplosion(SILVal);
-  emitShadowCopy(e.claimAll(), i->getDebugScope(), Name, Copy);
-  emitDebugVariableDeclaration(Copy, DbgTy, i->getDebugScope(), Name,
-                               i->getVarInfo().ArgNo);
+  unsigned ArgNo = i->getVarInfo().ArgNo;
+  emitShadowCopy(e.claimAll(), i->getDebugScope(), Name, ArgNo, Copy);
+  emitDebugVariableDeclaration(Copy, DbgTy, i->getDebugScope(), Name, ArgNo);
 }
 
 void IRGenSILFunction::visitDebugValueAddrInst(DebugValueAddrInst *i) {
@@ -3159,9 +3157,10 @@ void IRGenSILFunction::visitDebugValueAddrInst(DebugValueAddrInst *i) {
     DbgTy.unwrapLValueOrInOutType();
   // Put the value's address into a stack slot at -Onone and emit a debug
   // intrinsic.
+  unsigned ArgNo = i->getVarInfo().ArgNo;
   emitDebugVariableDeclaration(
-      emitShadowCopy(Addr, i->getDebugScope(), Name), DbgTy, i->getDebugScope(),
-      Name, i->getVarInfo().ArgNo,
+      emitShadowCopy(Addr, i->getDebugScope(), Name, ArgNo), DbgTy,
+      i->getDebugScope(), Name, ArgNo,
       DbgTy.isImplicitlyIndirect() ? DirectValue : IndirectValue);
 }
 
@@ -3412,20 +3411,21 @@ void IRGenSILFunction::emitDebugInfoForAllocStack(AllocStackInst *i,
                                                   llvm::Value *addr) {
   VarDecl *Decl = i->getDecl();
   if (IGM.DebugInfo && Decl) {
-    auto *Pattern = Decl->getParentPattern();
-    if (!Pattern || !Pattern->isImplicit()) {
-      auto DbgTy = DebugTypeInfo(Decl, type);
-      // Discard any inout or lvalue qualifiers. Since the object itself
-      // is stored in the alloca, emitting it as a reference type would
-      // be wrong.
-      DbgTy.unwrapLValueOrInOutType();
-      StringRef Name = getVarName(i);
-      if (auto DS = i->getDebugScope()) {
-        assert(DS->SILFn == CurSILFn || DS->InlinedCallSite);
-        emitDebugVariableDeclaration(addr, DbgTy, DS, Name,
-                                     i->getVarInfo().ArgNo);
-      }
-    }
+    // Ignore compiler-generated patterns but not optional bindings.
+    if (auto *Pattern = Decl->getParentPattern())
+      if (Pattern->isImplicit() &&
+          Pattern->getKind() != PatternKind::OptionalSome)
+        return;
+
+    auto DbgTy = DebugTypeInfo(Decl, type);
+    // Discard any inout or lvalue qualifiers. Since the object itself
+    // is stored in the alloca, emitting it as a reference type would
+    // be wrong.
+    DbgTy.unwrapLValueOrInOutType();
+    StringRef Name = getVarName(i);
+    if (auto DS = i->getDebugScope())
+      emitDebugVariableDeclaration(addr, DbgTy, DS, Name,
+                                   i->getVarInfo().ArgNo);
   }
 }
 
@@ -3580,7 +3580,7 @@ void IRGenSILFunction::visitAllocBoxInst(swift::AllocBoxInst *i) {
     DebugTypeInfo DbgTy(Decl, i->getElementType().getSwiftType(), type);
     IGM.DebugInfo->emitVariableDeclaration(
         Builder,
-        emitShadowCopy(boxWithAddr.getAddress(), i->getDebugScope(), Name),
+          emitShadowCopy(boxWithAddr.getAddress(), i->getDebugScope(), Name, 0),
         DbgTy, i->getDebugScope(), Name, 0,
         DbgTy.isImplicitlyIndirect() ? DirectValue : IndirectValue);
   }
@@ -4573,8 +4573,8 @@ findPairedDeallocStackForDestroyAddr(DestroyAddrInst *destroyAddr) {
   auto allocStack = dyn_cast<AllocStackInst>(destroyAddr->getOperand());
   if (!allocStack) return nullptr;
 
-  for (auto inst = destroyAddr->getNextNode(); !isa<TermInst>(inst);
-       inst = inst->getNextNode()) {
+  for (auto inst = &*std::next(destroyAddr->getIterator()); !isa<TermInst>(inst);
+       inst = &*std::next(inst->getIterator())) {
     // If we find a dealloc_stack of the right memory, great.
     if (auto deallocStack = dyn_cast<DeallocStackInst>(inst))
       if (deallocStack->getOperand() == allocStack)

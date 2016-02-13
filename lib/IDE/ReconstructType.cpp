@@ -316,7 +316,7 @@ public:
         else
         {
           const bool allow_crawler = false;
-          if (_crawler._module)
+          if (!_crawler._module.empty())
             GetDeclsLookupSource(*ast_ctx, ConstString(_crawler._module),
                                  allow_crawler).lookupQualified(name, options, typeResolver, result);
         }
@@ -356,7 +356,7 @@ public:
         else
         {
           const bool allow_crawler = false;
-          if (_crawler._module)
+          if (!_crawler._module.empty())
             GetDeclsLookupSource(*ast_ctx, ConstString(_crawler._module),
                                  allow_crawler).lookupValue(path, name, kind,
                                                             result);
@@ -435,6 +435,9 @@ public:
         builder.append(_module->getNameStr());
         return builder.str();
     }
+  }
+
+  ~DeclsLookupSource() {
   }
 
   DeclsLookupSource (const DeclsLookupSource &rhs) :
@@ -560,7 +563,7 @@ private:
     swift::ModuleDecl *_module;
     struct {
       swift::ASTContext* _ast;
-      const char* _module;
+      std::string _module;
     } _crawler;
     swift::NominalTypeDecl *_decl;
     struct {

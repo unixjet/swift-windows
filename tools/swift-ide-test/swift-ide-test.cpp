@@ -462,6 +462,11 @@ AccessibilityFilter(
         clEnumValEnd));
 
 static llvm::cl::opt<bool>
+SynthesizeExtension("synthesize-extension",
+                    llvm::cl::desc("Print synthesized extensions from conforming protocols."),
+                    llvm::cl::init(false));
+
+static llvm::cl::opt<bool>
 SkipPrivateStdlibDecls("skip-private-stdlib-decls",
                 llvm::cl::desc("Don't print declarations that start with '_'"),
                 llvm::cl::init(false));
@@ -470,6 +475,11 @@ static llvm::cl::opt<bool>
 SkipUnderscoredStdlibProtocols("skip-underscored-stdlib-protocols",
                 llvm::cl::desc("Don't print protocols that start with '_'"),
                 llvm::cl::init(false));
+
+static llvm::cl::opt<bool>
+SkipDocumentationComments("skip-print-doc-comments",
+             llvm::cl::desc("Don't print documentation comments from clang module headers"),
+             llvm::cl::init(false));
 
 static llvm::cl::opt<bool>
 PrintRegularComments("print-regular-comments",
@@ -1573,7 +1583,8 @@ static int doPrintModules(const CompilerInvocation &InitInvok,
                           const std::vector<std::string> ModulesToPrint,
                           ide::ModuleTraversalOptions TraversalOptions,
                           const PrintOptions &Options,
-                          bool AnnotatePrint) {
+                          bool AnnotatePrint,
+                          bool SynthesizeExtensions) {
   CompilerInvocation Invocation(InitInvok);
 
   CompilerInstance CI;
@@ -1633,7 +1644,8 @@ static int doPrintModules(const CompilerInvocation &InitInvok,
       }
     }
 
-    printSubmoduleInterface(M, ModuleName, TraversalOptions, *Printer, Options);
+    printSubmoduleInterface(M, ModuleName, TraversalOptions, *Printer, Options,
+                            SynthesizeExtensions);
   }
 
   return ExitCode;
@@ -2525,6 +2537,7 @@ int main(int argc, char *argv[]) {
     PrintOpts.PrintImplicitAttrs = options::PrintImplicitAttrs;
     PrintOpts.PrintAccessibility = options::PrintAccessibility;
     PrintOpts.AccessibilityFilter = options::AccessibilityFilter;
+    PrintOpts.PrintDocumentationComments = !options::SkipDocumentationComments;
     PrintOpts.PrintRegularClangComments = options::PrintRegularComments;
     PrintOpts.SkipPrivateStdlibDecls = options::SkipPrivateStdlibDecls;
     PrintOpts.SkipUnavailable = options::SkipUnavailable;
@@ -2626,7 +2639,7 @@ int main(int argc, char *argv[]) {
 
     ExitCode = doPrintModules(
         InitInvok, options::ModuleToPrint, TraversalOptions, PrintOpts,
-        options::AnnotatePrint);
+        options::AnnotatePrint, options::SynthesizeExtension);
     break;
   }
 

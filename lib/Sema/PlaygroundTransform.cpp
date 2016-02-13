@@ -25,7 +25,7 @@
 #include "swift/AST/Stmt.h"
 #include "swift/AST/Types.h"
 #include "swift/Parse/Lexer.h"
-#include "swift/Sema/CodeCompletionTypeChecking.h"
+#include "swift/Sema/IDETypeChecking.h"
 #include "swift/Subsystems.h"
 #include "TypeChecker.h"
 
@@ -60,7 +60,7 @@ private:
   std::mt19937_64 &RNG;
   ASTContext &Context;
   DeclContext *TypeCheckDC;
-  unsigned TmpNameIndex = 0;
+  unsigned &TmpNameIndex;
   bool HighPerformance;
 
   struct BracePair {
@@ -171,10 +171,11 @@ private:
   ClosureFinder CF;
 
 public:
-  Instrumenter (ASTContext &C, DeclContext *DC, std::mt19937_64 &RNG,
-                bool HP) :
-    RNG(RNG), Context(C), TypeCheckDC(DC), HighPerformance(HP), CF(*this) { }
-    
+  Instrumenter(ASTContext &C, DeclContext *DC, std::mt19937_64 &RNG, bool HP,
+               unsigned &TmpNameIndex)
+      : RNG(RNG), Context(C), TypeCheckDC(DC), TmpNameIndex(TmpNameIndex),
+        HighPerformance(HP), CF(*this) {}
+
   Stmt *transformStmt(Stmt *S) { 
     switch (S->getKind()) {
     default:
@@ -1086,15 +1087,16 @@ void swift::performPlaygroundTransform(SourceFile &SF,
   private:
     std::mt19937_64 RNG;
     bool HighPerformance;
+    unsigned TmpNameIndex = 0;
   public:
-    ExpressionFinder(bool HP) : HighPerformance(HP) { }
+    ExpressionFinder(bool HP) : HighPerformance(HP) {}
 
     virtual bool walkToDeclPre(Decl *D) {
       if (AbstractFunctionDecl *FD = dyn_cast<AbstractFunctionDecl>(D)) {
         if (!FD->isImplicit()) {
           if (BraceStmt *Body = FD->getBody()) {
             ASTContext &ctx = FD->getASTContext();
-            Instrumenter I(ctx, FD, RNG, HighPerformance);
+            Instrumenter I(ctx, FD, RNG, HighPerformance, TmpNameIndex);
             BraceStmt *NewBody = I.transformBraceStmt(Body);
             if (NewBody != Body) {
               FD->setBody(NewBody);
@@ -1107,7 +1109,7 @@ void swift::performPlaygroundTransform(SourceFile &SF,
         if (!TLCD->isImplicit()) {
           if (BraceStmt *Body = TLCD->getBody()) {
             ASTContext &ctx = static_cast<Decl*>(TLCD)->getASTContext();
-            Instrumenter I(ctx, TLCD, RNG, HighPerformance);
+            Instrumenter I(ctx, TLCD, RNG, HighPerformance, TmpNameIndex);
             BraceStmt *NewBody = I.transformBraceStmt(Body, true);
             if (NewBody != Body) {
               TLCD->setBody(NewBody);

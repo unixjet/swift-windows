@@ -20,7 +20,7 @@
 #include "swift/AST/Attr.h"
 #include "swift/AST/Expr.h"
 #include "swift/AST/ParameterList.h"
-#include "swift/Sema/CodeCompletionTypeChecking.h"
+#include "swift/Sema/IDETypeChecking.h"
 #include "llvm/ADT/StringExtras.h"
 #include "llvm/ADT/APInt.h"
 
@@ -1340,7 +1340,7 @@ namespace {
         return visitLiteralExpr(expr);
 
       case MagicIdentifierLiteralExpr::DSOHandle: {
-        // __DSO_HANDLE__ has type UnsafeMutablePointer<Void>.
+        // #dsohandle has type UnsafeMutablePointer<Void>.
         auto &tc = CS.getTypeChecker();
         if (tc.requirePointerArgumentIntrinsics(expr->getLoc()))
           return nullptr;
@@ -1695,7 +1695,6 @@ namespace {
 
       // FIXME: If the base type is a type variable, constrain it to a metatype
       // of a bound generic type.
-      
       tc.diagnose(expr->getSubExpr()->getLoc(),
                   diag::not_a_generic_definition);
       tc.diagnose(expr->getLAngleLoc(),
@@ -2738,6 +2737,26 @@ namespace {
       // case we return the null type.
       return E->getType();
     }
+
+    Type visitObjCSelectorExpr(ObjCSelectorExpr *E) {
+      // #selector only makes sense when we have the Objective-C
+      // runtime.
+      auto &tc = CS.getTypeChecker();
+      if (!tc.Context.LangOpts.EnableObjCInterop) {
+        tc.diagnose(E->getLoc(), diag::expr_selector_no_objc_runtime);
+        return nullptr;
+      }
+
+      // Make sure we can reference ObjectiveC.Selector.
+      // FIXME: Fix-It to add the import?
+      auto type = CS.getTypeChecker().getObjCSelectorType(CS.DC);
+      if (!type) {
+        tc.diagnose(E->getLoc(), diag::expr_selector_module_missing);
+        return nullptr;
+      }
+
+      return type;
+    }
   };
 
   /// \brief AST walker that "sanitizes" an expression for the
@@ -3079,8 +3098,14 @@ Type swift::checkMemberType(DeclContext &DC, Type BaseTy,
   if (Names.empty())
     return BaseTy;
   ConstraintSystemOptions Options = ConstraintSystemFlags::AllowFixes;
+
+  std::unique_ptr<TypeChecker> CreatedTC;
+  // If the current ast context has no type checker, create one for it.
   auto *TC = static_cast<TypeChecker*>(DC.getASTContext().getLazyResolver());
-  assert(TC && "Expected a type resolver");
+  if (!TC) {
+    CreatedTC.reset(new TypeChecker(DC.getASTContext()));
+    TC = CreatedTC.get();
+  }
   ConstraintSystem CS(*TC, &DC, Options);
   auto Loc = CS.getConstraintLocator(nullptr);
 

@@ -39,6 +39,7 @@
 #include "llvm/ADT/StringExtras.h"
 
 using namespace swift;
+using namespace importer;
 
 /// Given that a type is the result of a special typedef import, was
 /// it originally a CF pointer?
@@ -182,7 +183,7 @@ namespace {
                               ImportHint hint = ImportHint::None)
       : AbstractType(type), Hint(hint) {}
 
-    /*implicit*/ ImportResult(TypeBase *type = nullptr,
+    /*implicit*/ ImportResult(TypeBase *type,
                               ImportHint hint = ImportHint::None)
       : AbstractType(type), Hint(hint) {}
 
@@ -567,7 +568,8 @@ namespace {
         case MappedTypeNameKind::DefineAndUse:
           break;
         case MappedTypeNameKind::DefineOnly:
-          mappedType = cast<TypeAliasDecl>(decl)->getUnderlyingType();
+          if (auto typealias = dyn_cast<TypeAliasDecl>(decl))
+            mappedType = typealias->getUnderlyingType();
           break;
         }
 
@@ -657,8 +659,8 @@ namespace {
 
     ImportResult VisitEnumType(const clang::EnumType *type) {
       auto clangDecl = type->getDecl();
-      switch (Impl.classifyEnum(Impl.getClangPreprocessor(), clangDecl)) {
-      case ClangImporter::Implementation::EnumKind::Constants: {
+      switch (Impl.getEnumKind(clangDecl)) {
+      case EnumKind::Constants: {
         auto clangDef = clangDecl->getDefinition();
         // Map anonymous enums with no fixed underlying type to Int /if/
         // they fit in an Int32. If not, this mapping isn't guaranteed to be
@@ -671,9 +673,9 @@ namespace {
         // Import the underlying integer type.
         return Visit(clangDecl->getIntegerType());
       }
-      case ClangImporter::Implementation::EnumKind::Enum:
-      case ClangImporter::Implementation::EnumKind::Unknown:
-      case ClangImporter::Implementation::EnumKind::Options: {
+      case EnumKind::Enum:
+      case EnumKind::Unknown:
+      case EnumKind::Options: {
         auto decl = dyn_cast_or_null<TypeDecl>(Impl.importDecl(clangDecl));
         if (!decl)
           return nullptr;
@@ -1448,7 +1450,7 @@ importFunctionType(const clang::FunctionDecl *clangDecl,
     auto bodyVar
       = createDeclWithClangNode<ParamDecl>(param,
                                      /*IsLet*/ true,
-                                     SourceLoc(), name,
+                                     SourceLoc(), SourceLoc(), name,
                                      importSourceLoc(param->getLocation()),
                                      bodyName, swiftParamTy, 
                                      ImportedHeaderUnit);
@@ -1466,10 +1468,10 @@ importFunctionType(const clang::FunctionDecl *clangDecl,
     auto paramTy =  BoundGenericType::get(SwiftContext.getArrayDecl(), Type(),
       {SwiftContext.getAnyDecl()->getDeclaredType()});
     auto name = SwiftContext.getIdentifier("varargs");
-    auto param = new (SwiftContext) ParamDecl(true, SourceLoc(),
-                                                Identifier(),
-                                                SourceLoc(), name, paramTy,
-                                                ImportedHeaderUnit);
+    auto param = new (SwiftContext) ParamDecl(true, SourceLoc(), SourceLoc(),
+                                              Identifier(),
+                                              SourceLoc(), name, paramTy,
+                                              ImportedHeaderUnit);
 
     param->setVariadic();
     parameters.push_back(param);
@@ -1739,11 +1741,11 @@ OmissionTypeName ClangImporter::Implementation::getClangTypeNameForOmission(
 
   // Block pointers.
   if (type->getAs<clang::BlockPointerType>())
-    return "Block";
+    return OmissionTypeName("Block", OmissionTypeFlags::Function);
 
   // Function pointers.
   if (type->isFunctionType())
-    return "Function";
+    return OmissionTypeName("Function", OmissionTypeFlags::Function);
 
   return StringRef();
 }
@@ -1873,7 +1875,7 @@ DefaultArgumentKind ClangImporter::Implementation::inferDefaultArgument(
 
   // Option sets default to "[]" if they have "Options" in their name.
   if (const clang::EnumType *enumTy = type->getAs<clang::EnumType>())
-    if (classifyEnum(pp, enumTy->getDecl()) == EnumKind::Options) {
+    if (getEnumKind(enumTy->getDecl(), &pp) == EnumKind::Options) {
       auto enumName = enumTy->getDecl()->getName();
       for (auto word : reversed(camel_case::getWords(enumName))) {
         if (camel_case::sameWordIgnoreFirstCase(word, "options"))
@@ -2093,7 +2095,7 @@ Type ClangImporter::Implementation::importMethodType(
     // It doesn't actually matter which DeclContext we use, so just
     // use the imported header unit.
     auto type = TupleType::getEmpty(SwiftContext);
-    auto var = new (SwiftContext) ParamDecl(/*IsLet*/ true,
+    auto var = new (SwiftContext) ParamDecl(/*IsLet*/ true, SourceLoc(),
                                             SourceLoc(), argName,
                                             SourceLoc(), argName, type,
                                             ImportedHeaderUnit);
@@ -2205,8 +2207,8 @@ Type ClangImporter::Implementation::importMethodType(
     // It doesn't actually matter which DeclContext we use, so just use the
     // imported header unit.
     auto bodyVar
-      = createDeclWithClangNode<ParamDecl>(param,
-                                     /*IsLet*/ true, SourceLoc(), name,
+      = createDeclWithClangNode<ParamDecl>(param, /*IsLet*/ true,
+                                     SourceLoc(), SourceLoc(), name,
                                      importSourceLoc(param->getLocation()),
                                      bodyName, swiftParamTy, 
                                      ImportedHeaderUnit);

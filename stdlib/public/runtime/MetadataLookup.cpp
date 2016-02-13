@@ -248,26 +248,23 @@ const Metadata *TypeMetadataRecord::getCanonicalTypeMetadata() const {
 const Metadata *
 swift::_matchMetadataByMangledTypeName(const llvm::StringRef typeName,
                                        const Metadata *metadata,
-                                       const GenericMetadata *pattern) {
-  const NominalTypeDescriptor *ntd = nullptr;
-  const Metadata *foundMetadata = nullptr;
-
-  if (metadata != nullptr)
+                                       const NominalTypeDescriptor *ntd) {
+  if (metadata != nullptr) {
+    assert(ntd == nullptr);
     ntd = metadata->getNominalTypeDescriptor();
-  else if (pattern != nullptr)
-    ntd = pattern->getTemplateDescription();
+  }
 
   if (ntd == nullptr || ntd->Name.get() != typeName)
     return nullptr;
 
-  if (pattern != nullptr) {
-    if (!ntd->GenericParams.hasGenericParams())
-      foundMetadata = swift_getResilientMetadata(const_cast<GenericMetadata *>(pattern));
-  } else {
-    foundMetadata = metadata;
+  // Instantiate resilient types.
+  if (metadata == nullptr &&
+      ntd->getGenericMetadataPattern() &&
+      !ntd->GenericParams.hasGenericParams()) {
+    return swift_getResilientMetadata(ntd->getGenericMetadataPattern());
   }
 
-  return foundMetadata;
+  return metadata;
 }
 
 // returns the type metadata for the type named by typeName
@@ -283,8 +280,8 @@ _searchTypeMetadataRecords(const TypeMetadataState &T,
     for (const auto &record : section) {
       if (auto metadata = record.getCanonicalTypeMetadata())
         foundMetadata = _matchMetadataByMangledTypeName(typeName, metadata, nullptr);
-      else if (auto pattern = record.getGenericPattern())
-        foundMetadata = _matchMetadataByMangledTypeName(typeName, nullptr, pattern);
+      else if (auto ntd = record.getNominalTypeDescriptor())
+        foundMetadata = _matchMetadataByMangledTypeName(typeName, nullptr, ntd);
 
       if (foundMetadata != nullptr)
         return foundMetadata;
@@ -339,6 +336,7 @@ _typeByMangledName(const llvm::StringRef typeName) {
 /// implementation of _typeByName(). The human readable name returned
 /// by swift_getTypeName() is non-unique, so we used mangled names
 /// internally.
+SWIFT_RUNTIME_EXPORT
 extern "C"
 const Metadata *
 swift_getTypeByMangledName(const char *typeName, size_t typeNameLength) {

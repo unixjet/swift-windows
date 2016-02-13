@@ -542,6 +542,14 @@ matchCallArguments(ConstraintSystem &cs, TypeMatchKind kind,
     if (argType->is<InOutType>()) {
       return ConstraintSystem::SolutionKind::Error;
     }
+    // If the param type is an empty existential composition, the function can
+    // only have one argument. Check if exactly one argument was passed to this
+    // function, otherwise we obviously have a mismatch
+    if (auto tupleArgType = argType->getAs<TupleType>()) {
+      if (tupleArgType->getNumElements() != 1) {
+        return ConstraintSystem::SolutionKind::Error;
+      }
+    }
     return ConstraintSystem::SolutionKind::Solved;
   }
 
@@ -1687,8 +1695,9 @@ ConstraintSystem::matchTypes(Type type1, Type type2, TypeMatchKind kind,
 
   if (concrete && kind >= TypeMatchKind::Conversion) {
     // An lvalue of type T1 can be converted to a value of type T2 so long as
-    // T1 is convertible to T2 (by loading the value).
-    if (type1->is<LValueType>())
+    // T1 is convertible to T2 (by loading the value).  Note that we cannot get
+    // a value of inout type as an lvalue though.
+    if (type1->is<LValueType>() && !type2->is<InOutType>())
       conversionsOrFixes.push_back(
         ConversionRestrictionKind::LValueToRValue);
 
