@@ -35,7 +35,7 @@ int swift::_swift_dl_iterate_phdr(int (*Callback)(struct dl_phdr_info *info,
   HANDLE procHandle =
       OpenProcess(PROCESS_QUERY_INFORMATION | PROCESS_VM_READ, FALSE, procId);
   if (!procHandle) {
-    swift::fatalError("OpenProcess() failed");
+    swift::fatalError(/* flags = */ 0, "OpenProcess() failed");
     return 0;
   }
 
@@ -49,7 +49,7 @@ int swift::_swift_dl_iterate_phdr(int (*Callback)(struct dl_phdr_info *info,
                                 modules.size() * sizeof(HMODULE), &neededSize);
 
   if (ret == FALSE) {
-    swift::fatalError("EnumProcessModules() failed");
+    swift::fatalError(/* flags = */ 0, "EnumProcessModules() failed");
     return 0;
   }
 
@@ -60,7 +60,7 @@ int swift::_swift_dl_iterate_phdr(int (*Callback)(struct dl_phdr_info *info,
   }
 
   if (ret == FALSE) {
-    swift::fatalError("EnumProcessModules() failed");
+    swift::fatalError(/* flags = */ 0, "EnumProcessModules() failed");
     return 0;
   }
 
@@ -69,7 +69,7 @@ int swift::_swift_dl_iterate_phdr(int (*Callback)(struct dl_phdr_info *info,
 
     if (!GetModuleFileNameExA(procHandle, modules[i], modName,
                               sizeof(modName))) {
-      swift::fatalError("GetModuleFileNameExA() failed");
+      swift::fatalError(/* flags = */ 0, "GetModuleFileNameExA() failed");
     }
 
     dl_phdr_info hdr;
@@ -97,7 +97,7 @@ uint8_t *swift::_swift_getSectionDataPE(void *handle, const char *sectionName,
   bool assert1 =
       peStart[ntHeadersOffset] == 'P' && peStart[ntHeadersOffset + 1] == 'E';
   if (assert1 == false) {
-    swift::fatalError("_swift_getSectionDataPE()'s finding PE failed");
+    swift::fatalError(/* flags = */ 0, "_swift_getSectionDataPE()'s finding PE failed");
   }
 
   unsigned char *coff = peStart + ntHeadersOffset + 4;
