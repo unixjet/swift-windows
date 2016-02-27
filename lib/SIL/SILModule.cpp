@@ -220,14 +220,15 @@ SILFunction *SILModule::getOrCreateFunction(SILLocation loc,
                                             SILFunction::ClassVisibility_t CV) {
   if (auto fn = lookUpFunction(name)) {
     assert(fn->getLoweredFunctionType() == type);
-    assert(fn->getLinkage() == linkage);
+    assert(fn->getLinkage() == linkage ||
+           stripExternalFromLinkage(fn->getLinkage()) == linkage);
     return fn;
   }
 
   auto fn = SILFunction::create(*this, linkage, name, type, nullptr,
                                 loc, isBareSILFunction, isTransparent,
                                 isFragile, isThunk, CV);
-  fn->setDebugScope(new (*this) SILDebugScope(loc, *fn));
+  fn->setDebugScope(new (*this) SILDebugScope(loc, fn));
   return fn;
 }
 
@@ -343,7 +344,7 @@ SILFunction *SILModule::getOrCreateFunction(SILLocation loc,
                                 inlineStrategy, EK);
 
   if (forDefinition == ForDefinition_t::ForDefinition)
-    F->setDebugScope(new (*this) SILDebugScope(loc, *F));
+    F->setDebugScope(new (*this) SILDebugScope(loc, F));
 
   F->setGlobalInit(constant.isGlobal());
   if (constant.hasDecl()) {

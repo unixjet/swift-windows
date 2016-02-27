@@ -76,6 +76,17 @@ static StringRef getTagForPrintNameContext(PrintNameContext context) {
   }
 }
 
+static StringRef getDeclNameTagForDecl(const Decl *D) {
+  switch (D->getKind()) {
+  case DeclKind::Param:
+    // When we're examining the parameter itself, it is the local name that is
+    // the name of the variable.
+    return LocalParamNameTag;
+  default:
+    return "decl.name";
+  }
+}
+
 /// An ASTPrinter for annotating declarations with XML tags that describe the
 /// key substructure of the declaration for CursorInfo/DocInfo.
 ///
@@ -111,16 +122,12 @@ private:
     DeclStack.pop_back();
     closeTag(getTagForDecl(D, /*isRef=*/false));
   }
-  void avoidPrintDeclPost(const Decl *D) override {
-    assert(DeclStack.back() == D && "unmatched printDeclPre");
-    DeclStack.pop_back();
-  }
 
   void printDeclLoc(const Decl *D) override {
-    openTag("decl.name");
+    openTag(getDeclNameTagForDecl(D));
   }
   void printDeclNameEndLoc(const Decl *D) override {
-    closeTag("decl.name");
+    closeTag(getDeclNameTagForDecl(D));
   }
 
   void printTypePre(const TypeLoc &TL) override {
@@ -166,6 +173,7 @@ private:
       switch (D->getKind()) {
       case DeclKind::Param:
         return "decl.var.parameter.type";
+      case DeclKind::Subscript:
       case DeclKind::Func:
         return "decl.function.returntype";
       default:
@@ -228,8 +236,9 @@ static void printAnnotatedDeclaration(const ValueDecl *VD, const Type Ty,
   OS<<"</Declaration>";
 }
 
-static void printFullyAnnotatedDeclaration(const ValueDecl *VD, const Type Ty,
-                                           const Type BaseTy, raw_ostream &OS) {
+void SwiftLangSupport::printFullyAnnotatedDeclaration(const ValueDecl *VD,
+                                                      Type BaseTy,
+                                                      raw_ostream &OS) {
   FullyAnnotatedDeclarationPrinter Printer(OS);
   PrintOptions PO = PrintOptions::printQuickHelpDeclaration();
   if (BaseTy)
@@ -454,7 +463,7 @@ static bool passCursorInfoForDecl(const ValueDecl *VD,
   unsigned FullDeclBegin = SS.size();
   {
     llvm::raw_svector_ostream OS(SS);
-    printFullyAnnotatedDeclaration(VD, Ty, BaseType, OS);
+    SwiftLangSupport::printFullyAnnotatedDeclaration(VD, BaseType, OS);
   }
   unsigned FullDeclEnd = SS.size();
 

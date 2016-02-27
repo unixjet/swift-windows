@@ -87,6 +87,22 @@ func nonDefaultArgNames(external1 local1: Int, _ local2: Int, external3 local3: 
 
 func nestedFunctionType(closure: (y: (z: Int) -> Int) -> Int) -> (y: (z: Int) -> Int) -> Int) { return closure }
 
+enum E2 {
+  case C1
+  case C2(x: Int, y: String), C3(Int)
+}
+
+enum E3: String {
+  case C = "a"
+}
+
+func refEnumElements() {
+  let w = E2.C1
+  let x = E2.C2(x: 1, y: "")
+  let y: E2 = .C2(x: 2, y: "")
+  let z: E3 = .C
+}
+
 // RUN: rm -rf %t.tmp
 // RUN: mkdir %t.tmp
 // RUN: %swiftc_driver -emit-module -o %t.tmp/FooSwiftModule.swiftmodule %S/Inputs/FooSwiftModule.swift
@@ -113,8 +129,7 @@ func nestedFunctionType(closure: (y: (z: Int) -> Int) -> Int) -> (y: (z: Int) ->
 // CHECK3-NEXT: s:vF11cursor_info3gooFSiT_L_1xSi{{$}}
 // CHECK3-NEXT: Int{{$}}
 // CHECK3-NEXT: <Declaration>let x: <Type usr="s:Si">Int</Type></Declaration>
-// CHECK3-NEXT: <decl.var.parameter>let <decl.name>x</decl.name>: <ref.struct usr="s:Si">Int</ref.struct></decl.var.parameter>
-// FIXME: decl.name should be decl.var.parameter.name.local
+// CHECK3-NEXT: <decl.var.parameter>let <decl.var.parameter.name.local>x</decl.var.parameter.name.local>: <ref.struct usr="s:Si">Int</ref.struct></decl.var.parameter>
 
 // RUN: %sourcekitd-test -req=cursor -pos=9:18 %s -- -F %S/../Inputs/libIDE-mock-sdk -I %t.tmp %mcp_opt %s | FileCheck -check-prefix=CHECK4 %s
 // CHECK4:      source.lang.swift.ref.var.global ({{.*}}Foo.framework/Headers/Foo.h:62:12-62:21)
@@ -172,14 +187,12 @@ func nestedFunctionType(closure: (y: (z: Int) -> Int) -> Int) -> (y: (z: Int) ->
 // RUN: %sourcekitd-test -req=cursor -pos=26:20 %s -- -F %S/../Inputs/libIDE-mock-sdk -I %t.tmp %mcp_opt %s | FileCheck -check-prefix=CHECK11 %s
 // CHECK11: source.lang.swift.decl.var.parameter (26:19-26:23)
 // CHECK11: <Declaration>let arg1: <Type usr="s:Si">Int</Type></Declaration>
-// CHECK11: <decl.var.parameter>let <decl.name>arg1</decl.name>: <ref.struct usr="s:Si">Int</ref.struct></decl.var.parameter>
-// FIXME: decl.name should be decl.var.parameter.name.local
+// CHECK11: <decl.var.parameter>let <decl.var.parameter.name.local>arg1</decl.var.parameter.name.local>: <ref.struct usr="s:Si">Int</ref.struct></decl.var.parameter>
 
 // RUN: %sourcekitd-test -req=cursor -pos=28:24 %s -- -F %S/../Inputs/libIDE-mock-sdk -I %t.tmp %mcp_opt %s | FileCheck -check-prefix=CHECK12 %s
 // CHECK12: source.lang.swift.decl.var.parameter (28:23-28:27)
 // CHECK12: <Declaration>var arg1: <Type usr="s:Si">Int</Type></Declaration>
-// CHECK12: <decl.var.parameter>var <decl.name>arg1</decl.name>: <ref.struct usr="s:Si">Int</ref.struct></decl.var.parameter>
-// FIXME: decl.name should be decl.var.parameter.name.local
+// CHECK12: <decl.var.parameter>var <decl.var.parameter.name.local>arg1</decl.var.parameter.name.local>: <ref.struct usr="s:Si">Int</ref.struct></decl.var.parameter>
 
 // RUN: %sourcekitd-test -req=cursor -pos=31:7 %s -- -F %S/../Inputs/libIDE-mock-sdk -I %t.tmp %mcp_opt %s | FileCheck -check-prefix=CHECK13 %s
 // CHECK13: source.lang.swift.decl.function.free (31:6-31:37)
@@ -251,13 +264,11 @@ func nestedFunctionType(closure: (y: (z: Int) -> Int) -> Int) -> (y: (z: Int) ->
 
 // RUN: %sourcekitd-test -req=cursor -pos=69:14 %s -- -F %S/../Inputs/libIDE-mock-sdk -I %t.tmp %mcp_opt %s | FileCheck -check-prefix=CHECK27 %s
 // CHECK27: <Declaration>public subscript(i: <Type usr="s:Si">Int</Type>) -&gt; <Type usr="s:Si">Int</Type> { get }</Declaration>
-// CHECK27: <decl.function.subscript>public <decl.name>subscript</decl.name>(<decl.var.parameter><decl.var.parameter.name.local>i</decl.var.parameter.name.local>: <decl.var.parameter.type><ref.struct usr="s:Si">Int</ref.struct></decl.var.parameter.type></decl.var.parameter>) -&gt; <ref.struct usr="s:Si">Int</ref.struct> { get }</decl.function.subscript>
-// FIXME: returntype
+// CHECK27: <decl.function.subscript>public <decl.name>subscript</decl.name>(<decl.var.parameter><decl.var.parameter.name.local>i</decl.var.parameter.name.local>: <decl.var.parameter.type><ref.struct usr="s:Si">Int</ref.struct></decl.var.parameter.type></decl.var.parameter>) -&gt; <decl.function.returntype><ref.struct usr="s:Si">Int</ref.struct></decl.function.returntype> { get }</decl.function.subscript>
 
 // RUN: %sourcekitd-test -req=cursor -pos=69:19 %s -- -F %S/../Inputs/libIDE-mock-sdk -I %t.tmp %mcp_opt %s | FileCheck -check-prefix=CHECK28 %s
 // CHECK28: <Declaration>public subscript(i: <Type usr="s:Si">Int</Type>) -&gt; <Type usr="s:Si">Int</Type> { get }</Declaration>
-// CHECK28: <decl.function.subscript>public <decl.name>subscript</decl.name>(<decl.var.parameter><decl.var.parameter.name.local>i</decl.var.parameter.name.local>: <decl.var.parameter.type><ref.struct usr="s:Si">Int</ref.struct></decl.var.parameter.type></decl.var.parameter>) -&gt; <ref.struct usr="s:Si">Int</ref.struct> { get }</decl.function.subscript>
-// FIXME: returntype
+// CHECK28: <decl.function.subscript>public <decl.name>subscript</decl.name>(<decl.var.parameter><decl.var.parameter.name.local>i</decl.var.parameter.name.local>: <decl.var.parameter.type><ref.struct usr="s:Si">Int</ref.struct></decl.var.parameter.type></decl.var.parameter>) -&gt; <decl.function.returntype><ref.struct usr="s:Si">Int</ref.struct></decl.function.returntype> { get }</decl.function.subscript>
 
 // RUN: %sourcekitd-test -req=cursor -pos=74:3 %s -- -F %S/../Inputs/libIDE-mock-sdk -I %t.tmp %mcp_opt %s | FileCheck %s -check-prefix=CHECK29
 // CHECK29: source.lang.swift.decl.function.destructor (74:3-74:9)
@@ -334,3 +345,62 @@ func nestedFunctionType(closure: (y: (z: Int) -> Int) -> Int) -> (y: (z: Int) ->
 // RUN: %sourcekitd-test -req=cursor -pos=88:6 %s -- -F %S/../Inputs/libIDE-mock-sdk -I %t.tmp %mcp_opt %s | FileCheck %s -check-prefix=CHECK38
 // CHECK38: <decl.function.free>func <decl.name>nestedFunctionType</decl.name>(<decl.var.parameter><decl.var.parameter.name.local>closure</decl.var.parameter.name.local>: <decl.var.parameter.type>(y: (z: <ref.struct usr="s:Si">Int</ref.struct>) -&gt; <ref.struct usr="s:Si">Int</ref.struct>) -&gt; <ref.struct usr="s:Si">Int</ref.struct></decl.var.parameter.type></decl.var.parameter>) -&gt; <decl.function.returntype>(<decl.var.parameter.name.external>y</decl.var.parameter.name.external>: (<decl.var.parameter.name.external>z</decl.var.parameter.name.external>: <ref.struct usr="s:Si">Int</ref.struct>) -&gt; <ref.struct usr="s:Si">Int</ref.struct>) -&gt; <ref.struct usr="s:Si">Int</ref.struct></decl.function.returntype></decl.function.free>
 // FIXME: inconsistent use of parameter inside type
+
+// RUN: %sourcekitd-test -req=cursor -pos=91:8 %s -- -F %S/../Inputs/libIDE-mock-sdk -I %t.tmp %mcp_opt %s | FileCheck %s -check-prefix=CHECK39
+// CHECK39: source.lang.swift.decl.enumelement (91:8-91:10)
+// CHECK39-NEXT: C1
+// CHECK39-NEXT: s:FO11cursor_info2E22C1FMS0_S0_
+// CHECK39-NEXT: E2.Type -> E2
+// CHECK39-NEXT: <Declaration>case C1</Declaration>
+// CHECK39-NEXT: <decl.enumelement>case <decl.name>C1</decl.name></decl.enumelement>
+
+// RUN: %sourcekitd-test -req=cursor -pos=92:8 %s -- -F %S/../Inputs/libIDE-mock-sdk -I %t.tmp %mcp_opt %s | FileCheck %s -check-prefix=CHECK40
+// CHECK40: source.lang.swift.decl.enumelement (92:8-92:10)
+// CHECK40-NEXT: C2
+// CHECK40-NEXT: s:FO11cursor_info2E22C2FMS0_FT1xSi1ySS_S0_
+// CHECK40-NEXT: E2.Type -> (x: Int, y: String) -> E2
+// CHECK40-NEXT: <Declaration>case C2(x: <Type usr="s:Si">Int</Type>, y: <Type usr="s:SS">String</Type>)</Declaration>
+// CHECK40-NEXT: <decl.enumelement>case <decl.name>C2</decl.name>(<decl.var.parameter.name.external>x</decl.var.parameter.name.external>: <ref.struct usr="s:Si">Int</ref.struct>, <decl.var.parameter.name.external>y</decl.var.parameter.name.external>: <ref.struct usr="s:SS">String</ref.struct>)</decl.enumelement>
+// FIXME: Wrap parameters in <decl.var.parameter>
+
+// RUN: %sourcekitd-test -req=cursor -pos=92:31 %s -- -F %S/../Inputs/libIDE-mock-sdk -I %t.tmp %mcp_opt %s | FileCheck %s -check-prefix=CHECK41
+// CHECK41: source.lang.swift.decl.enumelement (92:31-92:33)
+// CHECK41-NEXT: C3
+// CHECK41-NEXT: s:FO11cursor_info2E22C3FMS0_FSiS0_
+// CHECK41-NEXT: E2.Type -> (Int) -> E2
+// CHECK41-NEXT: <Declaration>case C3(<Type usr="s:Si">Int</Type>)</Declaration>
+// CHECK41-NEXT: <decl.enumelement>case <decl.name>C3</decl.name>(<ref.struct usr="s:Si">Int</ref.struct>)</decl.enumelement>
+// FIXME: Wrap parameters in <decl.var.parameter>
+
+// RUN: %sourcekitd-test -req=cursor -pos=96:8 %s -- -F %S/../Inputs/libIDE-mock-sdk -I %t.tmp %mcp_opt %s | FileCheck %s -check-prefix=CHECK42
+// CHECK42: source.lang.swift.decl.enumelement (96:8-96:9)
+// CHECK42-NEXT: C
+// CHECK42-NEXT: s:FO11cursor_info2E31CFMS0_S0_
+// CHECK42-NEXT: E3.Type -> E3
+// CHECK42-NEXT: <Declaration>case C</Declaration>
+// CHECK42-NEXT: <decl.enumelement>case <decl.name>C</decl.name></decl.enumelement>
+// FIXME: Annotate raw value.
+
+// RUN: %sourcekitd-test -req=cursor -pos=100:14 %s -- -F %S/../Inputs/libIDE-mock-sdk -I %t.tmp %mcp_opt %s | FileCheck %s -check-prefix=CHECK43
+// CHECK43: source.lang.swift.ref.enumelement (91:8-91:10)
+// CHECK43-NEXT: C1
+// CHECK43: <Declaration>case C1</Declaration>
+// CHECK43-NEXT: <decl.enumelement>case <decl.name>C1</decl.name></decl.enumelement>
+
+// RUN: %sourcekitd-test -req=cursor -pos=101:14 %s -- -F %S/../Inputs/libIDE-mock-sdk -I %t.tmp %mcp_opt %s | FileCheck %s -check-prefix=CHECK44
+// CHECK44: source.lang.swift.ref.enumelement (92:8-92:10)
+// CHECK44-NEXT: C2
+// CHECK44: <Declaration>case C2(x: <Type usr="s:Si">Int</Type>, y: <Type usr="s:SS">String</Type>)</Declaration>
+// CHECK44-NEXT: <decl.enumelement>case <decl.name>C2</decl.name>(<decl.var.parameter.name.external>x
+
+// RUN: %sourcekitd-test -req=cursor -pos=102:16 %s -- -F %S/../Inputs/libIDE-mock-sdk -I %t.tmp %mcp_opt %s | FileCheck %s -check-prefix=CHECK45
+// CHECK45: source.lang.swift.ref.enumelement (92:8-92:10)
+// CHECK45-NEXT: C2
+// CHECK45: <Declaration>case C2(x: <Type usr="s:Si">Int</Type>, y: <Type usr="s:SS">String</Type>)</Declaration>
+// CHECK45-NEXT: <decl.enumelement>case <decl.name>C2</decl.name>(<decl.var.parameter.name.external>x
+
+// RUN: %sourcekitd-test -req=cursor -pos=103:16 %s -- -F %S/../Inputs/libIDE-mock-sdk -I %t.tmp %mcp_opt %s | FileCheck %s -check-prefix=CHECK46
+// CHECK46: source.lang.swift.ref.enumelement (96:8-96:9)
+// CHECK46-NEXT: C
+// CHECK46: <Declaration>case C</Declaration>
+// CHECK46-NEXT: <decl.enumelement>case <decl.name>C</decl.name></decl.enumelement>
