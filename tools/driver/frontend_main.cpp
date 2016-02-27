@@ -801,7 +801,8 @@ static bool performCompile(CompilerInstance &Instance,
   // These may change across compiler versions.
   {
     SharedTimer timer("SIL optimization");
-    if (IRGenOpts.Optimize) {
+    if (Invocation.getSILOptions().Optimization >
+        SILOptions::SILOptMode::None) {
       StringRef CustomPipelinePath =
         Invocation.getSILOptions().ExternalPassPipelineFilename;
       if (!CustomPipelinePath.empty()) {
@@ -858,6 +859,7 @@ static bool performCompile(CompilerInstance &Instance,
       SerializationOptions serializationOpts;
       serializationOpts.OutputPath = opts.ModuleOutputPath.c_str();
       serializationOpts.DocOutputPath = opts.ModuleDocOutputPath.c_str();
+      serializationOpts.GroupInfoPath = opts.GroupInfoPath.c_str();
       serializationOpts.SerializeAllSIL = opts.SILSerializeAll;
       if (opts.SerializeBridgingHeader)
         serializationOpts.ImportedHeader = opts.ImplicitObjCHeaderPath;

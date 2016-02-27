@@ -55,18 +55,12 @@ public struct JoinGenerator<
         if _fastPath(result != nil) {
           return result
         }
-        if _separatorData.isEmpty {
-          _inner = _base.next()?.generate()
-          if _inner == nil {
-            _state = .End
-            return nil
-          }
-        } else {
-          _inner = _base.next()?.generate()
-          if _inner == nil {
-            _state = .End
-            return nil
-          }
+        _inner = _base.next()?.generate()
+        if _inner == nil {
+          _state = .End
+          return nil
+        }
+        if !_separatorData.isEmpty {
           _separator = _separatorData.generate()
           _state = .GeneratingSeparator
         }
@@ -87,7 +81,7 @@ public struct JoinGenerator<
   }
 
   internal var _base: Base
-  internal var _inner: Base.Element.Generator? = nil
+  internal var _inner: Base.Element.Generator?
   internal var _separatorData: ContiguousArray<Base.Element.Generator.Element>
   internal var _separator: ContiguousArray<Base.Element.Generator.Element>.Generator?
   internal var _state: _JoinGeneratorState = .Start
@@ -140,18 +134,19 @@ public struct JoinSequence<
       result.reserveCapacity(numericCast(n))
     }
 
-    if separatorSize != 0 {
-      var gen = _base.generate()
-      if let first = gen.next() {
-        result.appendContentsOf(first)
-        while let next = gen.next() {
-          result.appendContentsOf(_separator)
-          result.appendContentsOf(next)
-        }
-      }
-    } else {
+    if separatorSize == 0 {
       for x in _base {
         result.appendContentsOf(x)
+      }
+      return result._buffer
+    }
+
+    var gen = _base.generate()
+    if let first = gen.next() {
+      result.appendContentsOf(first)
+      while let next = gen.next() {
+        result.appendContentsOf(_separator)
+        result.appendContentsOf(next)
       }
     }
 

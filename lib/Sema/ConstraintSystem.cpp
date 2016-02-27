@@ -1385,7 +1385,7 @@ void ConstraintSystem::resolveOverload(ConstraintLocator *locator,
     } else {
       // When the base is a tuple rvalue, the member is always an rvalue.
       auto tuple = choice.getBaseType()->castTo<TupleType>();
-      refType = tuple->getElementType(choice.getTupleIndex());
+      refType = tuple->getElementType(choice.getTupleIndex())->getRValueType();
     }
     break;
   }
@@ -1459,7 +1459,7 @@ static bool isPrivilegedAccessToImplicitlyUnwrappedOptional(DeclContext *DC,
     // If we're in a type context that's defining or extending
     // ImplicitlyUnwrappedOptional<T>, we're privileged.
     } else if (DC->isTypeContext()) {
-      if (DC->getDeclaredTypeInContext()->getAnyNominal() == D)
+      if (DC->getAsNominalTypeOrNominalTypeExtensionContext() == D)
         return true;
 
     // Otherwise, we're privileged if we're within the same file that

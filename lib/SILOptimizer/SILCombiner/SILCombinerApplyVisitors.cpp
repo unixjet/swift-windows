@@ -29,36 +29,6 @@
 using namespace swift;
 using namespace swift::PatternMatch;
 
-/// Check that this is a partial apply of a reabstraction thunk and return the
-/// argument of the partial apply if it is.
-static SILValue
-isPartialApplyOfReabstractionThunk(PartialApplyInst *PAI, bool requireSingleUse) {
-  if (requireSingleUse) {
-    SILValue PAIVal(PAI);
-    if (!hasOneNonDebugUse(PAIVal))
-      return SILValue();
-  }
-
-  if (PAI->getNumArguments() != 1)
-    return SILValue();
-
-  auto *Fun = PAI->getCalleeFunction();
-  if (!Fun)
-    return SILValue();
-
-  // Make sure we have a reabstraction thunk.
-  if (Fun->isThunk() != IsReabstractionThunk)
-    return SILValue();
-
-  // The argument should be a closure.
-  auto Arg = PAI->getArgument(0);
-  if (!Arg->getType().is<SILFunctionType>() ||
-      !Arg->getType().isReferenceCounted(PAI->getFunction()->getModule()))
-    return SILValue();
-
-  return PAI->getArgument(0);
-}
-
 /// Remove pointless reabstraction thunk closures.
 ///   partial_apply %reabstraction_thunk_typeAtoB(
 ///      partial_apply %reabstraction_thunk_typeBtoA %closure_typeB))
@@ -66,7 +36,7 @@ isPartialApplyOfReabstractionThunk(PartialApplyInst *PAI, bool requireSingleUse)
 ///   %closure_typeB
 static bool foldInverseReabstractionThunks(PartialApplyInst *PAI,
                                            SILCombiner *Combiner) {
-  auto PAIArg = isPartialApplyOfReabstractionThunk(PAI, false);
+  auto PAIArg = isPartialApplyOfReabstractionThunk(PAI);
   if (!PAIArg)
     return false;
 
@@ -74,7 +44,10 @@ static bool foldInverseReabstractionThunks(PartialApplyInst *PAI,
   if (!PAI2)
     return false;
 
-  auto PAI2Arg = isPartialApplyOfReabstractionThunk(PAI2, true);
+  if (!hasOneNonDebugUse(PAI2))
+    return false;
+
+  auto PAI2Arg = isPartialApplyOfReabstractionThunk(PAI2);
   if (!PAI2Arg)
     return false;
 
@@ -453,7 +426,7 @@ SILCombiner::optimizeApplyOfConvertFunctionInst(FullApplySite AI,
   // Ok, we can now perform our transformation. Grab AI's operands and the
   // relevant types from the ConvertFunction function type and AI.
   Builder.setCurrentDebugScope(AI.getDebugScope());
-  OperandValueArrayRef Ops = AI.getArgumentsWithoutIndirectResult();
+  OperandValueArrayRef Ops = AI.getArgumentsWithoutIndirectResults();
   auto OldOpTypes = SubstCalleeTy->getParameterSILTypes();
   auto NewOpTypes = ConvertCalleeTy->getParameterSILTypes();
 
@@ -538,7 +511,6 @@ void SILCombiner::eraseApply(FullApplySite FAS, const UserListTy &Users) {
       case ParameterConvention::Indirect_In_Guaranteed:
       case ParameterConvention::Indirect_Inout:
       case ParameterConvention::Indirect_InoutAliasable:
-      case ParameterConvention::Indirect_Out:
       case ParameterConvention::Direct_Unowned:
       case ParameterConvention::Direct_Deallocating:
       case ParameterConvention::Direct_Guaranteed:
@@ -597,11 +569,10 @@ static SILValue getAddressOfStackInit(AllocStackInst *ASI,
     }
     if (isa<ApplyInst>(User) || isa<TryApplyInst>(User)) {
       // Ignore function calls which do not write to the stack location.
-      auto Params = FullApplySite(User).getSubstCalleeType()->getParameters();
       auto Idx = Use->getOperandNumber() - ApplyInst::getArgumentOperandNumber();
-      ParameterConvention Conv = Params[Idx].getConvention();
-      if (Conv != ParameterConvention::Indirect_In &&
-          Conv != ParameterConvention::Indirect_In_Guaranteed)
+      auto Conv = FullApplySite(User).getArgumentConvention(Idx);
+      if (Conv != SILArgumentConvention::Indirect_In &&
+          Conv != SILArgumentConvention::Indirect_In_Guaranteed)
         return SILValue();
       continue;
     }
@@ -902,7 +873,7 @@ SILCombiner::propagateConcreteTypeOfInitExistential(FullApplySite AI) {
   // Check if it is legal to perform the propagation.
   if (!AI.hasSubstitutions())
     return nullptr;
-  auto *Callee = AI.getCalleeFunction();
+  auto *Callee = AI.getReferencedFunction();
   if (!Callee || !Callee->getDeclContext())
     return nullptr;
 
@@ -1069,7 +1040,9 @@ static bool knowHowToEmitReferenceCountInsts(ApplyInst *Call) {
   auto FnTy = F->getLoweredFunctionType();
 
   // Look at the result type.
-  auto ResultInfo = FnTy->getResult();
+  if (FnTy->getNumAllResults() != 1)
+    return false;
+  auto ResultInfo = FnTy->getAllResults()[0];
   if (ResultInfo.getConvention() != ResultConvention::Owned)
     return false;
 
@@ -1088,7 +1061,8 @@ static void emitMatchingRCAdjustmentsForCall(ApplyInst *Call, SILValue OnX) {
   FunctionRefInst *FRI = cast<FunctionRefInst>(Call->getCallee());
   SILFunction *F = FRI->getReferencedFunction();
   auto FnTy = F->getLoweredFunctionType();
-  auto ResultInfo = FnTy->getResult();
+  assert(FnTy->getNumAllResults() == 1);
+  auto ResultInfo = FnTy->getAllResults()[0];
   (void) ResultInfo;
 
   assert(ResultInfo.getConvention() == ResultConvention::Owned &&
@@ -1213,7 +1187,7 @@ SILInstruction *SILCombiner::visitApplyInst(ApplyInst *AI) {
         }
 
   // Optimize readonly functions with no meaningful users.
-  SILFunction *SF = AI->getCalleeFunction();
+  SILFunction *SF = AI->getReferencedFunction();
   if (SF && SF->getEffectsKind() < EffectsKind::ReadWrite) {
     UserListTy Users;
     if (recursivelyCollectARCUsers(Users, AI)) {
@@ -1244,7 +1218,7 @@ SILInstruction *SILCombiner::visitApplyInst(ApplyInst *AI) {
   // (apply (thin_to_thick_function f)) to (apply f)
   if (auto *TTTFI = dyn_cast<ThinToThickFunctionInst>(AI->getCallee())) {
     // TODO: Handle substitutions and indirect results
-    if (AI->hasSubstitutions() || AI->hasIndirectResult())
+    if (AI->hasSubstitutions() || AI->hasIndirectResults())
       return nullptr;
     SmallVector<SILValue, 4> Arguments;
     for (auto &Op : AI->getArgumentOperands()) {
@@ -1347,7 +1321,7 @@ SILInstruction *SILCombiner::visitTryApplyInst(TryApplyInst *AI) {
   }
 
   // Optimize readonly functions with no meaningful users.
-  SILFunction *Fn = AI->getCalleeFunction();
+  SILFunction *Fn = AI->getReferencedFunction();
   if (Fn && Fn->getEffectsKind() < EffectsKind::ReadWrite) {
     UserListTy Users;
     if (isTryApplyResultNotUsed(Users, AI)) {
@@ -1375,7 +1349,7 @@ SILInstruction *SILCombiner::visitTryApplyInst(TryApplyInst *AI) {
   // (try_apply (thin_to_thick_function f)) to (try_apply f)
   if (auto *TTTFI = dyn_cast<ThinToThickFunctionInst>(AI->getCallee())) {
     // TODO: Handle substitutions and indirect results
-    if (AI->hasSubstitutions() || AI->hasIndirectResult())
+    if (AI->hasSubstitutions() || AI->hasIndirectResults())
       return nullptr;
     SmallVector<SILValue, 4> Arguments;
     for (auto &Op : AI->getArgumentOperands()) {

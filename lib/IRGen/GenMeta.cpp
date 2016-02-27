@@ -43,6 +43,7 @@
 #include "FixedTypeInfo.h"
 #include "GenClass.h"
 #include "GenPoly.h"
+#include "GenValueWitness.h"
 #include "GenArchetype.h"
 #include "GenStruct.h"
 #include "HeapTypeInfo.h"
@@ -882,7 +883,7 @@ namespace {
     }
 
     llvm::Value *visitArchetypeType(CanArchetypeType type) {
-      return IGF.getLocalTypeData(type, LocalTypeDataKind::forTypeMetadata());
+      return emitArchetypeTypeMetadataRef(IGF, type);
     }
 
     llvm::Value *visitGenericTypeParamType(CanGenericTypeParamType type) {
@@ -4271,17 +4272,6 @@ namespace {
       super::addMethod(fn);
     }
   END_METADATA_SEARCHER()
-}
-
-/// Provide the abstract parameters for virtual calls to the given method.
-AbstractCallee irgen::getAbstractVirtualCallee(IRGenFunction &IGF,
-                                               FuncDecl *method) {
-  // TODO: maybe use better versions in the v-table sometimes?
-  ResilienceExpansion bestExplosion = ResilienceExpansion::Minimal;
-  unsigned naturalUncurry = method->getNaturalArgumentCount() - 1;
-
-  return AbstractCallee(SILFunctionTypeRepresentation::Method, bestExplosion,
-                        naturalUncurry, naturalUncurry, ExtraData::None);
 }
 
 /// Load the correct virtual function for the given class method.

@@ -145,7 +145,7 @@ devirtualizeReleaseOfBuffer(SILInstruction *ReleaseInst,
   DEBUG(llvm::dbgs() << "  try to devirtualize " << *ReleaseInst);
 
   // Is this a deallocation of a buffer?
-  SILFunction *DeallocFn = DeallocCall->getCalleeFunction();
+  SILFunction *DeallocFn = DeallocCall->getReferencedFunction();
   if (!DeallocFn || DeallocFn->getName() != "swift_bufferDeallocateFromStack")
     return false;
 
@@ -154,7 +154,7 @@ devirtualizeReleaseOfBuffer(SILInstruction *ReleaseInst,
   if (!AllocAI || AllocAI->getNumArguments() < 1)
     return false;
 
-  SILFunction *AllocFunc = AllocAI->getCalleeFunction();
+  SILFunction *AllocFunc = AllocAI->getReferencedFunction();
   if (!AllocFunc || AllocFunc->getName() != "swift_bufferAllocateOnStack")
     return false;
 
@@ -209,7 +209,7 @@ bool ReleaseDevirtualizer::createDeinitCall(SILType AllocType,
     DeinitType = DeinitType->substGenericArgs(M, M.getSwiftModule(),
                                               AllocSubsts);
 
-  SILType ReturnType = DeinitType->getResult().getSILType();
+  SILType ReturnType = DeinitType->getSILResult();
   SILType DeinitSILType = SILType::getPrimitiveObjectType(DeinitType);
 
   SILBuilder B(ReleaseInst);

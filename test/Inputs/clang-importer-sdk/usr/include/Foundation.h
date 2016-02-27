@@ -264,7 +264,7 @@ BOOL BOOLtoBOOL(BOOL b);
 typedef CGPoint NSPoint;
 typedef CGSize NSSize;
 typedef CGRect NSRect;
-
+typedef NSPoint *NSPointArray;
 
 @interface BadCollection
 - (id)objectForKeyedSubscript:(id)key;
@@ -1006,5 +1006,5 @@ extern NSString *NSHTTPRequestKey;
 -(void)messageSomeObject:(nonnull id)object selector:(SEL)selector;
 @end
 
-#define NSTimeIntervalSince1970  978307200.0
+#define NSTimeIntervalSince1970 978307200.0
 #define NS_DO_SOMETHING 17

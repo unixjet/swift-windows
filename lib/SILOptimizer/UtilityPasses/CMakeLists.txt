@@ -1,10 +1,11 @@
 set(UTILITYPASSES_SOURCES
   UtilityPasses/AADumper.cpp
   UtilityPasses/BasicCalleePrinter.cpp
+  UtilityPasses/BasicInstructionPropertyDumper.cpp
   UtilityPasses/ComputeDominanceInfo.cpp
   UtilityPasses/ComputeLoopInfo.cpp
   UtilityPasses/CFGPrinter.cpp
-  UtilityPasses/EpilogueReleaseMatcherDumper.cpp
+  UtilityPasses/EpilogueRetainReleaseMatcherDumper.cpp
   UtilityPasses/EscapeAnalysisDumper.cpp
   UtilityPasses/FunctionOrderPrinter.cpp
   UtilityPasses/IVInfoPrinter.cpp

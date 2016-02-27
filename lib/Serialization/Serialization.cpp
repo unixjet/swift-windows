@@ -47,6 +47,7 @@
 #include "llvm/Support/OnDiskHashTable.h"
 #include "llvm/Support/Path.h"
 #include "llvm/Support/raw_ostream.h"
+#include "llvm/Support/YAMLParser.h"
 
 #include <vector>
 
@@ -268,8 +269,7 @@ DeclID Serializer::addLocalDeclContextRef(const DeclContext *DC) {
   if (id != 0)
     return id;
 
-  LastLocalDeclContextID = LastLocalDeclContextID + 1;
-  id = LastLocalDeclContextID;
+  id = ++LastLocalDeclContextID;
   LocalDeclContextsToWrite.push(DC);
   return id;
 }
@@ -294,8 +294,7 @@ DeclContextID Serializer::addDeclContextRef(const DeclContext *DC) {
   if (id)
     return id;
 
-  LastDeclContextID = LastDeclContextID + 1;
-  id = LastDeclContextID;
+  id = ++LastDeclContextID;
   DeclContextsToWrite.push(DC);
 
   return id;
@@ -327,8 +326,7 @@ DeclID Serializer::addDeclRef(const Decl *D, bool forceSerialization) {
   if (paramList)
     GenericContexts[paramList] = D;
 
-  LastDeclID = LastDeclID + 1;
-  id = { LastDeclID, forceSerialization };
+  id = { ++LastDeclID, forceSerialization };
   DeclsAndTypesToWrite.push(D);
   return id.first;
 }
@@ -341,8 +339,7 @@ TypeID Serializer::addTypeRef(Type ty) {
   if (id.first != 0)
     return id.first;
 
-  LastTypeID = LastTypeID + 1;
-  id = { LastTypeID, true };
+  id = { ++LastTypeID, true };
   DeclsAndTypesToWrite.push(ty);
   return id.first;
 }
@@ -355,8 +352,7 @@ IdentifierID Serializer::addIdentifierRef(Identifier ident) {
   if (id != 0)
     return id;
 
-  LastIdentifierID = LastIdentifierID + 1;
-  id = LastIdentifierID;
+  id = ++LastIdentifierID;
   IdentifiersToWrite.push_back(ident);
   return id;
 }
@@ -385,8 +381,7 @@ NormalConformanceID Serializer::addConformanceRef(
   if (conformanceID)
     return conformanceID;
 
-  LastNormalConformanceID = LastNormalConformanceID + 1;
-  conformanceID = LastNormalConformanceID;
+  conformanceID = ++LastNormalConformanceID;
   NormalConformancesToWrite.push(conformance);
 
   return conformanceID;
@@ -2662,7 +2657,6 @@ static uint8_t getRawStableParameterConvention(swift::ParameterConvention pc) {
   switch (pc) {
   SIMPLE_CASE(ParameterConvention, Indirect_In)
   SIMPLE_CASE(ParameterConvention, Indirect_In_Guaranteed)
-  SIMPLE_CASE(ParameterConvention, Indirect_Out)
   SIMPLE_CASE(ParameterConvention, Indirect_Inout)
   SIMPLE_CASE(ParameterConvention, Indirect_InoutAliasable)
   SIMPLE_CASE(ParameterConvention, Direct_Owned)
@@ -2677,6 +2671,7 @@ static uint8_t getRawStableParameterConvention(swift::ParameterConvention pc) {
 /// Serialization enum values, which are guaranteed to be stable.
 static uint8_t getRawStableResultConvention(swift::ResultConvention rc) {
   switch (rc) {
+  SIMPLE_CASE(ResultConvention, Indirect)
   SIMPLE_CASE(ResultConvention, Owned)
   SIMPLE_CASE(ResultConvention, Unowned)
   SIMPLE_CASE(ResultConvention, UnownedInnerPointer)
@@ -3006,31 +3001,28 @@ void Serializer::writeType(Type ty) {
     auto stableRepresentation =
       getRawStableSILFunctionTypeRepresentation(representation);
     
-    auto interfaceResult = fnTy->getResult();
-    TypeID interfaceResultTyID = addTypeRef(interfaceResult.getType());
-    auto stableInterfaceResultConvention =
-      getRawStableResultConvention(interfaceResult.getConvention());
-
-    TypeID errorResultTyID = 0;
-    uint8_t stableErrorResultConvention = 0;
+    SmallVector<TypeID, 8> variableData;
+    for (auto param : fnTy->getParameters()) {
+      variableData.push_back(addTypeRef(param.getType()));
+      unsigned conv = getRawStableParameterConvention(param.getConvention());
+      variableData.push_back(TypeID(conv));
+    }
+    for (auto result : fnTy->getAllResults()) {
+      variableData.push_back(addTypeRef(result.getType()));
+      unsigned conv = getRawStableResultConvention(result.getConvention());
+      variableData.push_back(TypeID(conv));
+    }
     if (fnTy->hasErrorResult()) {
       auto abResult = fnTy->getErrorResult();
-      errorResultTyID = addTypeRef(abResult.getType());
-      stableErrorResultConvention =
-        getRawStableResultConvention(abResult.getConvention());
-    }
-
-    SmallVector<TypeID, 8> paramTypes;
-    for (auto param : fnTy->getParameters()) {
-      paramTypes.push_back(addTypeRef(param.getType()));
-      unsigned conv = getRawStableParameterConvention(param.getConvention());
-      paramTypes.push_back(TypeID(conv));
+      variableData.push_back(addTypeRef(abResult.getType()));
+      unsigned conv = getRawStableResultConvention(abResult.getConvention());
+      variableData.push_back(TypeID(conv));
     }
 
     auto sig = fnTy->getGenericSignature();
     if (sig) {
       for (auto param : sig->getGenericParams())
-        paramTypes.push_back(addTypeRef(param));
+        variableData.push_back(addTypeRef(param));
     }
 
     auto stableCalleeConvention =
@@ -3038,15 +3030,13 @@ void Serializer::writeType(Type ty) {
 
     unsigned abbrCode = DeclTypeAbbrCodes[SILFunctionTypeLayout::Code];
     SILFunctionTypeLayout::emitRecord(Out, ScratchRecord, abbrCode,
-          interfaceResultTyID,
-          stableInterfaceResultConvention,
-          errorResultTyID,
-          stableErrorResultConvention,
           stableCalleeConvention,
           stableRepresentation,
           fnTy->isNoReturn(),
-          sig ? sig->getGenericParams().size() : 0,
-          paramTypes);
+          fnTy->hasErrorResult(),
+          fnTy->getParameters().size(),
+          fnTy->getNumAllResults(),
+          variableData);
     if (sig)
       writeRequirements(sig->getRequirements());
     else
@@ -3488,6 +3478,103 @@ public:
 
 } // end unnamed namespace
 
+typedef llvm::StringMap<std::string> FileNameToGroupNameMap;
+typedef std::unique_ptr<FileNameToGroupNameMap> pFileNameToGroupNameMap;
+
+class YamlGroupInputParser {
+  StringRef RecordPath;
+  std::string Separator = ".";
+  static llvm::StringMap<pFileNameToGroupNameMap> AllMaps;
+
+  bool parseRoot(FileNameToGroupNameMap &Map, llvm::yaml::Node *Root,
+                 const llvm::Twine &ParentName) {
+    llvm::yaml::MappingNode *MapNode = dyn_cast<llvm::yaml::MappingNode>(Root);
+    if (!MapNode) {
+      return true;
+    }
+    for (auto Pair : *MapNode) {
+      auto *Key = dyn_cast_or_null<llvm::yaml::ScalarNode>(Pair.getKey());
+      auto *Value = dyn_cast_or_null<llvm::yaml::SequenceNode>(Pair.getValue());
+
+      if (!Key || !Value) {
+        return true;
+      }
+      llvm::SmallString<16> GroupNameStorage;
+      StringRef GroupName = Key->getValue(GroupNameStorage);
+      std::unique_ptr<llvm::Twine> pCombined;
+      if (!ParentName.isTriviallyEmpty()) {
+        pCombined.reset(new llvm::Twine(ParentName.concat(Separator).
+                                        concat(GroupName)));
+      } else {
+        pCombined.reset(new llvm::Twine(GroupName));
+      }
+      std::string CombinedName = pCombined->str();
+      for (llvm::yaml::Node &Entry : *Value) {
+        if (auto *FileEntry= dyn_cast<llvm::yaml::ScalarNode>(&Entry)) {
+          llvm::SmallString<16> FileNameStorage;
+          StringRef FileName = FileEntry->getValue(FileNameStorage);
+          Map[FileName] = CombinedName;
+        } else if (Entry.getType() == llvm::yaml::Node::NodeKind::NK_Mapping) {
+          if(parseRoot(Map, &Entry, *pCombined))
+            return true;
+        } else
+          return true;
+      }
+    }
+    return false;
+  }
+
+public:
+  YamlGroupInputParser(StringRef RecordPath): RecordPath(RecordPath) {}
+
+  FileNameToGroupNameMap* getParsedMap() {
+    return AllMaps[RecordPath].get();
+  }
+
+  // Parse the Yaml file that contains the group information.
+  // True on failure; false on success.
+  bool parse() {
+    // If we have already parsed this group info file, return false;
+    auto FindMap = AllMaps.find(RecordPath);
+    if (FindMap != AllMaps.end())
+      return false;
+
+    auto Buffer = llvm::MemoryBuffer::getFile(RecordPath);
+    if (!Buffer) {
+      // The group info file does not exist.
+      return true;
+    }
+    llvm::SourceMgr SM;
+    llvm::yaml::Stream YAMLStream(Buffer.get()->getMemBufferRef(), SM);
+    llvm::yaml::document_iterator I = YAMLStream.begin();
+    if (I == YAMLStream.end()) {
+      // Cannot parse correctly.
+      return true;
+    }
+    llvm::yaml::Node *Root = I->getRoot();
+    if (!Root) {
+      // Cannot parse correctly.
+      return true;
+    }
+
+    // The format is a map of ("group0" : ["file1", "file2"]), meaning all
+    // symbols from file1 and file2 belong to "group0".
+    llvm::yaml::MappingNode *Map = dyn_cast<llvm::yaml::MappingNode>(Root);
+    if (!Map) {
+      return true;
+    }
+    pFileNameToGroupNameMap pMap(new FileNameToGroupNameMap());
+    if(parseRoot(*pMap, Root, llvm::Twine()))
+      return true;
+
+    // Save the parsed map to the owner.
+    AllMaps[RecordPath] = std::move(pMap);
+    return false;
+  }
+};
+
+llvm::StringMap<pFileNameToGroupNameMap> YamlGroupInputParser::AllMaps;
+
 class DeclGroupNameContext {
   struct GroupNameCollector {
     const std::string NullGroupName = "";
@@ -3512,13 +3599,45 @@ class DeclGroupNameContext {
     }
   };
 
+  class GroupNameCollectorFromJson : public GroupNameCollector {
+    StringRef RecordPath;
+    FileNameToGroupNameMap* pMap = nullptr;
+
+  public:
+    GroupNameCollectorFromJson(StringRef RecordPath) :
+      GroupNameCollector(!RecordPath.empty()), RecordPath(RecordPath) {}
+    StringRef getGroupNameInternal(const ValueDecl *VD) override {
+      // We need the file path, so there has to be a location.
+      if (VD->getLoc().isInvalid())
+        return NullGroupName;
+      auto PathOp = VD->getDeclContext()->getParentSourceFile()->getBufferID();
+      if (!PathOp.hasValue())
+        return NullGroupName;
+      StringRef FullPath = StringRef(VD->getASTContext().SourceMgr.
+                                     getIdentifierForBuffer(PathOp.getValue()));
+      if (!pMap) {
+        YamlGroupInputParser Parser(RecordPath);
+        if (!Parser.parse()) {
+
+          // Get the file-name to group map if parsing correctly.
+          pMap = Parser.getParsedMap();
+        }
+      }
+      if (!pMap)
+        return NullGroupName;
+      StringRef FileName = llvm::sys::path::filename(FullPath);
+      auto Found = pMap->find(FileName);
+      return Found == pMap->end() ? NullGroupName : Found->second;
+    }
+  };
+
   llvm::MapVector<StringRef, unsigned> Map;
   std::vector<StringRef> ViewBuffer;
   std::unique_ptr<GroupNameCollector> pNameCollector;
 
 public:
-  DeclGroupNameContext(bool Enable) :
-    pNameCollector(new GroupNameCollectorFromFileName(Enable)) {}
+  DeclGroupNameContext(StringRef RecordPath) :
+    pNameCollector(new GroupNameCollectorFromJson(RecordPath)) {}
   uint32_t getGroupSequence(const ValueDecl *VD) {
     return Map.insert(std::make_pair(pNameCollector->getGroupName(VD),
                                      Map.size())).first->second;
@@ -3530,6 +3649,10 @@ public:
       ViewBuffer.push_back(It->first);
     }
     return llvm::makeArrayRef(ViewBuffer);
+  }
+
+  bool isEnable() {
+    return pNameCollector->Enable;
   }
 };
 
@@ -3558,7 +3681,6 @@ static void writeDeclCommentTable(
     llvm::SmallString<512> USRBuffer;
     llvm::OnDiskChainedHashTableGenerator<DeclCommentTableInfo> generator;
     DeclGroupNameContext &GroupContext;
-    unsigned SourceOrder = 0;
 
     DeclCommentTableWriter(DeclGroupNameContext &GroupContext) :
       GroupContext(GroupContext) {}
@@ -3576,7 +3698,7 @@ static void writeDeclCommentTable(
 
       // Skip the decl if it does not have a comment.
       RawComment Raw = VD->getRawComment();
-      if (Raw.Comments.empty())
+      if (Raw.Comments.empty() && !GroupContext.isEnable())
         return true;
 
       // Compute USR.
@@ -3900,16 +4022,9 @@ void Serializer::writeToStream(raw_ostream &os, ModuleOrSourceFile DC,
   S.writeToStream(os);
 }
 
-static bool isStdlibModule(ModuleOrSourceFile DC) {
-  if (auto M = DC.dyn_cast<ModuleDecl*>()) {
-    return M->isStdlibModule();
-  }
-  return false;
-}
-
-void Serializer::writeDocToStream(raw_ostream &os, ModuleOrSourceFile DC) {
+void Serializer::writeDocToStream(raw_ostream &os, ModuleOrSourceFile DC,
+                                  StringRef GroupInfoPath) {
   Serializer S{MODULE_DOC_SIGNATURE, DC};
-  bool isStdlib = isStdlibModule(DC);
   // FIXME: This is only really needed for debugging. We don't actually use it.
   S.writeDocBlockInfoBlock();
 
@@ -3918,7 +4033,7 @@ void Serializer::writeDocToStream(raw_ostream &os, ModuleOrSourceFile DC) {
     S.writeDocHeader();
     {
       BCBlockRAII restoreBlock(S.Out, COMMENT_BLOCK_ID, 4);
-      DeclGroupNameContext GroupContext(isStdlib);
+      DeclGroupNameContext GroupContext(GroupInfoPath);
       comment_block::DeclCommentListLayout DeclCommentList(S.Out);
       writeDeclCommentTable(DeclCommentList, S.SF, S.M, GroupContext);
       comment_block::GroupNamesLayout GroupNames(S.Out);
@@ -3998,7 +4113,7 @@ void swift::serialize(ModuleOrSourceFile DC,
     (void)withOutputFile(getContext(DC), options.DocOutputPath,
                          [&](raw_ostream &out) {
       SharedTimer timer("Serialization (swiftdoc)");
-      Serializer::writeDocToStream(out, DC);
+      Serializer::writeDocToStream(out, DC, options.GroupInfoPath);
     });
   }
 }

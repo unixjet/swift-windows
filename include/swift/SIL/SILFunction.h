@@ -491,6 +491,10 @@ public:
   /// SILFunction.
   SILType mapTypeIntoContext(SILType type) const;
 
+  /// Map the given type, which is based on a contextual SILFunctionType and may
+  /// therefore contain context archetypes, to an interface type.
+  Type mapTypeOutOfContext(Type type) const;
+
   /// Converts the given function definition to a declaration.
   void convertToDeclaration();
 
@@ -582,6 +586,18 @@ public:
   ArrayRef<SILArgument *> getArguments() const {
     assert(!empty() && "Cannot get arguments of a function without a body");
     return begin()->getBBArgs();
+  }
+
+  ArrayRef<SILArgument *> getIndirectResults() const {
+    assert(!empty() && "Cannot get arguments of a function without a body");
+    return begin()->getBBArgs().slice(0,
+                            getLoweredFunctionType()->getNumIndirectResults());
+  }
+
+  ArrayRef<SILArgument *> getArgumentsWithoutIndirectResults() const {
+    assert(!empty() && "Cannot get arguments of a function without a body");
+    return begin()->getBBArgs().slice(
+                            getLoweredFunctionType()->getNumIndirectResults());
   }
 
   const SILArgument *getSelfArgument() const {

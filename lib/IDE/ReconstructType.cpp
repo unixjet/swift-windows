@@ -19,6 +19,7 @@
 #include "clang/Basic/TargetOptions.h"
 #include "llvm/ADT/ArrayRef.h"
 #include "llvm/ADT/StringRef.h"
+#include "llvm/Support/ErrorHandling.h"
 #include "llvm/Support/MemoryBuffer.h"
 #include "llvm/Support/Process.h"
 #include "llvm/Support/TargetRegistry.h"
@@ -313,13 +314,6 @@ public:
           }
           return;
         }
-        else
-        {
-          const bool allow_crawler = false;
-          if (!_crawler._module.empty())
-            GetDeclsLookupSource(*ast_ctx, ConstString(_crawler._module),
-                                 allow_crawler).lookupQualified(name, options, typeResolver, result);
-        }
       }
     }
     else if (_type == Type::SwiftModule)
@@ -352,14 +346,6 @@ public:
             iter++;
           }
           return;
-        }
-        else
-        {
-          const bool allow_crawler = false;
-          if (!_crawler._module.empty())
-            GetDeclsLookupSource(*ast_ctx, ConstString(_crawler._module),
-                                 allow_crawler).lookupValue(path, name, kind,
-                                                            result);
         }
       }
     }
@@ -449,7 +435,6 @@ public:
         break;
       case Type::Crawler:
         _crawler._ast = rhs._crawler._ast;
-        _crawler._module = rhs._crawler._module;
         break;
       case Type::SwiftModule:
         _module = rhs._module;
@@ -478,7 +463,6 @@ public:
           break;
         case Type::Crawler:
           _crawler._ast = rhs._crawler._ast;
-          _crawler._module = rhs._crawler._module;
           break;
         case Type::SwiftModule:
           _module = rhs._module;
@@ -563,7 +547,6 @@ private:
     swift::ModuleDecl *_module;
     struct {
       swift::ASTContext* _ast;
-      std::string _module;
     } _crawler;
     swift::NominalTypeDecl *_decl;
     struct {
@@ -590,7 +573,6 @@ private:
     if (_a)
     {
       _crawler._ast = _a;
-      _crawler._module = _m.data();
       _type = Type::Crawler;
     }
     else
@@ -967,6 +949,7 @@ GetKindAsDeclKind (swift::Demangle::Node::Kind node_kind)
       printf ("Missing alias for %s.\n", SwiftDemangleNodeKindToCString(node_kind));
       assert (0);
   }
+  llvm_unreachable("Invalid case");
 }
 
 // This should be called with a function type & its associated Decl.  If the type is not a function type,

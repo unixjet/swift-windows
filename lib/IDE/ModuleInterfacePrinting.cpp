@@ -62,11 +62,33 @@ private:
   void printDeclNameOrSignatureEndLoc(const Decl *D) override {
     return OtherPrinter.printDeclNameOrSignatureEndLoc(D);
   }
+  void printTypePre(const TypeLoc &TL) override {
+    return OtherPrinter.printTypePre(TL);
+  }
+  void printTypePost(const TypeLoc &TL) override {
+    return OtherPrinter.printTypePost(TL);
+  }
   void printTypeRef(const TypeDecl *TD, Identifier Name) override {
     return OtherPrinter.printTypeRef(TD, Name);
   }
   void printModuleRef(ModuleEntity Mod, Identifier Name) override {
     return OtherPrinter.printModuleRef(Mod, Name);
+  }
+  void printSynthesizedExtensionPre(const ExtensionDecl *ED,
+                                    const NominalTypeDecl *NTD) override {
+    return OtherPrinter.printSynthesizedExtensionPre(ED, NTD);
+  }
+
+  void printSynthesizedExtensionPost(const ExtensionDecl *ED,
+                                     const NominalTypeDecl *NTD) override {
+    return OtherPrinter.printSynthesizedExtensionPost(ED, NTD);
+  }
+
+  void printNamePre(PrintNameContext Context) override {
+    return OtherPrinter.printNamePre(Context);
+  }
+  void printNamePost(PrintNameContext Context) override {
+    return OtherPrinter.printNamePost(Context);
   }
 
   // Prints regular comments of the header the clang node comes from, until
@@ -120,8 +142,9 @@ void swift::ide::printModuleInterface(Module *M,
                                       ASTPrinter &Printer,
                                       const PrintOptions &Options,
                                       const bool PrintSynthesizedExtensions) {
-  printSubmoduleInterface(M, M->getName().str(), None, TraversalOptions, Printer,
-                          Options, PrintSynthesizedExtensions);
+  printSubmoduleInterface(M, M->getName().str(), ArrayRef<StringRef>(),
+                          TraversalOptions, Printer, Options,
+                          PrintSynthesizedExtensions);
 }
 
 static void adjustPrintOptions(PrintOptions &AdjustedOptions) {
@@ -166,10 +189,21 @@ void findExtensionsFromConformingProtocols(Decl *D,
   }
 }
 
+ArrayRef<StringRef>
+swift::ide::collectModuleGroups(Module *M, std::vector<StringRef> &Scratch) {
+  for (auto File : M->getFiles()) {
+    File->collectAllGroups(Scratch);
+  }
+  std::sort(Scratch.begin(), Scratch.end(), [](StringRef L, StringRef R) {
+    return L.compare_lower(R) < 0;
+  });
+  return llvm::makeArrayRef(Scratch);
+}
+
 void swift::ide::printSubmoduleInterface(
        Module *M,
        ArrayRef<StringRef> FullModuleName,
-       Optional<StringRef> GroupName,
+       ArrayRef<StringRef> GroupNames,
        ModuleTraversalOptions TraversalOptions,
        ASTPrinter &Printer,
        const PrintOptions &Options,
@@ -312,9 +346,14 @@ void swift::ide::printSubmoduleInterface(
     }
     if (FullModuleName.empty()) {
       // If group name is given and the decl does not belong to the group, skip it.
-      if (GroupName && (!D->getGroupName() ||
-                        D->getGroupName().getValue() != GroupName.getValue()))
+      if (!GroupNames.empty()){
+        if (auto Target = D->getGroupName()) {
+          if (std::find(GroupNames.begin(), GroupNames.end(),
+                        Target.getValue()) != GroupNames.end())
+             SwiftDecls.push_back(D);
+        }
         continue;
+      }
       // Add Swift decls if we are printing the top-level module.
       SwiftDecls.push_back(D);
     }
@@ -352,7 +391,7 @@ void swift::ide::printSubmoduleInterface(
 
   // If the group name is specified, we sort them according to their source order,
   // which is the order preserved by getTopLeveDecls.
-  if (!GroupName) {
+  if (GroupNames.empty()) {
     std::sort(SwiftDecls.begin(), SwiftDecls.end(),
       [&](Decl *LHS, Decl *RHS) -> bool {
         auto *LHSValue = dyn_cast<ValueDecl>(LHS);
@@ -434,9 +473,6 @@ void swift::ide::printSubmoduleInterface(
           for (auto ET : ExtensionsFromConformances) {
             if (!shouldPrint(ET, AdjustedOptions))
               continue;
-            Printer << "\n";
-            Printer << "/// Synthesized extension from ";
-            ET->getExtendedTypeLoc().getType().print(Printer, AdjustedOptions);
             Printer << "\n";
             ET->print(Printer, AdjustedOptions);
             Printer << "\n";
@@ -614,19 +650,29 @@ void ClangCommentPrinter::avoidPrintDeclPost(const Decl *D) {
 }
 
 void ClangCommentPrinter::printDeclPre(const Decl *D) {
-  if (auto ClangN = D->getClangNode()) {
-    printCommentsUntil(ClangN);
-    if (shouldPrintNewLineBefore(ClangN)) {
-      *this << "\n";
-      printIndent();
+  // Skip parameters, since we do not gracefully handle nested declarations on a
+  // single line.
+  // FIXME: we should fix that, since it also affects struct members, etc.
+  if (!isa<ParamDecl>(D)) {
+    if (auto ClangN = D->getClangNode()) {
+      printCommentsUntil(ClangN);
+      if (shouldPrintNewLineBefore(ClangN)) {
+        *this << "\n";
+        printIndent();
+      }
+      updateLastEntityLine(ClangN.getSourceRange().getBegin());
     }
-    updateLastEntityLine(ClangN.getSourceRange().getBegin());
   }
   return OtherPrinter.printDeclPre(D);
 }
 
 void ClangCommentPrinter::printDeclPost(const Decl *D) {
   OtherPrinter.printDeclPost(D);
+
+  // Skip parameters; see printDeclPre().
+  if (isa<ParamDecl>(D))
+    return;
+
   for (auto CommentText : PendingComments) {
     *this << " " << ASTPrinter::sanitizeUtf8(CommentText);
   }

@@ -1902,7 +1902,7 @@ ParserStatus Parser::parseDecl(SmallVectorImpl<Decl*> &Entries,
     // 'class' is a modifier on func, but is also a top-level decl.
     case tok::kw_class: {
       SourceLoc ClassLoc = consumeToken(tok::kw_class);
-      
+
       // If 'class' is a modifier on another decl kind, like var or func,
       // then treat it as a modifier.
       if (isStartOfDecl()) {
@@ -1916,7 +1916,7 @@ ParserStatus Parser::parseDecl(SmallVectorImpl<Decl*> &Entries,
         }
         continue;
       }
-      
+
       // Otherwise this is the start of a class declaration.
       DeclResult = parseDeclClass(ClassLoc, Flags, Attributes);
       Status = DeclResult;
@@ -1991,7 +1991,7 @@ ParserStatus Parser::parseDecl(SmallVectorImpl<Decl*> &Entries,
         parseNewDeclAttribute(Attributes, /*AtLoc*/ {}, DAK_Convenience);
         continue;
       }
-        
+
       // Otherwise this is not a context-sensitive keyword.
       SWIFT_FALLTHROUGH;
 
@@ -2005,13 +2005,28 @@ ParserStatus Parser::parseDecl(SmallVectorImpl<Decl*> &Entries,
                                                   false);
         }
       }
+
       diagnose(Tok, diag::expected_decl);
+
+      if (CurDeclContext) {
+        if (auto nominal = dyn_cast<NominalTypeDecl>(CurDeclContext)) {
+          diagnose(nominal->getLoc(), diag::note_in_decl_extension, false,
+                   nominal->getName());
+        } else if (auto extension = dyn_cast<ExtensionDecl>(CurDeclContext)) {
+          if (auto repr = extension->getExtendedTypeLoc().getTypeRepr()) {
+            if (auto idRepr = dyn_cast<IdentTypeRepr>(repr)) {
+              diagnose(extension->getLoc(), diag::note_in_decl_extension, true,
+                idRepr->getComponentRange().front()->getIdentifier());
+            }
+          }
+        }
+      }
       return makeParserErrorResult<Decl>();
-  
+
     case tok::unknown:
       consumeToken(tok::unknown);
       continue;
-        
+
     // Unambiguous top level decls.
     case tok::kw_import:
       DeclResult = parseDeclImport(Flags, Attributes);
@@ -2113,7 +2128,7 @@ ParserStatus Parser::parseDecl(SmallVectorImpl<Decl*> &Entries,
       }
       break;
     }
-  
+
     // If we 'break' out of the switch, break out of the loop too.
     break;
   }
@@ -2684,6 +2699,7 @@ ParserResult<IfConfigDecl> Parser::parseDeclIfConfig(ParseDeclOptions Flags) {
 /// \verbatim
 ///   decl-typealias:
 ///     'typealias' identifier inheritance? '=' type
+///     'associatedtype' identifier inheritance? '=' type
 /// \endverbatim
 ParserResult<TypeDecl> Parser::parseDeclTypeAlias(bool WantDefinition,
                                                   bool isAssociatedType,
@@ -2699,10 +2715,11 @@ ParserResult<TypeDecl> Parser::parseDeclTypeAlias(bool WantDefinition,
     }
   } else {
     if (consumeIf(tok::kw_associatedtype, TypeAliasLoc)) {
-      diagnose(TypeAliasLoc, diag::associatedtype_outside_protocol);
-      return makeParserErrorResult<TypeDecl>();
+      diagnose(TypeAliasLoc, diag::associatedtype_outside_protocol)
+        .fixItReplace(TypeAliasLoc, "typealias");
+    } else {
+      TypeAliasLoc = consumeToken(tok::kw_typealias);
     }
-    TypeAliasLoc = consumeToken(tok::kw_typealias);
   }
   
   Identifier Id;
@@ -3779,6 +3796,10 @@ ParserStatus Parser::parseDeclVar(ParseDeclOptions Flags,
   // so we can build our singular PatternBindingDecl at the end.
   SmallVector<PatternBindingEntry, 4> PBDEntries;
 
+  bool HasBehavior = false;
+  SourceLoc BehaviorLBracket, BehaviorRBracket;
+  TypeRepr *BehaviorType;
+
   // No matter what error path we take, make sure the
   // PatternBindingDecl/TopLevel code block are added.
   defer {
@@ -3822,6 +3843,27 @@ ParserStatus Parser::parseDeclVar(ParseDeclOptions Flags,
     // want.
     Decls.insert(Decls.begin()+NumDeclsInResult, PBD);
   };
+  
+  // Check for a behavior declaration.
+  if (Context.LangOpts.EnableExperimentalPropertyBehaviors
+      && Tok.is(tok::l_square)) {
+    BehaviorLBracket = consumeToken(tok::l_square);
+    // TODO: parse visibility (public/private/internal)
+    auto type = parseType(diag::expected_behavior_name,
+                          /*handle completion*/ true);
+    // TODO: recovery. could scan to next closing bracket
+    if (type.isParseError())
+      return makeParserError();
+    if (type.hasCodeCompletion())
+      return makeParserCodeCompletionStatus();
+    BehaviorType = type.get();
+    if (!Tok.is(tok::r_square)) {
+      diagnose(Tok.getLoc(), diag::expected_rsquare_after_behavior_name);
+      return makeParserError();
+    }
+    BehaviorRBracket = consumeToken(tok::r_square);
+    HasBehavior = true;
+  }
 
   do {
     Pattern *pattern;
@@ -3842,6 +3884,8 @@ ParserStatus Parser::parseDeclVar(ParseDeclOptions Flags,
     // Configure all vars with attributes, 'static' and parent pattern.
     pattern->forEachVariable([&](VarDecl *VD) {
       VD->setStatic(StaticLoc.isValid());
+      if (HasBehavior)
+        VD->addBehavior(BehaviorLBracket, BehaviorType, BehaviorRBracket);
       VD->getAttrs() = Attributes;
       Decls.push_back(VD);
     });

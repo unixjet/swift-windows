@@ -342,15 +342,19 @@ public:
       return true;
     };
     
-    // Check the return value.
-    
-    auto result1 = type1->getResult();
-    auto result2 = type2->getResult();
-    _require(result1.getConvention() == result2.getConvention(), what,
-             complain("Different return value conventions"));
-    _require(areABICompatibleParamsOrReturns(result1.getSILType(),
-                                             result2.getSILType()), what,
-             complain("ABI-incompatible return values"));
+    // Check the results.
+    _require(type1->getNumAllResults() == type2->getNumAllResults(),
+             what, complain("different number of results"));
+    for (unsigned i : indices(type1->getAllResults())) {
+      auto result1 = type1->getAllResults()[i];
+      auto result2 = type2->getAllResults()[i];
+
+      _require(result1.getConvention() == result2.getConvention(), what,
+               complain("Different return value conventions"));
+      _require(areABICompatibleParamsOrReturns(result1.getSILType(),
+                                               result2.getSILType()), what,
+               complain("ABI-incompatible return values"));
+    }
 
     // Our error result conventions are designed to be ABI compatible
     // with functions lacking error results.  Just make sure that the
@@ -390,8 +394,12 @@ public:
   void requireSameFunctionComponents(CanSILFunctionType type1,
                                      CanSILFunctionType type2,
                                      const Twine &what) {
-    require(type1->getResult() == type2->getResult(),
-            "result types of " + what + " do not match");
+    require(type1->getNumAllResults() == type2->getNumAllResults(),
+            "results of " + what + " do not match in count");
+    for (auto i : indices(type1->getAllResults())) {
+      require(type1->getAllResults()[i] == type2->getAllResults()[i],
+              "result " + Twine(i) + " of " + what + " do not match");
+    }
     require(type1->getParameters().size() ==
             type2->getParameters().size(),
             "inputs of " + what + " do not match in count");
@@ -523,9 +531,8 @@ public:
     SILLocation::LocationKind LocKind = L.getKind();
     ValueKind InstKind = I->getKind();
 
-    // Regular locations and SIL file locations are allowed on all instructions.
-    if (LocKind == SILLocation::RegularKind ||
-        LocKind == SILLocation::SILFileKind)
+    // Regular locations are allowed on all instructions.
+    if (LocKind == SILLocation::RegularKind)
       return;
 
 #if 0
@@ -696,13 +703,19 @@ public:
             "substituted callee type does not match substitutions");
 
     // Check that the arguments and result match.
-    require(site.getArguments().size() ==
-            substTy->getParameters().size(),
+    require(site.getArguments().size() == substTy->getNumSILArguments(),
             "apply doesn't have right number of arguments for function");
+    auto numIndirects = substTy->getNumIndirectResults();
     for (size_t i = 0, size = site.getArguments().size(); i < size; ++i) {
-      requireSameType(site.getArguments()[i]->getType(),
-                      substTy->getParameters()[i].getSILType(),
-                      "operand of 'apply' doesn't match function input type");
+      if (i < numIndirects) {
+        requireSameType(site.getArguments()[i]->getType(),
+                        substTy->getIndirectResults()[i].getSILType(),
+                        "operand of 'apply' doesn't match function input type");
+      } else {
+        requireSameType(site.getArguments()[i]->getType(),
+                        substTy->getParameters()[i - numIndirects].getSILType(),
+                        "operand of 'apply' doesn't match function input type");
+      }
     }
   }
 
@@ -710,7 +723,7 @@ public:
     checkFullApplySite(AI);
 
     auto substTy = AI->getSubstCalleeType();
-    require(AI->getType() == substTy->getResult().getSILType(),
+    require(AI->getType() == substTy->getSILResult(),
             "type of apply instruction doesn't match function result type");
     if (AI->isNonThrowing()) {
       require(substTy->hasErrorResult(),
@@ -738,7 +751,7 @@ public:
     require(normalBB->bbarg_size() == 1,
             "normal destination of try_apply must take one argument");
     requireSameType((*normalBB->bbarg_begin())->getType(),
-                    substTy->getResult().getSILType(),
+                    substTy->getSILResult(),
                     "normal destination of try_apply must take argument "
                     "of normal result type");
 
@@ -845,22 +858,28 @@ public:
               "inputs to result function type do not match unapplied inputs "
               "of original function");
     }
-    
-    // The "returns inner pointer" convention doesn't survive through a partial
-    // application, since the thunk takes responsibility for lifetime-extending
-    // 'self'.
-    auto expectedResult = substTy->getResult();
-    if (expectedResult.getConvention() == ResultConvention::UnownedInnerPointer)
-    {
-      expectedResult = SILResultInfo(expectedResult.getType(),
-                                     ResultConvention::Unowned);
-      require(resultInfo->getResult() == expectedResult,
-              "result type of result function type for partially applied "
-              "@unowned_inner_pointer function should have @unowned convention");
-    } else {
-      require(resultInfo->getResult() == expectedResult,
-              "result type of result function type does not match original "
-              "function");
+
+    require(resultInfo->getNumAllResults() == substTy->getNumAllResults(),
+            "applied results do not agree in count with function type");
+    for (unsigned i = 0, size = resultInfo->getNumAllResults(); i < size; ++i) {
+      auto expectedResult = substTy->getAllResults()[i];
+
+      // The "returns inner pointer" convention doesn't survive through a
+      // partial application, since the thunk takes responsibility for
+      // lifetime-extending 'self'.
+      if (expectedResult.getConvention()
+            == ResultConvention::UnownedInnerPointer) {
+        expectedResult = SILResultInfo(expectedResult.getType(),
+                                       ResultConvention::Unowned);
+        require(resultInfo->getAllResults()[i] == expectedResult,
+                "result type of result function type for partially applied "
+                "@unowned_inner_pointer function should have @unowned"
+                "convention");
+      } else {
+        require(resultInfo->getAllResults()[i] == expectedResult,
+                "result type of result function type does not match original "
+                "function");
+      }
     }
   }
 
@@ -940,6 +959,8 @@ public:
   }
   void checkLoadInst(LoadInst *LI) {
     require(LI->getType().isObject(), "Result of load must be an object");
+    require(LI->getType().isLoadable(LI->getModule()),
+            "Load must have a loadable type");
     require(LI->getOperand()->getType().isAddress(),
             "Load operand must be an address");
     require(LI->getOperand()->getType().getObjectType() == LI->getType(),
@@ -949,6 +970,8 @@ public:
   void checkStoreInst(StoreInst *SI) {
     require(SI->getSrc()->getType().isObject(),
             "Can't store from an address source");
+    require(SI->getSrc()->getType().isLoadable(SI->getModule()),
+            "Can't store a non loadable type");
     require(SI->getDest()->getType().isAddress(),
             "Must store to an address dest");
     require(SI->getDest()->getType().getObjectType() == SI->getSrc()->getType(),
@@ -1565,8 +1588,8 @@ public:
       auto conformance = AMI->getConformance().getConcrete();
       require(conformance->getType()->isEqual(AMI->getLookupType()),
               "concrete type lookup requires conformance that matches type");
-      require(AMI->getModule().lookUpWitnessTable(conformance, false).first,
-              "Could not find witness table for conformance.");
+      require(AMI->getModule().lookUpWitnessTable(conformance, false),
+              "Could not find witness table for conformance");
     }
   }
 
@@ -1592,18 +1615,21 @@ public:
       dynParams(params.begin(), params.end() - 1);
     dynParams.push_back(SILParameterInfo(selfType.getSwiftRValueType(),
                                          params.back().getConvention()));
-    
-    auto dynResult = methodTy->getResult();
+
+    auto results = methodTy->getAllResults();
+    SmallVector<SILResultInfo, 4> dynResults(results.begin(), results.end());    
 
     // If the method returns Self, substitute AnyObject for the result type.
     if (auto fnDecl = dyn_cast<FuncDecl>(method.getDecl())) {
       if (fnDecl->hasDynamicSelf()) {
         auto anyObjectTy = C.getProtocol(KnownProtocolKind::AnyObject)
                              ->getDeclaredType();
-        auto newResultTy
-          = dynResult.getType()->replaceCovariantResultType(anyObjectTy, 0);
-        dynResult = SILResultInfo(newResultTy->getCanonicalType(),
-                                  dynResult.getConvention());
+        for (auto &dynResult : dynResults) {
+          auto newResultTy
+            = dynResult.getType()->replaceCovariantResultType(anyObjectTy, 0);
+          dynResult = SILResultInfo(newResultTy->getCanonicalType(),
+                                    dynResult.getConvention());
+        }
       }
     }
 
@@ -1611,7 +1637,7 @@ public:
                                      methodTy->getExtInfo(),
                                      methodTy->getCalleeConvention(),
                                      dynParams,
-                                     dynResult,
+                                     dynResults,
                                      methodTy->getOptionalErrorResult(),
                                      F.getASTContext());
     return SILType::getPrimitiveObjectType(fnTy);
@@ -1923,7 +1949,7 @@ public:
 
       if (conformances[i].isConcrete()) {
         auto conformance = conformances[i].getConcrete();
-        require(F.getModule().lookUpWitnessTable(conformance, false).first,
+        require(F.getModule().lookUpWitnessTable(conformance, false),
                 "Could not find witness table for conformance.");
 
       }
@@ -2314,8 +2340,7 @@ public:
     DEBUG(RI->print(llvm::dbgs()));
 
     CanSILFunctionType ti = F.getLoweredFunctionType();
-    SILType functionResultType
-      = F.mapTypeIntoContext(ti->getResult().getSILType());
+    SILType functionResultType = F.mapTypeIntoContext(ti->getSILResult());
     SILType instResultType = RI->getOperand()->getType();
     DEBUG(llvm::dbgs() << "function return type: ";
           functionResultType.dump();
@@ -2453,9 +2478,12 @@ public:
 
       seenCaseValues.insert(elt);
 
+      requireSameType(I->getOperand()->getType(), casevalue->getType(),
+                      "select_value case value must match type of operand");
+
       // The result value must match the type of the instruction.
       requireSameType(result->getType(), I->getType(),
-                    "select_value case operand must match type of instruction");
+                    "select_value case result must match type of instruction");
     }
 
     require(I->hasDefault(),
@@ -2684,8 +2712,8 @@ public:
     require(blockTy, "result must be a function");
     require(blockTy->getRepresentation() == SILFunctionType::Representation::Block,
             "result must be a cdecl block function");
-    require(blockTy->getResult() == invokeTy->getResult(),
-            "result must have same return type as invoke function");
+    require(blockTy->getAllResults() == invokeTy->getAllResults(),
+            "result must have same results as invoke function");
     
     require(blockTy->getParameters().size() + 1
               == invokeTy->getParameters().size(),
@@ -2751,27 +2779,37 @@ public:
           for (auto input : ti->getParameters())
             input.getSILType().dump(););
 
-    require(entry->bbarg_size() == ti->getParameters().size(),
+    require(entry->bbarg_size() ==
+              ti->getNumIndirectResults() + ti->getParameters().size(),
             "entry point has wrong number of arguments");
 
+    bool matched = true;
+    auto argI = entry->bbarg_begin();
 
-    require(std::equal(entry->bbarg_begin(), entry->bbarg_end(),
-                      ti->getParameterSILTypes().begin(),
-                      [&](SILArgument *bbarg, SILType ty) {
-                        auto mappedTy = F.mapTypeIntoContext(ty);
-                        if (bbarg->getType() != mappedTy) {
-                          llvm::errs() << "argument type mismatch!\n";
-                          llvm::errs() << "  argument: "; bbarg->dump();
-                          llvm::errs() << "  expected: "; mappedTy.dump();
-                          return false;
-                        }
-                        return true;
-                      }),
-            "entry point argument types do not match function type");
+    auto check = [&](const char *what, SILType ty) {
+      auto mappedTy = F.mapTypeIntoContext(ty);
+      SILArgument *bbarg = *argI++;
+      if (bbarg->getType() != mappedTy) {
+        llvm::errs() << what << " type mismatch!\n";
+        llvm::errs() << "  argument: "; bbarg->dump();
+        llvm::errs() << "  expected: "; mappedTy.dump();
+        matched = false;
+      }
+    };
 
+    for (auto result : ti->getIndirectResults()) {
+      assert(result.isIndirect());
+      check("result", result.getSILType());
+    }
+    for (auto param : ti->getParameters()) {
+      check("parameter", param.getSILType());
+    }
+
+    require(matched, "entry point argument types do not match function type");
 
     // TBAA requirement for all address arguments.
-    require(std::equal(entry->bbarg_begin(), entry->bbarg_end(),
+    require(std::equal(entry->bbarg_begin() + ti->getNumIndirectResults(),
+                       entry->bbarg_end(),
                        ti->getParameters().begin(),
                        [&](SILArgument *bbarg, SILParameterInfo paramInfo) {
                          if (!bbarg->getType().isAddress())
@@ -2782,7 +2820,6 @@ public:
                          case ParameterConvention::Indirect_In:
                          case ParameterConvention::Indirect_Inout:
                          case ParameterConvention::Indirect_InoutAliasable:
-                         case ParameterConvention::Indirect_Out:
                          case ParameterConvention::Indirect_In_Guaranteed:
                            return true;
                          }
@@ -2833,17 +2870,6 @@ public:
     require(!FTy->hasSelfParam() || !FTy->getParameters().empty(),
             "Functions with a calling convention with self parameter must "
             "have at least one argument for self.");
-
-    // Make sure that FTy does not have any out parameters except for the first
-    // parameter.
-    if (FTy->getParameters().size() < 2)
-      return;
-
-    for (SILParameterInfo PInfo : FTy->getParameters().slice(1)) {
-      require(!PInfo.isIndirectResult(),
-              "Indirect results can only be the first argument of a "
-              "SILFunction.");
-    }
   }
 
   void verifyStackHeight(SILFunction *F) {

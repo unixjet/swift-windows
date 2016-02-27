@@ -952,14 +952,9 @@ SourceRange PatternBindingDecl::getSourceRange() const {
 }
 
 static StaticSpellingKind getCorrectStaticSpellingForDecl(const Decl *D) {
-  auto StaticSpelling = StaticSpellingKind::KeywordStatic;
-  if (Type T = D->getDeclContext()->getDeclaredTypeInContext()) {
-    if (auto NTD = T->getAnyNominal()) {
-      if (isa<ClassDecl>(NTD))
-        StaticSpelling = StaticSpellingKind::KeywordClass;
-    }
-  }
-  return StaticSpelling;
+  if (D->getDeclContext()->getAsClassOrClassExtensionContext())
+    return StaticSpellingKind::KeywordClass;
+  return StaticSpellingKind::KeywordStatic;
 }
 
 StaticSpellingKind PatternBindingDecl::getCorrectStaticSpelling() const {
@@ -1015,11 +1010,10 @@ SourceRange IfConfigDecl::getSourceRange() const {
 }
 
 static bool isPolymorphic(const AbstractStorageDecl *storage) {
-  auto ctx = storage->getDeclContext()->getDeclaredTypeInContext();
-  if (!ctx) return false;
+  auto nominal = storage->getDeclContext()
+      ->getAsNominalTypeOrNominalTypeExtensionContext();
+  if (!nominal) return false;
 
-  auto nominal = ctx->getNominalOrBoundGenericNominal();
-  assert(nominal && "context wasn't a nominal type?");
   switch (nominal->getKind()) {
 #define DECL(ID, BASE) case DeclKind::ID:
 #define NOMINAL_TYPE_DECL(ID, BASE)
@@ -2738,6 +2732,16 @@ void AbstractStorageDecl::setComputedSetter(FuncDecl *Set) {
   }
 }
 
+void AbstractStorageDecl::addBehavior(SourceLoc LBracketLoc,
+                                      TypeRepr *Type,
+                                      SourceLoc RBracketLoc) {
+  assert(BehaviorInfo.getPointer() == nullptr && "already set behavior!");
+  auto mem = getASTContext().Allocate(sizeof(BehaviorRecord),
+                                      alignof(BehaviorRecord));
+  auto behavior = new (mem) BehaviorRecord{LBracketLoc, Type, RBracketLoc};
+  BehaviorInfo.setPointer(behavior);
+}
+
 void AbstractStorageDecl::makeComputedWithMutableAddress(SourceLoc lbraceLoc,
                                                 FuncDecl *get, FuncDecl *set,
                                                 FuncDecl *materializeForSet,
@@ -2932,9 +2936,15 @@ ObjCSelector AbstractStorageDecl::getObjCGetterSelector(
     }
   }
 
-  // The getter selector is the property name itself.
+  // If the Swift name starts with the word "is", use that Swift name as the
+  // getter name.
   auto var = cast<VarDecl>(this);
-  return VarDecl::getDefaultObjCGetterSelector(ctx, var->getObjCPropertyName());
+  if (ctx.LangOpts.OmitNeedlessWords &&
+      camel_case::getFirstWord(var->getName().str()) == "is")
+    return ObjCSelector(ctx, 0, { var->getName() });
+
+  // The getter selector is the property name itself.
+  return ObjCSelector(ctx, 0, { var->getObjCPropertyName() });
 }
 
 ObjCSelector AbstractStorageDecl::getObjCSetterSelector(
@@ -3039,8 +3049,8 @@ bool VarDecl::isSettable(const DeclContext *UseDC,
     // If this init is defined inside of the same type (or in an extension
     // thereof) as the let property, then it is mutable.
     if (!CDC->isTypeContext() ||
-        CDC->getDeclaredTypeInContext()->getAnyNominal() !=
-        getDeclContext()->getDeclaredTypeInContext()->getAnyNominal())
+        CDC->getAsNominalTypeOrNominalTypeExtensionContext() !=
+        getDeclContext()->getAsNominalTypeOrNominalTypeExtensionContext())
       return false;
 
     if (base && CD->getImplicitSelfDecl() != base->getDecl())
@@ -3213,21 +3223,26 @@ Identifier VarDecl::getObjCPropertyName() const {
       return name->getSelectorPieces()[0];
   }
 
+  // If the Swift property name starts with the word "is", strip the
+  // "is" and lowercase the rest when forming the Objective-C property
+  // name.
+  ASTContext &ctx = getASTContext();
+  StringRef nameStr = getName().str();
+  if (ctx.LangOpts.OmitNeedlessWords &&
+      camel_case::getFirstWord(nameStr) == "is") {
+    SmallString<16> scratch;
+    return ctx.getIdentifier(camel_case::toLowercaseWord(nameStr.substr(2),
+                                                         scratch));
+  }
+
   return getName();
 }
-
-ObjCSelector VarDecl::getDefaultObjCGetterSelector(ASTContext &ctx,
-                                                   Identifier propertyName) {
-  return ObjCSelector(ctx, 0, propertyName);
-}
-
 
 ObjCSelector VarDecl::getDefaultObjCSetterSelector(ASTContext &ctx,
                                                    Identifier propertyName) {
   llvm::SmallString<16> scratch;
   scratch += "set";
   camel_case::appendSentenceCase(scratch, propertyName.str());
-
   return ObjCSelector(ctx, 1, ctx.getIdentifier(scratch));
 }
 
@@ -3300,7 +3315,32 @@ ParamDecl::ParamDecl(ParamDecl *PD)
 
 
 /// \brief Retrieve the type of 'self' for the given context.
-static Type getSelfTypeForContext(DeclContext *dc) {
+Type DeclContext::getSelfTypeInContext() const {
+  // For a protocol or extension thereof, the type is 'Self'.
+  if (getAsProtocolOrProtocolExtensionContext()) {
+    // In the parser, generic parameters won't be wired up yet, just give up on
+    // producing a type.
+    if (getGenericParamsOfContext() == nullptr)
+      return Type();
+    return getProtocolSelf()->getArchetype();
+  }
+  return getDeclaredTypeInContext();
+}
+
+/// \brief Retrieve the interface type of 'self' for the given context.
+Type DeclContext::getSelfInterfaceType() const {
+  // For a protocol or extension thereof, the type is 'Self'.
+  if (getAsProtocolOrProtocolExtensionContext()) {
+    if (getGenericParamsOfContext() == nullptr)
+      return Type();
+    return getProtocolSelf()->getDeclaredType();
+  }
+  return getDeclaredInterfaceType();
+}
+
+/// \brief Retrieve the type of 'self' for the given context.
+/// FIXME: Can this be integrated with getSelfTypeInContext above?
+static Type getSelfTypeOfContext(DeclContext *dc) {
   // For a protocol or extension thereof, the type is 'Self'.
   // FIXME: Weird that we're producing an archetype for protocol Self,
   // but the declared type of the context in non-protocol cases.
@@ -3314,7 +3354,6 @@ static Type getSelfTypeForContext(DeclContext *dc) {
   return dc->getDeclaredTypeOfContext();
 }
 
-
 /// Create an implicit 'self' decl for a method in the specified decl context.
 /// If 'static' is true, then this is self for a static method in the type.
 ///
@@ -3325,7 +3364,7 @@ static Type getSelfTypeForContext(DeclContext *dc) {
 ParamDecl *ParamDecl::createSelf(SourceLoc loc, DeclContext *DC,
                                  bool isStaticMethod, bool isInOut) {
   ASTContext &C = DC->getASTContext();
-  auto selfType = getSelfTypeForContext(DC);
+  auto selfType = getSelfTypeOfContext(DC);
 
   // If we have a selfType (i.e. we're not in the parser before we know such
   // things, configure it.
@@ -4106,8 +4145,10 @@ SourceRange FuncDecl::getSourceRange() const {
       getBodyKind() == BodyKind::Skipped)
     return { StartLoc, BodyRange.End };
 
-  if (auto *B = getBody())
-    return { StartLoc, B->getEndLoc() };
+  if (auto *B = getBody()) {
+    if (!B->isImplicit())
+      return { StartLoc, B->getEndLoc() };
+  }
   if (getBodyResultTypeLoc().hasLocation() &&
       getBodyResultTypeLoc().getSourceRange().End.isValid() &&
       !this->isAccessor())
@@ -4342,8 +4383,7 @@ ConstructorDecl::getDelegatingOrChainedInitKind(DiagnosticEngine *diags,
   // If wes till don't know, check whether we have a class with a superclass: it
   // gets an implicit chained initializer.
   if (Kind == BodyInitKind::None) {
-    if (auto classDecl = getDeclContext()->getDeclaredTypeInContext()
-                           ->getClassOrBoundGenericClass()) {
+    if (auto classDecl = getDeclContext()->getAsClassOrClassExtensionContext()) {
       if (classDecl->getSuperclass())
         Kind = BodyInitKind::ImplicitChained;
     }

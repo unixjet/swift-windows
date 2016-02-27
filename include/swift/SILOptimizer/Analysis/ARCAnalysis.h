@@ -36,6 +36,7 @@ class SILFunction;
 
 namespace swift {
 
+using RetainList = llvm::SmallVector<SILInstruction *, 1>;
 using ReleaseList = llvm::SmallVector<SILInstruction *, 1>;
 
 /// \returns True if the user \p User decrements the ref count of \p Ptr.
@@ -104,6 +105,70 @@ valueHasARCDecrementOrCheckInInstructionRange(SILValue Op,
                                               SILBasicBlock::iterator End,
                                               AliasAnalysis *AA);
 
+
+/// A class that attempts to match owned return value and corresponding epilogue
+/// retains for a specific function.
+///
+/// TODO: This really needs a better name.
+class ConsumedReturnValueToEpilogueRetainMatcher {
+public:
+  enum class ExitKind { Return, Throw };
+
+  enum class FindRetainKind { None, Found, Blocked };
+
+  using RetainKindValue = std::pair<FindRetainKind, SILInstruction *>;
+
+private:
+  SILFunction *F;
+  RCIdentityFunctionInfo *RCFI;
+  AliasAnalysis *AA;
+  ExitKind Kind;
+  // We use a list of instructions for now so that we can keep the same interface
+  // and handle exploded retain_value later.
+  RetainList EpilogueRetainInsts;
+  bool HasBlock = false;
+
+public:
+  /// Finds matching releases in the return block of the function \p F.
+  ConsumedReturnValueToEpilogueRetainMatcher(RCIdentityFunctionInfo *RCFI,
+                                             AliasAnalysis *AA,
+                                             SILFunction *F,
+                                             ExitKind Kind = ExitKind::Return);
+
+  /// Finds matching releases in the provided block \p BB.
+  void findMatchingRetains(SILBasicBlock *BB);
+
+  RetainList getEpilogueRetains() { return EpilogueRetainInsts; }
+
+  /// Recompute the mapping from argument to consumed arg.
+  void recompute();
+
+  bool hasBlock() const { return HasBlock; }
+  
+  using iterator = decltype(EpilogueRetainInsts)::iterator;
+  using const_iterator = decltype(EpilogueRetainInsts)::const_iterator;
+  iterator begin() { return EpilogueRetainInsts.begin(); }
+  iterator end() { return EpilogueRetainInsts.end(); }
+  const_iterator begin() const { return EpilogueRetainInsts.begin(); }
+  const_iterator end() const { return EpilogueRetainInsts.end(); }
+
+  using reverse_iterator = decltype(EpilogueRetainInsts)::reverse_iterator;
+  using const_reverse_iterator = decltype(EpilogueRetainInsts)::const_reverse_iterator;
+  reverse_iterator rbegin() { return EpilogueRetainInsts.rbegin(); }
+  reverse_iterator rend() { return EpilogueRetainInsts.rend(); }
+  const_reverse_iterator rbegin() const { return EpilogueRetainInsts.rbegin(); }
+  const_reverse_iterator rend() const { return EpilogueRetainInsts.rend(); }
+
+  unsigned size() const { return EpilogueRetainInsts.size(); }
+
+  iterator_range<iterator> getRange() { return swift::make_range(begin(), end()); }
+
+
+private:
+  /// Finds matching releases in the provided block \p BB.
+  RetainKindValue findMatchingRetainsInner(SILBasicBlock *BB, SILValue V);
+};
+
 /// A class that attempts to match owned arguments and corresponding epilogue
 /// releases for a specific function.
 ///
@@ -118,6 +183,19 @@ private:
   ExitKind Kind;
   llvm::SmallMapVector<SILArgument *, ReleaseList, 8> ArgInstMap;
   bool HasBlock = false;
+
+  /// Return true if we have seen releases to part or all of \p Derived in
+  /// \p Insts.
+  /// 
+  /// NOTE: This function relies on projections to analyze the relation
+  /// between the releases values in \p Insts and \p Derived, it also bails
+  /// out and return true if projection path can not be formed between Base
+  /// and any one the released values.
+  bool isRedundantRelease(ReleaseList Insts, SILValue Base, SILValue Derived);
+
+  /// Return true if we have a release instruction for all the reference
+  /// semantics part of \p Base.
+  bool releaseAllNonTrivials(ReleaseList Insts, SILValue Base);
 
 public:
   /// Finds matching releases in the return block of the function \p F.

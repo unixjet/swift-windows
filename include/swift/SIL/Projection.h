@@ -9,11 +9,14 @@
 // See http://swift.org/CONTRIBUTORS.txt for the list of Swift project authors
 //
 //===----------------------------------------------------------------------===//
-//
-// This file defines the class Projection and related utilities. A projection is
-// a representation of type projections that is nominal, tuple agnostic. These
-// utilities are useful for working with aggregate type trees at a high level.
-//
+///
+/// \file
+///
+/// This file defines the class Projection and related utilities. A projection
+/// is a representation of type projections that is nominal, tuple
+/// agnostic. These utilities are useful for working with aggregate type trees
+/// at a high level.
+///
 //===----------------------------------------------------------------------===//
 
 #ifndef SWIFT_SIL_PROJECTION_H
@@ -36,6 +39,7 @@ namespace swift {
 
 class SILBuilder;
 class ProjectionPath;
+using ProjectionPathSet = llvm::DenseSet<ProjectionPath>;
 using ProjectionPathList = llvm::SmallVector<Optional<ProjectionPath>, 8>;
 
 enum class SubSeqRelation_t : uint8_t {
@@ -568,6 +572,11 @@ public:
                                                 SILModule *Mod,
                                                 ProjectionPathList &P);
 
+  /// Return true if the given projection paths in \p CPaths does not cover
+  /// all the fields with non-trivial semantics, false otherwise.
+  static bool hasUncoveredNonTrivials(SILType B, SILModule *Mod,
+                                      ProjectionPathSet &CPaths);
+
   /// Returns true if the two paths have a non-empty symmetric
   /// difference.
   ///
@@ -902,17 +911,6 @@ public:
   replaceValueUsesWithLeafUses(SILBuilder &B, SILLocation Loc,
                                llvm::SmallVectorImpl<SILValue> &Leafs);
  
-
-  /// Return true if we have seen releases to part or all of \p Derived in
-  /// \p Insts.
-  /// 
-  /// NOTE: This function relies on projections to analyze the relation
-  /// between the releases values in \p Insts and \p Derived, it also bails
-  /// out and return true if projection path can not be formed between Base
-  /// and any one the released values.
-  static bool
-  isRedundantRelease(ReleaseList Insts, SILValue Base, SILValue Derived);
-
 private:
   void createRoot(SILType BaseTy) {
     assert(ProjectionTreeNodes.empty() &&
@@ -955,5 +953,26 @@ private:
 };
 
 } // end swift namespace
+
+namespace llvm {
+using swift::ProjectionPath;
+/// Allow ProjectionPath to be used in DenseMap.
+template <> struct DenseMapInfo<ProjectionPath> {
+  static inline ProjectionPath getEmptyKey() {
+    return ProjectionPath(DenseMapInfo<swift::SILType>::getEmptyKey(),
+                          DenseMapInfo<swift::SILType>::getEmptyKey());
+  }
+  static inline ProjectionPath getTombstoneKey() {
+    return ProjectionPath(DenseMapInfo<swift::SILType>::getTombstoneKey(),
+                          DenseMapInfo<swift::SILType>::getTombstoneKey());
+  }
+  static inline unsigned getHashValue(const ProjectionPath &Val) {
+    return hash_value(Val);
+  }
+  static bool isEqual(const ProjectionPath &LHS, const ProjectionPath &RHS) {
+    return LHS == RHS;
+  }
+};
+} // namespace llvm
 
 #endif

@@ -15,14 +15,14 @@ protocol Test {
   var major : Int { get }
   var minor : Int { get }
   var subminor : Int  // expected-error {{property in protocol must have explicit { get } or { get set } specifier}}
-  static var staticProperty: Int // expected-error{{static stored properties not yet supported in generic types}} expected-error{{property in protocol must have explicit { get } or { get set } specifier}}
+  static var staticProperty: Int // expected-error{{property in protocol must have explicit { get } or { get set } specifier}}
 }
 
 protocol Test2 {
   var property: Int { get }
 
   var title: String = "The Art of War" { get } // expected-error{{initial value is not allowed here}} expected-error {{property in protocol must have explicit { get } or { get set } specifier}}
-  static var title2: String = "The Art of War" // expected-error{{initial value is not allowed here}} expected-error {{property in protocol must have explicit { get } or { get set } specifier}} expected-error {{static stored properties not yet supported in generic types}}
+  static var title2: String = "The Art of War" // expected-error{{initial value is not allowed here}} expected-error {{property in protocol must have explicit { get } or { get set } specifier}}
 
   associatedtype mytype
   associatedtype mybadtype = Int
@@ -464,4 +464,14 @@ func g<T : C2>(x : T) {
 class C3 : P1 {} // expected-error{{type 'C3' does not conform to protocol 'P1'}}
 func h<T : C3>(x : T) {
   x as P1 // expected-error{{protocol 'P1' can only be used as a generic constraint because it has Self or associated type requirements}}
+}
+
+
+
+protocol P4 {
+  associatedtype T
+}
+
+class C4 : P4 {
+  associatedtype T = Int  // expected-error {{associated types can only be defined in a protocol}} {{3-17=typealias}}
 }

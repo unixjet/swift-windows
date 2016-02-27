@@ -113,7 +113,8 @@ class EOFCountingGenerator<T> : GeneratorType {
       numTimesReturnedEOF += 1
       return .None
     }
-    return array[index++]
+    index += 1
+    return array[index - 1]
   }
 }
 
@@ -204,7 +205,7 @@ struct UTF8Test {
 
   init(
     _ scalars: [UInt32], _ encoded: [UInt8],
-    file: String = __FILE__, line: UInt = __LINE__
+    file: String = #file, line: UInt = #line
   ) {
     self.scalars = scalars
     self.encoded = encoded
@@ -413,7 +414,7 @@ struct UTF16Test {
   init(
     _ scalarsHead: [UInt32], _ scalarsRepairedTail: [UInt32],
     _ encoded: [UInt16],
-    file: String = __FILE__, line: UInt = __LINE__
+    file: String = #file, line: UInt = #line
   ) {
     self.scalarsHead = scalarsHead
     self.scalarsRepairedTail = scalarsRepairedTail

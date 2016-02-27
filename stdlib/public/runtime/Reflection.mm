@@ -169,10 +169,6 @@ struct PlaygroundQuickLook {
   } Kind;
 };
   
-struct StringMirrorTuple {
-  String first;
-  Mirror second;
-};
 struct OptionalPlaygroundQuickLook {
   union {
     struct {
@@ -506,12 +502,12 @@ static Mirror reflect(HeapObject *owner,
 /// \param value passed unowned.
 SWIFT_RUNTIME_STDLIB_INTERFACE
 extern "C"
-StringMirrorTuple swift_TupleMirror_subscript(intptr_t i,
-                                              HeapObject *owner,
-                                              const OpaqueValue *value,
-                                              const Metadata *type) {
-  StringMirrorTuple result;
-  
+void swift_TupleMirror_subscript(String *outString,
+                                 Mirror *outMirror,
+                                 intptr_t i,
+                                 HeapObject *owner,
+                                 const OpaqueValue *value,
+                                 const Metadata *type) {
   auto Tuple = static_cast<const TupleTypeMetadata *>(type);
   
   if (i < 0 || (size_t)i > Tuple->NumElements)
@@ -521,7 +517,7 @@ StringMirrorTuple swift_TupleMirror_subscript(intptr_t i,
   char buf[32];
   snprintf(buf, 31, ".%zd", i);
   buf[31] = 0;
-  result.first = String(buf, strlen(buf));
+  new (outString) String(buf, strlen(buf));
   
   // Get a Mirror for the nth element.
   auto &elt = Tuple->getElement(i);
@@ -532,9 +528,7 @@ StringMirrorTuple swift_TupleMirror_subscript(intptr_t i,
   swift_retain(owner);
 
   // 'owner' is consumed by this call.
-  result.second = reflect(owner, eltData, elt.Type);
-
-  return result;
+  new (outMirror) Mirror(reflect(owner, eltData, elt.Type));
 }
   
 // Get a field name from a doubly-null-terminated list.
@@ -562,12 +556,12 @@ intptr_t swift_StructMirror_count(HeapObject *owner,
 
 SWIFT_RUNTIME_STDLIB_INTERFACE
 extern "C"
-StringMirrorTuple swift_StructMirror_subscript(intptr_t i,
-                                               HeapObject *owner,
-                                               const OpaqueValue *value,
-                                               const Metadata *type) {
-  StringMirrorTuple result;
-  
+void swift_StructMirror_subscript(String *outString,
+                                  Mirror *outMirror,
+                                  intptr_t i,
+                                  HeapObject *owner,
+                                  const OpaqueValue *value,
+                                  const Metadata *type) {
   auto Struct = static_cast<const StructMetadata *>(type);
   
   if (i < 0 || (size_t)i > Struct->Description->Struct.NumFields)
@@ -580,17 +574,14 @@ StringMirrorTuple swift_StructMirror_subscript(intptr_t i,
   auto bytes = reinterpret_cast<const char*>(value);
   auto fieldData = reinterpret_cast<const OpaqueValue *>(bytes + fieldOffset);
 
-  result.first = String(getFieldName(Struct->Description->Struct.FieldNames, i));
+  new (outString) String(getFieldName(Struct->Description->Struct.FieldNames, i));
 
   // This matches the -1 in reflect.
   swift_retain(owner);
 
   // 'owner' is consumed by this call.
   assert(!fieldType.isIndirect() && "indirect struct fields not implemented");
-  result.second = reflect(owner, fieldData,
-                                         fieldType.getType());
-
-  return result;
+  new (outMirror) Mirror(reflect(owner, fieldData, fieldType.getType()));
 }
 
 // -- Enum destructuring.
@@ -696,12 +687,12 @@ intptr_t swift_EnumMirror_count(HeapObject *owner,
 
 SWIFT_RUNTIME_STDLIB_INTERFACE
 extern "C"
-StringMirrorTuple swift_EnumMirror_subscript(intptr_t i,
-                                             HeapObject *owner,
-                                             const OpaqueValue *value,
-                                             const Metadata *type) {
-  StringMirrorTuple result;
-
+void swift_EnumMirror_subscript(String *outString,
+                                Mirror *outMirror,
+                                intptr_t i,
+                                HeapObject *owner,
+                                const OpaqueValue *value,
+                                const Metadata *type) {
   const auto Enum = static_cast<const EnumMetadata *>(type);
   const auto &Description = Enum->Description->Enum;
 
@@ -728,10 +719,8 @@ StringMirrorTuple swift_EnumMirror_subscript(intptr_t i,
   // This matches the -1 in reflect.
   swift_retain(owner);
 
-  result.first = String(getFieldName(Description.CaseNames, tag));
-  result.second = reflect(owner, value, payloadType);
-
-  return result;
+  new (outString) String(getFieldName(Description.CaseNames, tag));
+  new (outMirror) Mirror(reflect(owner, value, payloadType));
 }
   
 // -- Class destructuring.
@@ -761,12 +750,12 @@ intptr_t swift_ClassMirror_count(HeapObject *owner,
 /// \param value passed unowned.
 SWIFT_RUNTIME_STDLIB_INTERFACE
 extern "C"
-StringMirrorTuple swift_ClassMirror_subscript(intptr_t i,
-                                              HeapObject *owner,
-                                              const OpaqueValue *value,
-                                              const Metadata *type) {
-  StringMirrorTuple result;
-  
+void swift_ClassMirror_subscript(String *outString,
+                                 Mirror *outMirror,
+                                 intptr_t i,
+                                 HeapObject *owner,
+                                 const OpaqueValue *value,
+                                 const Metadata *type) {
   auto Clas = static_cast<const ClassMetadata*>(type);
 
   if (classHasSuperclass(Clas)) {
@@ -774,10 +763,10 @@ StringMirrorTuple swift_ClassMirror_subscript(intptr_t i,
     // first child.
     if (i == 0) {
       // FIXME: Put superclass name here
-      result.first = String("super");
-      result.second
-        = getMirrorForSuperclass(Clas->SuperClass, owner, value, type);
-      return result;
+      new (outString) String("super");
+      new (outMirror) Mirror(
+        getMirrorForSuperclass(Clas->SuperClass, owner, value, type));
+      return;
     }
     --i;
   }
@@ -809,10 +798,9 @@ StringMirrorTuple swift_ClassMirror_subscript(intptr_t i,
   auto bytes = *reinterpret_cast<const char * const*>(value);
   auto fieldData = reinterpret_cast<const OpaqueValue *>(bytes + fieldOffset);
   
-  result.first = String(getFieldName(Clas->getDescription()->Class.FieldNames, i));
+  new (outString) String(getFieldName(Clas->getDescription()->Class.FieldNames, i));
   // 'owner' is consumed by this call.
-  result.second = reflect(owner, fieldData, fieldType.getType());
-  return result;
+  new (outMirror) Mirror(reflect(owner, fieldData, fieldType.getType()));
 }
   
 // -- Mirror witnesses for ObjC classes.
@@ -919,10 +907,12 @@ static Mirror ObjC_getMirrorForSuperclass(Class sup,
   
 SWIFT_RUNTIME_STDLIB_INTERFACE
 extern "C"
-StringMirrorTuple swift_ObjCMirror_subscript(intptr_t i,
-                                             HeapObject *owner,
-                                             const OpaqueValue *value,
-                                             const Metadata *type) {
+void swift_ObjCMirror_subscript(String *outString,
+                                Mirror *outMirror,
+                                intptr_t i,
+                                HeapObject *owner,
+                                const OpaqueValue *value,
+                                const Metadata *type) {
 #if REFLECT_OBJC_IVARS
   id object = *reinterpret_cast<const id *>(value);
 #endif
@@ -931,11 +921,11 @@ StringMirrorTuple swift_ObjCMirror_subscript(intptr_t i,
   // If there's a superclass, it becomes the first child.
   if (auto sup = (Class) _swift_getSuperclass((const ClassMetadata*) isa)) {
     if (i == 0) {
-      StringMirrorTuple result;
       const char *supName = class_getName(sup);
-      result.first = String(supName, strlen(supName));
-      result.second = ObjC_getMirrorForSuperclass(sup, owner, value, type);
-      return result;
+      new (outString) String(supName, strlen(supName));
+      new (outMirror) Mirror(
+                        ObjC_getMirrorForSuperclass(sup, owner, value, type));
+      return;
     }
     --i;
   }
@@ -969,11 +959,9 @@ StringMirrorTuple swift_ObjCMirror_subscript(intptr_t i,
   
   const Metadata *ivarType = getMetadataForEncoding(typeEncoding);
   
-  StringMirrorTuple result;
-  result.first = String(name, strlen(name));
+  new (outString) String(name, strlen(name));
   // 'owner' is consumed by this call.
-  result.second = reflect(owner, ivar, ivarType);
-  return result;
+  new (outMirror) Mirror(reflect(owner, ivar, ivarType));
 #else
   // ObjC makes no guarantees about the state of ivars, so we can't safely
   // introspect them in the general case.

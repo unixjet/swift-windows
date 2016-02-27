@@ -72,6 +72,21 @@ swift::isInstructionTriviallyDead(SILInstruction *I) {
   return false;
 }
 
+/// \brief Return true if this is a release instruction and the released value
+/// is a part of a guaranteed parameter.
+bool swift::isGuaranteedParamRelease(SILInstruction *I) {
+  if (!isa<StrongReleaseInst>(I) || !isa<ReleaseValueInst>(I))
+    return false;
+  // OK. we have a release instruction.
+  // Check whether this is a release on part of a guaranteed function argument.
+  SILValue Op = stripValueProjections(I->getOperand(0));
+  SILArgument *Arg = dyn_cast<SILArgument>(Op);
+  if (!Arg || !Arg->isFunctionArg() ||
+      !Arg->hasConvention(SILArgumentConvention::Direct_Guaranteed))
+    return false;
+  return true;
+}
+
 namespace {
   using CallbackTy = std::function<void(SILInstruction *)>;
 } // end anonymous namespace
@@ -216,6 +231,28 @@ FullApplySite swift::findApplyFromDevirtualizedResult(SILInstruction *I) {
 
   return FullApplySite();
 }
+
+SILValue swift::isPartialApplyOfReabstractionThunk(PartialApplyInst *PAI) {
+  if (PAI->getNumArguments() != 1)
+    return SILValue();
+
+  auto *Fun = PAI->getReferencedFunction();
+  if (!Fun)
+    return SILValue();
+
+  // Make sure we have a reabstraction thunk.
+  if (Fun->isThunk() != IsReabstractionThunk)
+    return SILValue();
+
+  // The argument should be a closure.
+  auto Arg = PAI->getArgument(0);
+  if (!Arg->getType().is<SILFunctionType>() ||
+      !Arg->getType().isReferenceCounted(PAI->getFunction()->getModule()))
+    return SILValue();
+
+  return Arg;
+}
+
 
 // Replace a dead apply with a new instruction that computes the same
 // value, and delete the old apply.
@@ -695,7 +732,7 @@ public:
 /// Returns false if optimization is not possible.
 /// Returns true and initializes internal fields if optimization is possible.
 bool StringConcatenationOptimizer::extractStringConcatOperands() {
-  auto *Fn = AI->getCalleeFunction();
+  auto *Fn = AI->getReferencedFunction();
   if (!Fn)
     return false;
 
@@ -879,7 +916,7 @@ SILInstruction *StringConcatenationOptimizer::optimize() {
   Arguments.push_back(FuncResultType);
 
   auto FnTy = FRIConvertFromBuiltin->getType();
-  auto STResultType = FnTy.castTo<SILFunctionType>()->getResult().getSILType();
+  auto STResultType = FnTy.castTo<SILFunctionType>()->getSILResult();
   return Builder.createApply(AI->getLoc(), FRIConvertFromBuiltin, FnTy,
                              STResultType, ArrayRef<Substitution>(), Arguments,
                              false);
@@ -1272,8 +1309,7 @@ optimizeBridgedObjCToSwiftCast(SILInstruction *Inst,
 
   auto *Conformance = Conf.getPointer();
 
-  auto ParamTypes = BridgedFunc->getLoweredFunctionType()
-                               ->getParametersWithoutIndirectResult();
+  auto ParamTypes = BridgedFunc->getLoweredFunctionType()->getParameters();
 
   auto *FuncRef = Builder.createFunctionRef(Loc, BridgedFunc);
 
@@ -1471,8 +1507,7 @@ optimizeBridgedSwiftToObjCCast(SILInstruction *Inst,
         BridgedFunc->isExternalDeclaration()))
     return nullptr;
 
-  auto ParamTypes = BridgedFunc->getLoweredFunctionType()
-                               ->getParametersWithoutIndirectResult();
+  auto ParamTypes = BridgedFunc->getLoweredFunctionType()->getParameters();
 
   auto SILFnTy = SILType::getPrimitiveObjectType(
       M.Types.getConstantFunctionType(BridgeFuncDeclRef));

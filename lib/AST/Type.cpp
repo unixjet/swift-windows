@@ -2124,97 +2124,6 @@ GenericParamList::getSubstitutionMap(ArrayRef<swift::Substitution> Subs) const {
 }
 
 FunctionType *
-GenericFunctionType::substGenericArgs(Module *M, ArrayRef<Type> args) const {
-  auto params = getGenericParams();
-  assert(args.size() == params.size());
-  
-  TypeSubstitutionMap subs;
-  for (size_t i = 0, e = args.size(); i != e; ++i) {
-    subs.insert(std::make_pair(params[i], args[i]));
-  }
-  
-  Type input = getInput().subst(M, subs, SubstFlags::IgnoreMissing);
-  Type result = getResult().subst(M, subs, SubstFlags::IgnoreMissing);
-  return FunctionType::get(input, result, getExtInfo());
-}
-
-AnyFunctionType *
-GenericFunctionType::partialSubstGenericArgs(Module *M, ArrayRef<Type> args)
-const {
-  auto params = getGenericParams();
-  
-  // If we're fully applying the generic params, fall through to
-  // substGenericArgs.
-  if (args.size() == params.size())
-    return substGenericArgs(M, args);
-  
-  assert(args.size() < params.size());
-  
-  TypeSubstitutionMap subs;
-  for (size_t i = 0, e = args.size(); i != e; ++i) {
-    subs.insert(std::make_pair(params[i], args[i]));
-  }
-
-  // Get the slice of the generic parameters and requirements we haven't
-  // applied.
-  auto appliedParams = params.slice(0, args.size());
-  auto unappliedParams = params.slice(args.size());
-  
-  // Drop requirements rooted in the applied generic parameters.
-  SmallVector<Requirement, 4> unappliedReqts;
-  
-  auto rootType = [](Type t) -> TypeBase* {
-    while (auto dmt = t->getAs<DependentMemberType>()) {
-      t = dmt->getBase();
-    }
-    return t.getPointer();
-  };
-  
-  auto rootedInAppliedParam = [&](Type t) -> bool {
-    return std::find(appliedParams.begin(), appliedParams.end(), rootType(t))
-             != appliedParams.end();
-  };
-  
-  for (auto &reqt : getRequirements()) {
-    switch (reqt.getKind()) {
-    case RequirementKind::Conformance:
-    case RequirementKind::Superclass:
-    case RequirementKind::WitnessMarker:
-      // Substituting the parameter eliminates conformance constraints rooted
-      // in the parameter.
-      if (rootedInAppliedParam(reqt.getFirstType()))
-        continue;
-      break;
-        
-    case RequirementKind::SameType: {
-      // Same-type constraints are eliminated if both sides of the constraint
-      // are rooted in substituted parameters.
-      if (rootedInAppliedParam(reqt.getFirstType())
-          && rootedInAppliedParam(reqt.getSecondType()))
-        continue;
-        
-      // Otherwise, substitute the constrained types.
-      unappliedReqts.push_back(
-        Requirement(RequirementKind::SameType,
-                    reqt.getFirstType().subst(M, subs,
-                                              SubstFlags::IgnoreMissing),
-                    reqt.getSecondType().subst(M, subs,
-                                               SubstFlags::IgnoreMissing)));
-      continue;
-    }
-    }
-    unappliedReqts.push_back(reqt);
-  }
-  
-  GenericSignature *sig = GenericSignature::get(unappliedParams,
-                                                unappliedReqts);
-  
-  Type input = getInput().subst(M, subs, SubstFlags::IgnoreMissing);
-  Type result = getResult().subst(M, subs, SubstFlags::IgnoreMissing);
-  return GenericFunctionType::get(sig, input, result, getExtInfo());
-}
-
-FunctionType *
 GenericFunctionType::substGenericArgs(Module *M, ArrayRef<Substitution> args) {
   auto params = getGenericParams();
   (void)params;
@@ -2239,15 +2148,22 @@ static Type getMemberForBaseType(Module *module,
   // If the parent is an archetype, extract the child archetype with the
   // given name.
   if (auto archetypeParent = substBase->getAs<ArchetypeType>()) {
-    if (!archetypeParent->hasNestedType(name)) {
-      const auto parent = archetypeParent->getParent();
-      if (!parent)
-        return ErrorType::get(module->getASTContext());
-      if (parent->isSelfDerived())
-        return parent->getNestedTypeValue(name);
+    if (archetypeParent->hasNestedType(name))
+      return archetypeParent->getNestedTypeValue(name);
+
+    if (auto parent = archetypeParent->getParent()) {
+      // If the archetype doesn't have the requested type and the parent is not
+      // self derived, error out
+      return parent->isSelfDerived() ? parent->getNestedTypeValue(name)
+                                     : ErrorType::get(module->getASTContext());
     }
-    
-    return archetypeParent->getNestedTypeValue(name);
+
+    // If looking for an associated type and the archetype is constrained to a
+    // class, continue to the default associated type lookup
+    if (!assocType || !archetypeParent->getSuperclass()) {
+      // else just error out
+      return ErrorType::get(module->getASTContext());
+    }
   }
 
   // If the parent is a type variable, retrieve its member type
@@ -2343,6 +2259,15 @@ Type Type::subst(Module *module, TypeSubstitutionMap &substitutions,
     // For dependent member types, we may need to look up the member if the
     // base is resolved to a non-dependent type.
     if (auto depMemTy = type->getAs<DependentMemberType>()) {
+      // Check whether we have a direct substitution for the dependent type.
+      // FIXME: This arguably should be getMemberForBaseType's responsibility.
+      auto known =
+        substitutions.find(depMemTy->getCanonicalType().getPointer());
+      if (known != substitutions.end() && known->second) {
+        return SubstitutedType::get(type, known->second,
+                                    module->getASTContext());
+      }
+    
       auto newBase = depMemTy->getBase().subst(module, substitutions, options);
       if (!newBase)
         return failed(type);
@@ -2600,13 +2525,16 @@ case TypeKind::Id:
     auto fnTy = cast<SILFunctionType>(base);
     bool changed = false;
 
-    SILResultInfo transResult = fnTy->getResult();
-    if (transformSILResult(transResult, changed, fn)) return Type();
-
     SmallVector<SILParameterInfo, 8> transInterfaceParams;
     for (SILParameterInfo param : fnTy->getParameters()) {
       if (transformSILParameter(param, changed, fn)) return Type();
       transInterfaceParams.push_back(param);
+    }
+
+    SmallVector<SILResultInfo, 8> transInterfaceResults;
+    for (SILResultInfo result : fnTy->getAllResults()) {
+      if (transformSILResult(result, changed, fn)) return Type();
+      transInterfaceResults.push_back(result);
     }
 
     Optional<SILResultInfo> transErrorResult;
@@ -2622,7 +2550,7 @@ case TypeKind::Id:
                                 fnTy->getExtInfo(),
                                 fnTy->getCalleeConvention(),
                                 transInterfaceParams,
-                                transResult,
+                                transInterfaceResults,
                                 transErrorResult,
                                 Ptr->getASTContext());
   }

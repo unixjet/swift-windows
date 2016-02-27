@@ -92,6 +92,8 @@ public:
   }
 
   void printDeclPre(const Decl *D) override {
+    if (isa<ParamDecl>(D))
+      return; // Parameters are handled specially in addParameters().
     unsigned StartOffset = OS.tell();
     EntitiesStack.emplace_back(D, StartOffset);
   }
@@ -104,6 +106,9 @@ public:
   }
 
   void printDeclPost(const Decl *D) override {
+    if (isa<ParamDecl>(D))
+      return; // Parameters are handled specially in addParameters().
+
     assert(EntitiesStack.back().Dcl == D);
     TextEntity Entity = std::move(EntitiesStack.back());
     EntitiesStack.pop_back();
@@ -901,11 +906,6 @@ void SwiftLangSupport::findModuleGroups(StringRef ModuleName,
     Receiver(Groups, Error);
     return;
   }
-  for (auto File : M->getFiles()) {
-    File->collectAllGroups(Groups);
-  }
-  std::sort(Groups.begin(), Groups.end(), [](StringRef L, StringRef R) {
-    return L.compare_lower(R) < 0;
-  });
-  Receiver(Groups, Error);
+  std::vector<StringRef> Scratch;
+  Receiver(collectModuleGroups(M, Scratch), Error);
 }

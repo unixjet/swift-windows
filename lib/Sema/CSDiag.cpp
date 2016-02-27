@@ -987,18 +987,14 @@ static bool argumentMismatchIsNearMiss(Type argType, Type paramType) {
 /// and equal fixed type portions, and return by reference each archetype and
 /// the matching portion of the actual arg type where that archetype appears.
 static bool findGenericSubstitutions(DeclContext *dc, Type paramType, Type actualArgType,
-                                     SmallVector<ArchetypeType *, 4> &archetypes,
-                                     SmallVector<Type, 4> &substitutions) {
+                                     TypeSubstitutionMap &archetypesMap) {
   class GenericVisitor : public TypeMatcher<GenericVisitor> {
     DeclContext *dc;
-    SmallVector<ArchetypeType *, 4> &archetypes;
-    SmallVector<Type, 4> &substitutions;
+    TypeSubstitutionMap &archetypesMap;
 
   public:
-    GenericVisitor(DeclContext *dc,
-                   SmallVector<ArchetypeType *, 4> &archetypes,
-                   SmallVector<Type, 4> &substitutions)
-    : dc(dc), archetypes(archetypes), substitutions(substitutions) {}
+    GenericVisitor(DeclContext *dc, TypeSubstitutionMap &archetypesMap)
+      : dc(dc), archetypesMap(archetypesMap) {}
     
     bool mismatch(TypeBase *paramType, TypeBase *argType) {
       return paramType->isEqual(argType);
@@ -1010,12 +1006,10 @@ static bool findGenericSubstitutions(DeclContext *dc, Type paramType, Type actua
         type = ArchetypeBuilder::mapTypeIntoContext(dc, paramType);
       
       if (auto archetype = type->getAs<ArchetypeType>()) {
-        for (unsigned i = 0, c = archetypes.size(); i < c; i++) {
-          if (archetypes[i]->isEqual(archetype))
-            return substitutions[i]->isEqual(argType);
-        }
-        archetypes.push_back(archetype);
-        substitutions.push_back(argType);
+        auto existing = archetypesMap[archetype];
+        if (existing)
+          return existing->isEqual(argType);
+        archetypesMap[archetype] = argType;
         return true;
       }
       return false;
@@ -1030,15 +1024,22 @@ static bool findGenericSubstitutions(DeclContext *dc, Type paramType, Type actua
       if (dc && original->isTypeParameter())
         original = ArchetypeBuilder::mapTypeIntoContext(dc, original);
       
-      if (auto archetype = original->getAs<ArchetypeType>()) {
-        archetypes.push_back(archetype);
-        substitutions.push_back(substitution->getReplacementType());
-      }
+      Type replacement = substitution->getReplacementType();
+      // If the replacement is itself an archetype, then the constraint
+      // system was asserting equivalencies between different levels of
+      // generics, rather than binding a generic to a concrete type (and we
+      // don't/won't have a concrete type). In which case, it is the
+      // replacement we are interested in, since it is the one in our current
+      // context. That generic type should equal itself.
+      if (auto ourGeneric = replacement->getAs<ArchetypeType>())
+        archetypesMap[ourGeneric] = replacement;
+      else if (auto archetype = original->getAs<ArchetypeType>())
+        archetypesMap[archetype] = replacement;
     }
     return false;
   });
   
-  GenericVisitor visitor(dc, archetypes, substitutions);
+  GenericVisitor visitor(dc, archetypesMap);
   return visitor.match(paramType, actualArgType);
 }
 
@@ -1085,17 +1086,19 @@ CalleeCandidateInfo::evaluateCloseness(DeclContext *dc, Type candArgListType,
   // their type and count the number of mismatched arguments.
   unsigned mismatchingArgs = 0;
 
-  // Checking of archetypes.
-  // FIXME: For now just trying to verify applicability of arguments with only
-  // a single generic variable. Ideally we'd create a ConstraintSystem with
-  // type variables for all generics and solve it with the given argument types.
-  Type singleArchetype = nullptr;
-  Type matchingArgType = nullptr;
+  // Known mapping of archetypes in all arguments so far. An archetype may map
+  // to another archetype if the constraint system substituted one for another.
+  TypeSubstitutionMap allGenericSubstitutions;
 
-  // Number of args of generic archetype which are mismatched because
+  // Number of args of one generic archetype which are mismatched because
   // isSubstitutableFor() has failed. If all mismatches are of this type, we'll
   // return a different closeness for better diagnoses.
+  Type nonSubstitutableArchetype = nullptr;
   unsigned nonSubstitutableArgs = 0;
+  
+  // The type of failure is that multiple occurrences of the same generic are
+  // being passed arguments with different concrete types.
+  bool genericWithDifferingConcreteTypes = false;
   
   // We classify an argument mismatch as being a "near" miss if it is a very
   // likely match due to a common sort of problem (e.g. wrong flags on a
@@ -1121,69 +1124,80 @@ CalleeCandidateInfo::evaluateCloseness(DeclContext *dc, Type candArgListType,
         continue;
       
       // FIXME: Right now, a "matching" overload is one with a parameter whose
-      // type is identical to the argument type, or substitutable via
-      // rudimentary handling of functions with a single archetype in one or
-      // more parameters.
+      // type is identical to the argument type, or substitutable via handling
+      // of functions with primary archetypes in one or more parameters.
       // We can still do something more sophisticated with this.
       // FIXME: Use TC.isConvertibleTo?
 
-      SmallVector<ArchetypeType *, 4> archetypes;
-      SmallVector<Type, 4> substitutions;
+      TypeSubstitutionMap archetypesMap;
       bool matched;
-      if (paramType->is<UnresolvedType>())
+      if (paramType->is<UnresolvedType>() || rArgType->hasTypeVariable())
         matched = false;
       else
-        matched = findGenericSubstitutions(dc, paramType, rArgType,
-                                           archetypes, substitutions);
+        matched = findGenericSubstitutions(dc, paramType, rArgType, archetypesMap);
       
-      if (matched && archetypes.size() == 0)
-        continue;
-      if (matched && archetypes.size() == 1 && !rArgType->hasTypeVariable()) {
-        auto archetype = archetypes[0];
-        auto substitution = substitutions[0];
-        
-        if (singleArchetype) {
-          if (!archetype->isEqual(singleArchetype))
-            // Multiple archetypes, too complicated.
-            return { CC_ArgumentMismatch, {}};
+      if (matched) {
+        for (auto pair : archetypesMap) {
+          auto archetype = pair.first->castTo<ArchetypeType>();
+          auto substitution = pair.second;
           
-          if (substitution->isEqual(matchingArgType)) {
-            if (nonSubstitutableArgs == 0)
-              continue;
-            ++nonSubstitutableArgs;
-            // Fallthrough, this is nonsubstitutable, so mismatches as well.
+          auto existingSubstitution = allGenericSubstitutions[archetype];
+          if (!existingSubstitution) {
+            // New substitution for this callee.
+            allGenericSubstitutions[archetype] = substitution;
+            
+            // Not yet handling nested archetypes.
+            if (!archetype->isPrimary())
+              return { CC_ArgumentMismatch, {}};
+            
+            if (!CS->TC.isSubstitutableFor(substitution, archetype, CS->DC)) {
+              // If we have multiple non-substitutable types, this is just a mismatched mess.
+              if (!nonSubstitutableArchetype.isNull())
+                return { CC_ArgumentMismatch, {}};
+              
+              if (auto argOptType = argType->getOptionalObjectType())
+                mismatchesAreNearMisses &= CS->TC.isSubstitutableFor(argOptType, archetype, CS->DC);
+              else
+                mismatchesAreNearMisses = false;
+              
+              nonSubstitutableArchetype = archetype;
+              nonSubstitutableArgs = 1;
+              matched = false;
+            }
           } else {
-            if (nonSubstitutableArgs == 0) {
-              paramType = matchingArgType;
-              // Fallthrough as mismatched arg, comparing nearness to archetype
-              // bound type.
-            } else if (nonSubstitutableArgs == 1) {
+            // Substitution for the same archetype as in a previous argument.
+            bool isNonSubstitutableArchetype = !nonSubstitutableArchetype.isNull() &&
+                                               nonSubstitutableArchetype->isEqual(archetype);
+            if (substitution->isEqual(existingSubstitution)) {
+              if (isNonSubstitutableArchetype) {
+                ++nonSubstitutableArgs;
+                matched = false;
+              }
+            } else {
               // If we have only one nonSubstitutableArg so far, then this different
               // type might be the one that we should be substituting for instead.
               // Note that failureInfo is already set correctly for that case.
-              if (CS->TC.isSubstitutableFor(substitution, archetype, CS->DC)) {
-                mismatchesAreNearMisses = argumentMismatchIsNearMiss(matchingArgType, substitution);
-                matchingArgType = substitution;
-                continue;
+              if (isNonSubstitutableArchetype && nonSubstitutableArgs == 1 &&
+                  CS->TC.isSubstitutableFor(substitution, archetype, CS->DC)) {
+                mismatchesAreNearMisses = argumentMismatchIsNearMiss(existingSubstitution, substitution);
+                allGenericSubstitutions[archetype] = substitution;
+              } else {
+                genericWithDifferingConcreteTypes = true;
+                matched = false;
               }
             }
           }
-        } else {
-          matchingArgType = substitution;
-          singleArchetype = archetype;
-
-          if (CS->TC.isSubstitutableFor(substitution, archetype, CS->DC)) {
-            continue;
-          }
-          ++nonSubstitutableArgs;
         }
       }
       
+      if (matched)
+        continue;
+      
+      if (archetypesMap.empty())
+        mismatchesAreNearMisses &= argumentMismatchIsNearMiss(argType, paramType);
+      
       ++mismatchingArgs;
-      
-      // Keep track of whether this argument was a near miss or not.
-      mismatchesAreNearMisses &= argumentMismatchIsNearMiss(argType, paramType);
-      
+
       failureInfo.argumentNumber = argNo;
       failureInfo.parameterType = paramType;
       if (paramType->hasTypeParameter())
@@ -1196,17 +1210,31 @@ CalleeCandidateInfo::evaluateCloseness(DeclContext *dc, Type candArgListType,
   
   // Check to see if the first argument expects an inout argument, but is not
   // an lvalue.
-  if (candArgs[0].Ty->is<InOutType>() && !actualArgs[0].Ty->isLValueType())
+  Type firstArg = actualArgs[0].Ty;
+  if (candArgs[0].Ty->is<InOutType>() && !(firstArg->isLValueType() || firstArg->is<InOutType>()))
     return { CC_NonLValueInOut, {}};
   
   // If we have exactly one argument mismatching, classify it specially, so that
   // close matches are prioritized against obviously wrong ones.
   if (mismatchingArgs == 1) {
     CandidateCloseness closeness;
-    if (singleArchetype.isNull()) {
+    if (allGenericSubstitutions.empty()) {
       closeness = mismatchesAreNearMisses ? CC_OneArgumentNearMismatch
                                           : CC_OneArgumentMismatch;
     } else {
+      // If the failure is that different occurrences of the same generic have
+      // different concrete types, substitute in all the concrete types we've found
+      // into the failureInfo to improve diagnosis.
+      if (genericWithDifferingConcreteTypes) {
+        auto newType = failureInfo.parameterType.transform([&](Type type) -> Type {
+          if (auto archetype = type->getAs<ArchetypeType>())
+            if (auto replacement = allGenericSubstitutions[archetype])
+              return replacement;
+          return type;
+        });
+        failureInfo.parameterType = newType;
+      }
+      
       closeness = mismatchesAreNearMisses ? CC_OneGenericArgumentNearMismatch
                                           : CC_OneGenericArgumentMismatch;
     }
@@ -1579,23 +1607,36 @@ bool CalleeCandidateInfo::diagnoseGenericParameterErrors(Expr *badArgExpr) {
     return false;
   
   bool foundFailure = false;
-  SmallVector<ArchetypeType *, 4> archetypes;
-  SmallVector<Type, 4> substitutions;
+  TypeSubstitutionMap archetypesMap;
   
   if (!findGenericSubstitutions(failedArgument.declContext, failedArgument.parameterType,
-                                argType, archetypes, substitutions))
+                                argType, archetypesMap))
     return false;
 
-  for (unsigned i = 0, c = archetypes.size(); i < c; i++) {
-    auto archetype = archetypes[i];
-    auto argType = substitutions[i];
+  for (auto pair : archetypesMap) {
+    auto archetype = pair.first->castTo<ArchetypeType>();
+    auto substitution = pair.second;
     
     // FIXME: Add specific error for not subclass, if the archetype has a superclass?
+
+    // Check for optional near miss.
+    if (auto argOptType = substitution->getOptionalObjectType()) {
+      if (CS->TC.isSubstitutableFor(argOptType, archetype, CS->DC)) {
+        CS->TC.diagnose(badArgExpr->getLoc(), diag::missing_unwrap_optional, argType);
+        foundFailure = true;
+        continue;
+      }
+    }
     
     for (auto proto : archetype->getConformsTo()) {
-      if (!CS->TC.conformsToProtocol(argType, proto, CS->DC, ConformanceCheckOptions(TR_InExpression))) {
-        CS->TC.diagnose(badArgExpr->getLoc(), diag::cannot_convert_argument_value_protocol,
-                        argType, proto->getDeclaredType());
+      if (!CS->TC.conformsToProtocol(substitution, proto, CS->DC, ConformanceCheckOptions(TR_InExpression))) {
+        if (substitution->isEqual(argType)) {
+          CS->TC.diagnose(badArgExpr->getLoc(), diag::cannot_convert_argument_value_protocol,
+                          substitution, proto->getDeclaredType());
+        } else {
+          CS->TC.diagnose(badArgExpr->getLoc(), diag::cannot_convert_partial_argument_value_protocol,
+                          argType, substitution, proto->getDeclaredType());
+        }
         foundFailure = true;
       }
     }
@@ -1647,7 +1688,11 @@ enum TCCFlags {
   /// Re-type-check the given subexpression even if the expression has already
   /// been checked already.  The client is asserting that infinite recursion is
   /// not possible because it has relaxed a constraint on the system.
-  TCC_ForceRecheck = 0x02
+  TCC_ForceRecheck = 0x02,
+    
+  /// tell typeCheckExpression that it is ok to produce an ambiguous result,
+  /// it can just fill in holes with UnresolvedType and we'll deal with it.
+  TCC_AllowUnresolvedTypeVariables = 0x04
 };
 
 typedef OptionSet<TCCFlags> TCCOptions;
@@ -1716,7 +1761,8 @@ public:
 
   /// Special magic to handle inout exprs and tuples in argument lists.
   Expr *typeCheckArgumentChildIndependently(Expr *argExpr, Type argType,
-                                        const CalleeCandidateInfo &candidates);
+                                        const CalleeCandidateInfo &candidates,
+                                            TCCOptions options = TCCOptions());
 
   /// Diagnose common failures due to applications of an argument list to an
   /// ApplyExpr or SubscriptExpr.
@@ -2781,7 +2827,7 @@ typeCheckChildIndependently(Expr *subExpr, Type convertType,
   // If there is no contextual type available, tell typeCheckExpression that it
   // is ok to produce an ambiguous result, it can just fill in holes with
   // UnresolvedType and we'll deal with it.
-  if (!convertType)
+  if (!convertType || options.contains(TCC_AllowUnresolvedTypeVariables))
     TCEOptions |= TypeCheckExprFlags::AllowUnresolvedTypeVariables;
 
   bool hadError = CS->TC.typeCheckExpression(subExpr, CS->DC, convertType,
@@ -3169,7 +3215,8 @@ void ConstraintSystem::diagnoseAssignmentFailure(Expr *dest, Type destTy,
 /// Special magic to handle inout exprs and tuples in argument lists.
 Expr *FailureDiagnosis::
 typeCheckArgumentChildIndependently(Expr *argExpr, Type argType,
-                                    const CalleeCandidateInfo &candidates) {
+                                    const CalleeCandidateInfo &candidates,
+                                    TCCOptions options) {
   // Grab one of the candidates (if present) and get its input list to help
   // identify operators that have implicit inout arguments.
   Type exampleInputType;
@@ -3203,7 +3250,6 @@ typeCheckArgumentChildIndependently(Expr *argExpr, Type argType,
   if (!TE) {
     // If the argument isn't a tuple, it is some scalar value for a
     // single-argument call.
-    TCCOptions options;
     if (exampleInputType && exampleInputType->is<InOutType>())
       options |= TCC_AllowLValue;
 
@@ -3276,7 +3322,6 @@ typeCheckArgumentChildIndependently(Expr *argExpr, Type argType,
         unsigned inArgNo = sources[i];
         auto actualType = argTypeTT->getElementType(i);
 
-        TCCOptions options;
         if (actualType->is<InOutType>())
           options |= TCC_AllowLValue;
 
@@ -3341,7 +3386,6 @@ typeCheckArgumentChildIndependently(Expr *argExpr, Type argType,
     exampleInputTuple = exampleInputType->getAs<TupleType>();
 
   for (unsigned i = 0, e = TE->getNumElements(); i != e; i++) {
-    TCCOptions options;
     if (exampleInputTuple && i < exampleInputTuple->getNumElements() &&
         exampleInputTuple->getElementType(i)->is<InOutType>())
       options |= TCC_AllowLValue;
@@ -3761,17 +3805,16 @@ bool FailureDiagnosis::diagnoseParameterErrors(CalleeCandidateInfo &CCI,
       badArgExpr = argExpr;
     }
 
+    // It could be that the argument doesn't conform to an archetype.
+    if (CCI.diagnoseGenericParameterErrors(badArgExpr))
+      return true;
+    
     // Re-type-check the argument with the expected type of the candidate set.
     // This should produce a specific and tailored diagnostic saying that the
     // type mismatches with expectations.
     Type paramType = CCI.failedArgument.parameterType;
     if (!typeCheckChildIndependently(badArgExpr, paramType,
                                      CTP_CallArgument, options))
-      return true;
-
-    // If that fails, it could be that the argument doesn't conform to an
-    // archetype.
-    if (CCI.diagnoseGenericParameterErrors(badArgExpr))
       return true;
   }
   
@@ -4059,8 +4102,9 @@ bool FailureDiagnosis::visitApplyExpr(ApplyExpr *callExpr) {
   // Get the expression result of type checking the arguments to the call
   // independently, so we have some idea of what we're working with.
   //
-  auto argExpr = typeCheckArgumentChildIndependently(callExpr->getArg(),
-                                                     argType, calleeInfo);
+  auto argExpr = typeCheckArgumentChildIndependently(callExpr->getArg(), argType,
+                                                     calleeInfo,
+                                                     TCC_AllowUnresolvedTypeVariables);
   if (!argExpr)
     return true; // already diagnosed.
 
@@ -4069,6 +4113,14 @@ bool FailureDiagnosis::visitApplyExpr(ApplyExpr *callExpr) {
   if (diagnoseParameterErrors(calleeInfo, callExpr->getFn(), argExpr))
     return true;
 
+  // Force recheck of the arg expression because we allowed unresolved types
+  // before, and that turned out not to help, and now we want any diagnoses
+  // from disallowing them.
+  argExpr = typeCheckArgumentChildIndependently(callExpr->getArg(), argType,
+                                                calleeInfo, TCC_ForceRecheck);
+  if (!argExpr)
+    return true; // already diagnosed.
+  
   // Diagnose some simple and common errors.
   if (calleeInfo.diagnoseSimpleErrors(callExpr->getLoc()))
     return true;

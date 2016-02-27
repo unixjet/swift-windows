@@ -231,7 +231,7 @@ SILValue SILDeserializer::getLocalValue(ValueID Id,
   // it until we see a real definition.
   ValueBase *&Placeholder = ForwardLocalValues[Id];
   if (!Placeholder)
-    Placeholder = new (SILMod) GlobalAddrInst(nullptr, Type);
+    Placeholder = new (SILMod) GlobalAddrInst(SILDebugLocation(), Type);
   return Placeholder;
 }
 
@@ -282,7 +282,7 @@ static SILFunction *createBogusSILFunction(SILModule &M,
   SourceLoc loc;
   return M.getOrCreateFunction(
       SILLinkage::Private, name, type.castTo<SILFunctionType>(), nullptr,
-      SILFileLocation(loc), IsNotBare, IsNotTransparent, IsNotFragile,
+      RegularLocation(loc), IsNotBare, IsNotTransparent, IsNotFragile,
       IsNotThunk, SILFunction::NotRelevant);
 }
 
@@ -402,7 +402,7 @@ SILFunction *SILDeserializer::readSILFunction(DeclID FID,
   auto fn = existingFn;
 
   // TODO: use the correct SILLocation from module.
-  SILLocation loc = SILFileLocation(SourceLoc());
+  SILLocation loc = RegularLocation(SourceLoc());
 
   // If we have an existing function, verify that the types match up.
   if (fn) {
@@ -624,7 +624,7 @@ bool SILDeserializer::readSILInstruction(SILFunction *Fn, SILBasicBlock *BB,
   ModuleID OwningModuleID;
   SourceLoc SLoc;
   ArrayRef<uint64_t> ListOfValues;
-  SILLocation Loc = SILFileLocation(SLoc);
+  SILLocation Loc = RegularLocation(SLoc);
 
   switch (RecordKind) {
   default:
@@ -894,13 +894,11 @@ bool SILDeserializer::readSILInstruction(SILFunction *Fn, SILBasicBlock *BB,
     SILType FnTy = getSILType(Ty, SILValueCategory::Object);
     SILType SubstFnTy = getSILType(Ty2, SILValueCategory::Object);
     SILFunctionType *FTI = SubstFnTy.castTo<SILFunctionType>();
-    auto ArgTys = FTI->getParameterSILTypes();
-
-    assert(ArgTys.size() == ListOfValues.size() &&
+    assert(FTI->getNumSILArguments() == ListOfValues.size() &&
            "Argument number mismatch in ApplyInst.");
     SmallVector<SILValue, 4> Args;
     for (unsigned I = 0, E = ListOfValues.size(); I < E; I++)
-      Args.push_back(getLocalValue(ListOfValues[I], ArgTys[I]));
+      Args.push_back(getLocalValue(ListOfValues[I],FTI->getSILArgumentType(I)));
     unsigned NumSub = NumSubs;
 
     SmallVector<Substitution, 4> Substitutions;
@@ -912,7 +910,7 @@ bool SILDeserializer::readSILInstruction(SILFunction *Fn, SILBasicBlock *BB,
 
     ResultVal = Builder.createApply(Loc, getLocalValue(ValID, FnTy),
                                     SubstFnTy,
-                                    FTI->getResult().getSILType(),
+                                    FTI->getSILResult(),
                                     Substitutions, Args, IsNonThrowingApply != 0);
     break;
   }
@@ -932,12 +930,11 @@ bool SILDeserializer::readSILInstruction(SILFunction *Fn, SILBasicBlock *BB,
     ListOfValues = ListOfValues.drop_back();
 
     SILFunctionType *FTI = SubstFnTy.castTo<SILFunctionType>();
-    auto ArgTys = FTI->getParameterSILTypes();
-    assert(ArgTys.size() == ListOfValues.size() &&
+    assert(FTI->getNumSILArguments() == ListOfValues.size() &&
            "Argument number mismatch in ApplyInst.");
     SmallVector<SILValue, 4> Args;
     for (unsigned I = 0, E = ListOfValues.size(); I < E; I++)
-      Args.push_back(getLocalValue(ListOfValues[I], ArgTys[I]));
+      Args.push_back(getLocalValue(ListOfValues[I],FTI->getSILArgumentType(I)));
     unsigned NumSub = NumSubs;
 
     SmallVector<Substitution, 4> Substitutions;
@@ -1991,7 +1988,7 @@ SILWitnessTable *SILDeserializer::readWitnessTable(DeclID WId,
                           MF->readConformance(SILCursor).getConcrete());
 
   if (!existingWt)
-    existingWt = SILMod.lookUpWitnessTable(theConformance, false).first;
+    existingWt = SILMod.lookUpWitnessTable(theConformance, false);
   auto wT = existingWt;
 
   // If we have an existing witness table, verify that the conformance matches

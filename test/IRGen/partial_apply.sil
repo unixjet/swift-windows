@@ -205,7 +205,7 @@ entry(%x : $Int):
   return %p : $@callee_owned Int -> Int
 }
 
-sil public_external @generic_captured_and_open_param : $@convention(thin) <T> (@out T, @in T, @inout T) -> ()
+sil public_external @generic_captured_and_open_param : $@convention(thin) <T> (@in T, @inout T) -> @out T
 
 // CHECK-LABEL: define {{.*}} @partial_apply_open_generic_capture({{.*}} %swift.type* %T) {{.*}} {
 // CHECK:         store %swift.type* %T
@@ -214,11 +214,11 @@ sil public_external @generic_captured_and_open_param : $@convention(thin) <T> (@
 // CHECK:       define {{.*}} [[PARTIAL_APPLY_STUB]]
 // CHECK:         [[T:%.*]] = load %swift.type*, %swift.type**
 // CHECK:         tail call void @generic_captured_and_open_param({{.*}} %swift.type* [[T]])
-sil @partial_apply_open_generic_capture : $@convention(thin) <T> (@inout T) -> @callee_owned (@out T, @in T) -> () {
+sil @partial_apply_open_generic_capture : $@convention(thin) <T> (@inout T) -> @callee_owned (@in T) -> @out T {
 entry(%a : $*T):
-  %f = function_ref @generic_captured_and_open_param : $@convention(thin) <U> (@out U, @in U, @inout U) -> ()
-  %p = partial_apply %f<T>(%a) : $@convention(thin) <U> (@out U, @in U, @inout U) -> ()
-  return %p : $@callee_owned (@out T, @in T) -> ()
+  %f = function_ref @generic_captured_and_open_param : $@convention(thin) <U> (@in U, @inout U) -> @out U
+  %p = partial_apply %f<T>(%a) : $@convention(thin) <U> (@in U, @inout U) -> @out U
+  return %p : $@callee_owned (@in T) -> @out T
 }
 
 /*****************************************************************************/
@@ -453,22 +453,22 @@ bb0(%a : $SwiftClass, %b : $*T, %c : $Int):
   return %p : $@callee_owned () -> ()
 }
 
-sil public_external @captured_dependent_out_param : $@convention(thin) <A> (@out A, @in A) -> ()
+sil public_external @captured_dependent_out_param : $@convention(thin) <A> (@in A) -> @out A
 
-sil @partial_apply_with_out_param : $@convention(thin) <T> (@in T) -> @callee_owned (@out T) -> () {
+sil @partial_apply_with_out_param : $@convention(thin) <T> (@in T) -> @callee_owned () -> @out T {
 bb0(%x : $*T):
-  %f = function_ref @captured_dependent_out_param : $@convention(thin) <B> (@out B, @in B) -> ()
-  %p = partial_apply %f<T>(%x) : $@convention(thin) <C> (@out C, @in C) -> ()
-  return %p : $@callee_owned (@out T) -> ()
+  %f = function_ref @captured_dependent_out_param : $@convention(thin) <B> (@in B) -> @out B
+  %p = partial_apply %f<T>(%x) : $@convention(thin) <C> (@in C) -> @out C
+  return %p : $@callee_owned () -> @out T
 }
 
 // CHECK-LABEL: define internal void @_TPA_captured_dependent_out_param(%swift.opaque* noalias nocapture sret, %swift.refcounted*) {{.*}} {
 // CHECK:         call void @captured_dependent_out_param(%swift.opaque* noalias nocapture sret
 
-sil @partial_apply_dynamic_with_out_param : $@convention(thin) <T> (Int32, @owned @callee_owned (@out T, Int32) -> ()) -> @callee_owned (@out T) -> () {
-bb0(%x : $Int32, %f : $@callee_owned (@out T, Int32) -> ()):
-  %p = partial_apply %f(%x) : $@callee_owned (@out T, Int32) -> ()
-  return %p : $@callee_owned (@out T) -> ()
+sil @partial_apply_dynamic_with_out_param : $@convention(thin) <T> (Int32, @owned @callee_owned (Int32) -> @out T) -> @callee_owned () -> @out T {
+bb0(%x : $Int32, %f : $@callee_owned (Int32) -> @out T):
+  %p = partial_apply %f(%x) : $@callee_owned (Int32) -> @out T
+  return %p : $@callee_owned () -> @out T
 }
 
 // CHECK-LABEL: define{{( protected)?}} { i8*, %swift.refcounted* } @partial_apply_dynamic_with_out_param
@@ -535,3 +535,41 @@ entry:
   %g = partial_apply %f(%b, %ba) : $@convention(thin) (@owned @box (), @inout ()) -> ()
   return undef : $()
 }
+
+protocol P0 {}
+protocol P1 { associatedtype X : P0 }
+protocol P2 { associatedtype Y : P1 }
+
+sil hidden_external @complex_generic_function : $@convention(thin) <T where T : P2, T.Y : P2> (Int) -> ()
+
+sil @partial_apply_complex_generic_function : $@convention(thin) <T where T : P2, T.Y : P2> (Int) -> () {
+bb0(%0 : $Int):
+  %fn = function_ref @complex_generic_function : $@convention(thin) <T where T : P2, T.Y : P2> (Int) -> ()
+  %pa = partial_apply %fn <T, T.Y, T.Y.X, T.Y.Y, T.Y.Y.X>(%0) : $@convention(thin) <T where T : P2, T.Y : P1, T.Y : P2, T.Y.X : P0, T.Y.Y : P1, T.Y.Y.X : P0> (Int) -> ()
+  %result = tuple ()
+  return %result : $()
+}
+// CHECK-LABEL: define void @partial_apply_complex_generic_function(i64, %swift.type* %T, i8** %T.P2, i8** %T.Y.P2)
+// CHECK:      [[T0:%.*]] = call noalias %swift.refcounted* @swift_allocObject(%swift.type* {{.*}}, i64 48, i64 7)
+// CHECK-NEXT: [[T1:%.*]] = bitcast %swift.refcounted* [[T0]] to <{ %swift.refcounted, [24 x i8], %Si }>*
+// CHECK-NEXT: [[T2:%.*]] = getelementptr inbounds <{ %swift.refcounted, [24 x i8], %Si }>, <{ %swift.refcounted, [24 x i8], %Si }>* [[T1]], i32 0, i32 1
+// CHECK-NEXT: [[BUFFER:%.*]] = bitcast [24 x i8]* [[T2]] to %swift.type**
+// CHECK-NEXT: store %swift.type* %T, %swift.type** [[BUFFER]], align 8
+// CHECK-NEXT: [[T0:%.*]] = getelementptr inbounds %swift.type*, %swift.type** [[BUFFER]], i32 1
+// CHECK-NEXT: [[T1:%.*]] = bitcast %swift.type** [[T0]] to i8***
+// CHECK-NEXT: store i8** %T.P2, i8*** [[T1]], align 8
+// CHECK-NEXT: [[T0:%.*]] = getelementptr inbounds %swift.type*, %swift.type** [[BUFFER]], i32 2
+// CHECK-NEXT: [[T1:%.*]] = bitcast %swift.type** [[T0]] to i8***
+// CHECK-NEXT: store i8** %T.Y.P2, i8*** [[T1]], align 8
+
+// CHECK-LABEL: define internal void @_TPA_complex_generic_function(%swift.refcounted*)
+// CHECK:      [[T0:%.*]] = bitcast %swift.refcounted* %0 to <{ %swift.refcounted, [24 x i8], %Si }>*
+// CHECK-NEXT: [[T1:%.*]] = getelementptr inbounds <{ %swift.refcounted, [24 x i8], %Si }>, <{ %swift.refcounted, [24 x i8], %Si }>* [[T0]], i32 0, i32 1
+// CHECK-NEXT: [[BUFFER:%.*]] = bitcast [24 x i8]* [[T1]] to %swift.type**
+// CHECK-NEXT: %T = load %swift.type*, %swift.type** [[BUFFER]], align 8
+// CHECK-NEXT: [[T0:%.*]] = getelementptr inbounds %swift.type*, %swift.type** [[BUFFER]], i32 1
+// CHECK-NEXT: [[T1:%.*]] = bitcast %swift.type** [[T0]] to i8***
+// CHECK-NEXT: %T.P2 = load i8**, i8*** [[T1]], align 8
+// CHECK-NEXT: [[T0:%.*]] = getelementptr inbounds %swift.type*, %swift.type** [[BUFFER]], i32 2
+// CHECK-NEXT: [[T1:%.*]] = bitcast %swift.type** [[T0]] to i8***
+// CHECK-NEXT: %T.Y.P2 = load i8**, i8*** [[T1]], align 8

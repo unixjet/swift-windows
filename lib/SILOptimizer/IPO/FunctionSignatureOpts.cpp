@@ -11,16 +11,18 @@
 //===----------------------------------------------------------------------===//
 
 #define DEBUG_TYPE "sil-function-signature-opts"
-#include "swift/SILOptimizer/PassManager/Passes.h"
+#include "swift/SILOptimizer/Analysis/AliasAnalysis.h"
+#include "swift/SILOptimizer/Analysis/ARCAnalysis.h"
 #include "swift/SILOptimizer/Analysis/BasicCalleeAnalysis.h"
 #include "swift/SILOptimizer/Analysis/FunctionOrder.h"
 #include "swift/SILOptimizer/Analysis/RCIdentityAnalysis.h"
-#include "swift/SILOptimizer/Analysis/ARCAnalysis.h"
+#include "swift/SILOptimizer/PassManager/Passes.h"
 #include "swift/SILOptimizer/PassManager/Transforms.h"
 #include "swift/SILOptimizer/Utils/Local.h"
-#include "swift/Basic/LLVM.h"
 #include "swift/Basic/BlotMapVector.h"
+#include "swift/Basic/LLVM.h"
 #include "swift/Basic/Range.h"
+#include "swift/SIL/DebugUtils.h"
 #include "swift/SIL/Mangle.h"
 #include "swift/SIL/Projection.h"
 #include "swift/SIL/SILFunction.h"
@@ -28,19 +30,18 @@
 #include "swift/SIL/SILArgument.h"
 #include "swift/SIL/SILValue.h"
 #include "swift/SIL/SILDebugScope.h"
-#include "swift/SIL/DebugUtils.h"
 #include "llvm/ADT/SmallBitVector.h"
 #include "llvm/ADT/SmallString.h"
 #include "llvm/ADT/Statistic.h"
 #include "llvm/Support/Allocator.h"
 #include "llvm/Support/Debug.h"
-#include <type_traits>
 
 using namespace swift;
 
 STATISTIC(NumFunctionSignaturesOptimized, "Total func sig optimized");
 STATISTIC(NumDeadArgsEliminated, "Total dead args eliminated");
 STATISTIC(NumOwnedConvertedToGuaranteed, "Total owned args -> guaranteed args");
+STATISTIC(NumOwnedConvertedToGuaranteedReturnValue, "Total owned args -> guaranteed return value");
 STATISTIC(NumCallSitesOptimized, "Total call sites optimized");
 STATISTIC(NumSROAArguments, "Total SROA arguments optimized");
 
@@ -61,17 +62,30 @@ static bool isRelease(SILInstruction *I) {
   }
 }
 
+/// Returns true if LHS and RHS contain identical set of releases.
+static bool hasIdenticalReleases(ReleaseList LHS, ReleaseList RHS) {
+  llvm::DenseSet<SILInstruction *> Releases;
+  if (LHS.size() != RHS.size())
+    return false;
+  for (auto &X : LHS) 
+    Releases.insert(X);
+  for (auto &X : RHS) 
+    if (Releases.find(X) == Releases.end())
+      return false;
+  return true;
+}
+
 /// Returns .Some(I) if I is a release that is the only non-debug instruction
 /// with side-effects in the use-def graph originating from Arg. Returns
 /// .Some(nullptr), if all uses from the arg were either debug insts or do not
 /// have side-effects. Returns .None if there were any non-release instructions
 /// with side-effects in the use-def graph from Arg or if there were multiple
 /// release instructions with side-effects in the use-def graph from Arg.
-static llvm::Optional<NullablePtr<SILInstruction>>
+static llvm::Optional<ReleaseList>
 getNonTrivialNonDebugReleaseUse(SILArgument *Arg) {
   llvm::SmallVector<SILInstruction *, 8> Worklist;
   llvm::SmallPtrSet<SILInstruction *, 8> SeenInsts;
-  llvm::Optional<SILInstruction *> Result;
+  ReleaseList Result;
 
   for (Operand *I : getNonDebugUses(SILValue(Arg)))
     Worklist.push_back(I->getUser());
@@ -91,12 +105,8 @@ getNonTrivialNonDebugReleaseUse(SILArgument *Arg) {
       if (!isRelease(U))
         return None;
 
-      // If we have already seen a release of some sort, bail.
-      if (Result.hasValue())
-        return None;
-
       // Otherwise, set result to that value.
-      Result = U;
+      Result.push_back(U);
       continue;
     }
 
@@ -105,9 +115,7 @@ getNonTrivialNonDebugReleaseUse(SILArgument *Arg) {
       Worklist.push_back(I->getUser());
   }
 
-  if (!Result.hasValue())
-    return NullablePtr<SILInstruction>();
-  return NullablePtr<SILInstruction>(Result.getValue());
+  return Result;
 }
 
 //===----------------------------------------------------------------------===//
@@ -126,23 +134,23 @@ struct ArgumentDescriptor {
   /// The original index of this argument.
   unsigned Index;
 
-  /// The original parameter info of this argument.
-  SILParameterInfo ParameterInfo;
-
   /// The original decl of this Argument.
   const ValueDecl *Decl;
 
   /// Was this parameter originally dead?
   bool IsDead;
 
+  /// Is this parameter an indirect result?
+  bool IsIndirectResult;
+
   /// If non-null, this is the release in the return block of the callee, which
   /// is associated with this parameter if it is @owned. If the parameter is not
   /// @owned or we could not find such a release in the callee, this is null.
-  SILInstruction *CalleeRelease;
+  ReleaseList CalleeRelease;
 
   /// The same as CalleeRelease, but the release in the throw block, if it is a
   /// function which has a throw block.
-  SILInstruction *CalleeReleaseInThrowBlock;
+  ReleaseList CalleeReleaseInThrowBlock;
 
   /// The projection tree of this arguments.
   ProjectionTree ProjTree;
@@ -157,9 +165,10 @@ struct ArgumentDescriptor {
   /// have access to the original argument's state if we modify the argument
   /// when optimizing.
   ArgumentDescriptor(llvm::BumpPtrAllocator &BPA, SILArgument *A)
-      : Arg(A), Index(A->getIndex()), ParameterInfo(A->getParameterInfo()),
-        Decl(A->getDecl()), IsDead(false), CalleeRelease(),
-        CalleeReleaseInThrowBlock(),
+      : Arg(A), Index(A->getIndex()),
+        Decl(A->getDecl()), IsDead(false),
+        IsIndirectResult(A->isIndirectResult()),
+        CalleeRelease(), CalleeReleaseInThrowBlock(),
         ProjTree(A->getModule(), BPA, A->getType()) {
     ProjTree.computeUsesAndLiveness(A);
   }
@@ -169,8 +178,8 @@ struct ArgumentDescriptor {
   ArgumentDescriptor &operator=(const ArgumentDescriptor &) = delete;
   ArgumentDescriptor &operator=(ArgumentDescriptor &&) = default;
 
-  /// \returns true if this argument's ParameterConvention is P.
-  bool hasConvention(ParameterConvention P) const {
+  /// \returns true if this argument's convention is P.
+  bool hasConvention(SILArgumentConvention P) const {
     return Arg->hasConvention(P);
   }
 
@@ -198,7 +207,7 @@ struct ArgumentDescriptor {
                                  unsigned ArgOffset);
 
   bool canOptimizeLiveArg() const {
-    return ParameterInfo.getSILType().isObject();
+    return Arg->getType().isObject();
   }
 
   /// Return true if it's both legal and a good idea to explode this argument.
@@ -218,6 +227,38 @@ struct ArgumentDescriptor {
   }
 };
 
+/// A structure that maintains all of the information about a specific
+/// direct result that we are tracking.
+struct ResultDescriptor {
+  /// The original parameter info of this argument.
+  SILResultInfo ResultInfo;
+
+  /// If non-null, this is the release in the return block of the callee, which
+  /// is associated with this parameter if it is @owned. If the parameter is not
+  /// @owned or we could not find such a release in the callee, this is null.
+  RetainList CalleeRetain;
+
+  /// Initialize this argument descriptor with all information from A that we
+  /// use in our optimization.
+  ///
+  /// *NOTE* We cache a lot of data from the argument and maintain a reference
+  /// to the original argument. The reason why we do this is to make sure we
+  /// have access to the original argument's state if we modify the argument
+  /// when optimizing.
+  ResultDescriptor() {};
+  ResultDescriptor(SILResultInfo RI) : ResultInfo(RI), CalleeRetain() {}
+
+  ResultDescriptor(const ResultDescriptor &) = delete;
+  ResultDescriptor(ResultDescriptor &&) = default;
+  ResultDescriptor &operator=(const ResultDescriptor &) = delete;
+  ResultDescriptor &operator=(ResultDescriptor &&) = default;
+
+  /// \returns true if this argument's ParameterConvention is P.
+  bool hasConvention(ResultConvention R) const {
+    return ResultInfo.getConvention() == R;
+  }
+};
+
 } // end anonymous namespace
 
 void ArgumentDescriptor::computeOptimizedInterfaceParams(
@@ -229,6 +270,14 @@ void ArgumentDescriptor::computeOptimizedInterfaceParams(
     return;
   }
 
+  // If we have an indirect result, bail.
+  if (IsIndirectResult) {
+    DEBUG(llvm::dbgs() << "            Indirect result.\n");
+    return;
+  }
+
+  auto ParameterInfo = Arg->getKnownParameterInfo();
+
   // If this argument is live, but we cannot optimize it.
   if (!canOptimizeLiveArg()) {
     DEBUG(llvm::dbgs() << "            Cannot optimize live arg!\n");
@@ -239,9 +288,9 @@ void ArgumentDescriptor::computeOptimizedInterfaceParams(
   // If we cannot explode this value, handle callee release and return.
   if (!shouldExplode()) {
     DEBUG(llvm::dbgs() << "            ProjTree cannot explode arg.\n");
-    // If we found a release in the callee in the last BB on an @owned
+    // If we found releases in the callee in the last BB on an @owned
     // parameter, change the parameter to @guaranteed and continue...
-    if (CalleeRelease) {
+    if (!CalleeRelease.empty()) {
       DEBUG(llvm::dbgs() << "            Has callee release.\n");
       assert(ParameterInfo.getConvention() ==
                  ParameterConvention::Direct_Owned &&
@@ -277,8 +326,8 @@ void ArgumentDescriptor::computeOptimizedInterfaceParams(
     // If Ty is guaranteed, just pass it through.
     ParameterConvention Conv = ParameterInfo.getConvention();
     if (Conv == ParameterConvention::Direct_Guaranteed) {
-      assert(!CalleeRelease && "Guaranteed parameter should not have a callee "
-                               "release.");
+      assert(CalleeRelease.empty() && "Guaranteed parameter should not have a "
+                                      "callee release.");
       SILParameterInfo NewInfo(Ty.getSwiftRValueType(),
                                ParameterConvention::Direct_Guaranteed);
       Out.push_back(NewInfo);
@@ -289,7 +338,7 @@ void ArgumentDescriptor::computeOptimizedInterfaceParams(
     // guaranteed.
     assert(ParameterInfo.getConvention() == ParameterConvention::Direct_Owned &&
            "Can only transform @owned => @guaranteed in this code path");
-    if (CalleeRelease) {
+    if (!CalleeRelease.empty()) {
       SILParameterInfo NewInfo(Ty.getSwiftRValueType(),
                                ParameterConvention::Direct_Guaranteed);
       Out.push_back(NewInfo);
@@ -344,16 +393,10 @@ unsigned ArgumentDescriptor::updateOptimizedBBArgs(SILBuilder &Builder,
     // do need the instruction to be non-null.
     //
     // TODO: This should not be necessary.
-    if (CalleeRelease) {
-      SILType CalleeReleaseTy = CalleeRelease->getOperand(0)->getType();
-      CalleeRelease->setOperand(
+    for (auto &X : CalleeRelease) {
+      SILType CalleeReleaseTy = X->getOperand(0)->getType();
+      X->setOperand(
           0, SILUndef::get(CalleeReleaseTy, Builder.getModule()));
-
-      // TODO: Currently we cannot mark arguments as dead if they are released
-      // in a throw block. But as soon as we can do this, we have to handle
-      // CalleeReleaseInThrowBlock as well.
-      assert(!CalleeReleaseInThrowBlock &&
-             "released arg in throw block cannot be dead");
     }
 
     // We should be able to recursively delete all of the remaining
@@ -423,11 +466,13 @@ namespace {
 // Helper class that analyzes the parameters of a function to
 // determine how we can modify the function signature to improve the
 // quality of the code that we generate.
-class ParameterAnalyzer {
+class SignatureAnalyzer {
   /// The function that we are analyzing.
   SILFunction *F;
 
   RCIdentityFunctionInfo *RCIA;
+
+  AliasAnalysis *AA;
 
   /// Does any call inside the given function may bind dynamic 'Self' to a
   /// generic argument of the callee.
@@ -441,12 +486,17 @@ class ParameterAnalyzer {
   /// an argument that we will use during our optimization.
   llvm::SmallVector<ArgumentDescriptor, 8> ArgDescList;
 
+  /// Keep a "view" of precompiled information on the direct results
+  /// which we will use during our optimization.
+  llvm::SmallVector<ResultDescriptor, 4> ResultDescList;
+
   llvm::BumpPtrAllocator &Allocator;
 
 public:
-  ParameterAnalyzer(SILFunction *F, RCIdentityFunctionInfo *RCIA,
+  SignatureAnalyzer(SILFunction *F, RCIdentityFunctionInfo *RCIA,
+                    AliasAnalysis *AA,
                     llvm::BumpPtrAllocator &Allocator)
-      : F(F), RCIA(RCIA), MayBindDynamicSelf(computeMayBindDynamicSelf(F)),
+      : F(F), RCIA(RCIA), AA(AA), MayBindDynamicSelf(computeMayBindDynamicSelf(F)),
         Allocator(Allocator) {}
 
   bool analyze();
@@ -457,6 +507,7 @@ public:
 
   bool shouldModifySelfArgument() const { return ShouldModifySelfArgument; }
   ArrayRef<ArgumentDescriptor> getArgDescList() const { return ArgDescList; }
+  MutableArrayRef<ResultDescriptor> getResultDescList() {return ResultDescList;}
   MutableArrayRef<ArgumentDescriptor> getArgDescList() { return ArgDescList; }
   SILFunction *getAnalyzedFunction() const { return F; }
 
@@ -475,14 +526,14 @@ private:
 /// A class that contains all analysis information we gather about our
 /// function. Also provides utility methods for creating the new empty function.
 class SignatureOptimizer {
-  ParameterAnalyzer &Analyzer;
+  SignatureAnalyzer &Analyzer;
 
 public:
   SignatureOptimizer() = delete;
   SignatureOptimizer(const SignatureOptimizer &) = delete;
   SignatureOptimizer(SignatureOptimizer &&) = delete;
 
-  SignatureOptimizer(ParameterAnalyzer &Analyzer) : Analyzer(Analyzer) {}
+  SignatureOptimizer(SignatureAnalyzer &Analyzer) : Analyzer(Analyzer) {}
 
   ArrayRef<ArgumentDescriptor> getArgDescList() const {
     return Analyzer.getArgDescList();
@@ -490,6 +541,10 @@ public:
 
   MutableArrayRef<ArgumentDescriptor> getArgDescList() {
     return Analyzer.getArgDescList();
+  }
+
+  MutableArrayRef<ResultDescriptor> getResultDescList() {
+    return Analyzer.getResultDescList();
   }
 
   /// Create a new empty function with the optimized signature found by this
@@ -508,9 +563,9 @@ private:
 /// This function goes through the arguments of F and sees if we have anything
 /// to optimize in which case it returns true. If we have nothing to optimize,
 /// it returns false.
-bool ParameterAnalyzer::analyze() {
+bool SignatureAnalyzer::analyze() {
   // For now ignore functions with indirect results.
-  if (F->getLoweredFunctionType()->hasIndirectResult())
+  if (F->getLoweredFunctionType()->hasIndirectResults())
     return false;
 
   ArrayRef<SILArgument *> Args = F->begin()->getBBArgs();
@@ -524,6 +579,7 @@ bool ParameterAnalyzer::analyze() {
   // Did we decide we should optimize any parameter?
   bool ShouldOptimize = false;
 
+  // Analyze the argument information.
   for (unsigned i = 0, e = Args.size(); i != e; ++i) {
     ArgumentDescriptor A(Allocator, Args[i]);
     bool HaveOptimizedArg = false;
@@ -533,7 +589,7 @@ bool ParameterAnalyzer::analyze() {
 
     // If this argument is not ABI required and has no uses except for debug
     // instructions, remove it.
-    if (!isABIRequired && OnlyRelease && OnlyRelease.getValue().isNull()) {
+    if (!isABIRequired && OnlyRelease && OnlyRelease.getValue().empty()) {
       A.IsDead = true;
       HaveOptimizedArg = true;
       ++NumDeadArgsEliminated;
@@ -541,22 +597,23 @@ bool ParameterAnalyzer::analyze() {
 
     // See if we can find a ref count equivalent strong_release or release_value
     // at the end of this function if our argument is an @owned parameter.
-    if (A.hasConvention(ParameterConvention::Direct_Owned)) {
-      if (auto *Release = ArgToReturnReleaseMap.getSingleReleaseForArgument(A.Arg)) {
-        SILInstruction *ReleaseInThrow = nullptr;
+    if (A.hasConvention(SILArgumentConvention::Direct_Owned)) {
+      auto Releases = ArgToReturnReleaseMap.getReleasesForArgument(A.Arg);
+      if (!Releases.empty()) {
 
         // If the function has a throw block we must also find a matching
         // release in the throw block.
-        if (!ArgToThrowReleaseMap.hasBlock() ||
-            (ReleaseInThrow = ArgToThrowReleaseMap.getSingleReleaseForArgument(A.Arg))) {
+        auto ReleasesInThrow = ArgToThrowReleaseMap.getReleasesForArgument(A.Arg);
+        if (!ArgToThrowReleaseMap.hasBlock() || !ReleasesInThrow.empty()) {
 
           // TODO: accept a second release in the throw block to let the
           // argument be dead.
-          if (OnlyRelease && OnlyRelease.getValue().getPtrOrNull() == Release) {
+          if (OnlyRelease && hasIdenticalReleases(OnlyRelease.getValue(), Releases)) {
             A.IsDead = true;
           }
-          A.CalleeRelease = Release;
-          A.CalleeReleaseInThrowBlock = ReleaseInThrow;
+
+          A.CalleeRelease = Releases;
+          A.CalleeReleaseInThrowBlock = ReleasesInThrow;
           HaveOptimizedArg = true;
           ++NumOwnedConvertedToGuaranteed;
         }
@@ -580,6 +637,27 @@ bool ParameterAnalyzer::analyze() {
     ArgDescList.push_back(std::move(A));
   }
 
+  // Analyze return result information.
+  auto DirectResults = F->getLoweredFunctionType()->getDirectResults();
+  for (SILResultInfo DirectResult : DirectResults) {
+    ResultDescList.emplace_back(DirectResult);
+  }
+  // For now, only do anything if there's a single direct result.
+  if (DirectResults.size() == 1 &&
+      ResultDescList[0].hasConvention(ResultConvention::Owned)) {
+    auto &RI = ResultDescList[0];
+    // We have an @owned return value, find the epilogue retains now.
+    ConsumedReturnValueToEpilogueRetainMatcher RVToReturnRetainMap(RCIA, AA, F);
+    auto Retains = RVToReturnRetainMap.getEpilogueRetains();
+    // We do not need to worry about the throw block, as the return value is only
+    // going to be used in the return block/normal block of the try_apply instruction.
+    if (!Retains.empty()) {
+      RI.CalleeRetain = Retains;
+      ShouldOptimize = true;
+      ++NumOwnedConvertedToGuaranteedReturnValue;
+    }
+  }
+
   return ShouldOptimize;
 }
 
@@ -587,11 +665,12 @@ bool ParameterAnalyzer::analyze() {
 //                                  Mangling
 //===----------------------------------------------------------------------===//
 
-std::string ParameterAnalyzer::getOptimizedName() const {
+std::string SignatureAnalyzer::getOptimizedName() const {
   Mangle::Mangler M;
   auto P = SpecializationPass::FunctionSignatureOpts;
   FunctionSignatureSpecializationMangler FSSM(P, M, F);
 
+  // Handle arguments' changes.
   for (unsigned i : indices(ArgDescList)) {
     const ArgumentDescriptor &Arg = ArgDescList[i];
     if (Arg.IsDead) {
@@ -600,7 +679,7 @@ std::string ParameterAnalyzer::getOptimizedName() const {
 
     // If we have an @owned argument and found a callee release for it,
     // convert the argument to guaranteed.
-    if (Arg.CalleeRelease) {
+    if (!Arg.CalleeRelease.empty()) {
       FSSM.setArgumentOwnedToGuaranteed(i);
     }
 
@@ -610,6 +689,12 @@ std::string ParameterAnalyzer::getOptimizedName() const {
       FSSM.setArgumentSROA(i);
     }
   }
+
+  // Handle return value's change.
+  // FIXME: handle multiple direct results here
+  if (ResultDescList.size() == 1 &&
+      !ResultDescList[0].CalleeRetain.empty())
+    FSSM.setReturnValueOwnedToUnowned();
 
   FSSM.mangle();
 
@@ -635,7 +720,25 @@ CanSILFunctionType SignatureOptimizer::createOptimizedSILFunctionType() {
     ArgDesc.computeOptimizedInterfaceParams(InterfaceParams);
   }
 
-  SILResultInfo InterfaceResult = FTy->getResult();
+  // ResultDescs only covers the direct results; we currently can't ever
+  // change an indirect result.  Piece the modified direct result information
+  // back into the all-results list.
+  llvm::SmallVector<SILResultInfo, 8> InterfaceResults;
+  auto ResultDescs = getResultDescList();
+  for (SILResultInfo InterfaceResult : FTy->getAllResults()) {
+    if (InterfaceResult.isDirect()) {
+      auto &RV = ResultDescs[0];
+      ResultDescs = ResultDescs.slice(0);
+      if (!RV.CalleeRetain.empty()) {
+        InterfaceResults.push_back(SILResultInfo(InterfaceResult.getType(),
+                                                 ResultConvention::Unowned));
+        continue;
+      }
+    }
+
+    InterfaceResults.push_back(InterfaceResult);
+  }
+
   auto InterfaceErrorResult = FTy->getOptionalErrorResult();
   auto ExtInfo = FTy->getExtInfo();
 
@@ -645,7 +748,7 @@ CanSILFunctionType SignatureOptimizer::createOptimizedSILFunctionType() {
 
   return SILFunctionType::get(FTy->getGenericSignature(), ExtInfo,
                               FTy->getCalleeConvention(), InterfaceParams,
-                              InterfaceResult, InterfaceErrorResult, Ctx);
+                              InterfaceResults, InterfaceErrorResult, Ctx);
 }
 
 SILFunction *SignatureOptimizer::createEmptyFunctionWithOptimizedSig(
@@ -673,6 +776,23 @@ SILFunction *SignatureOptimizer::createEmptyFunctionWithOptimizedSig(
       NewF->addSemanticsAttr(Attr);
 
   return NewF;
+}
+
+static void addRetainsForConvertedDirectResults(SILBuilder &Builder,
+                                                SILLocation Loc,
+                                                SILValue ReturnValue,
+                                     ArrayRef<ResultDescriptor> DirectResults) {
+  for (auto I : indices(DirectResults)) {
+    auto &RV = DirectResults[I];
+    if (RV.CalleeRetain.empty()) continue;
+
+    // Extract the return value if necessary.
+    SILValue SpecificResultValue = ReturnValue;
+    if (DirectResults.size() != 1)
+      SpecificResultValue = Builder.createTupleExtract(Loc, ReturnValue, I);
+
+    Builder.createRetainValue(Loc, SpecificResultValue);
+  }
 }
 
 //===----------------------------------------------------------------------===//
@@ -703,12 +823,15 @@ static void rewriteApplyInstToCallNewFunction(SignatureOptimizer &Optimizer,
     SILType LoweredType = NewF->getLoweredType();
     SILType ResultType = LoweredType.getFunctionInterfaceResultType();
     SILLocation Loc = AI->getLoc();
+    SILValue ReturnValue = SILValue();
 
     // Create the new apply.
     if (ApplyInst *RealAI = dyn_cast<ApplyInst>(AI)) {
       auto *NewAI = Builder.createApply(Loc, FRI, LoweredType, ResultType,
                                         ArrayRef<Substitution>(), NewArgs,
                                         RealAI->isNonThrowing());
+      // This is the return value.
+      ReturnValue = SILValue(NewAI);
       // Replace all uses of the old apply with the new apply.
       AI->replaceAllUsesWith(NewAI);
     } else {
@@ -717,11 +840,13 @@ static void rewriteApplyInstToCallNewFunction(SignatureOptimizer &Optimizer,
                              ArrayRef<Substitution>(), NewArgs,
                              TAI->getNormalBB(), TAI->getErrorBB());
 
+      // This is the return value.
+      ReturnValue = TAI->getNormalBB()->getBBArg(0);
       Builder.setInsertionPoint(TAI->getErrorBB(), TAI->getErrorBB()->begin());
       // If we have any arguments that were consumed but are now guaranteed,
       // insert a release_value in the error block.
       for (auto &ArgDesc : ArgDescs) {
-        if (!ArgDesc.CalleeRelease)
+        if (ArgDesc.CalleeRelease.empty())
           continue;
         Builder.createReleaseValue(Loc, FAS.getArgument(ArgDesc.Index));
       }
@@ -733,11 +858,16 @@ static void rewriteApplyInstToCallNewFunction(SignatureOptimizer &Optimizer,
     // If we have any arguments that were consumed but are now guaranteed,
     // insert a release_value.
     for (auto &ArgDesc : ArgDescs) {
-      if (!ArgDesc.CalleeRelease)
+      if (ArgDesc.CalleeRelease.empty())
         continue;
       Builder.createReleaseValue(Loc, FAS.getArgument(ArgDesc.Index));
     }
 
+    // If we have converted the return value from @owned to @guaranteed,
+    // insert a retain_value at the callsite.
+    addRetainsForConvertedDirectResults(Builder, Loc, ReturnValue,
+                                        Optimizer.getResultDescList());
+      
     // Erase the old apply and its callee.
     recursivelyDeleteTriviallyDeadInstructions(AI, true,
                                                [](SILInstruction *) {});
@@ -784,7 +914,7 @@ static void createThunkBody(SILBasicBlock *BB, SILFunction *NewF,
     // insert a release_value in the error block.
     Builder.setInsertionPoint(ErrorBlock);
     for (auto &ArgDesc : ArgDescs) {
-      if (!ArgDesc.CalleeRelease)
+      if (ArgDesc.CalleeRelease.empty())
         continue;
       Builder.createReleaseValue(Loc, BB->getBBArg(ArgDesc.Index));
     }
@@ -801,10 +931,14 @@ static void createThunkBody(SILBasicBlock *BB, SILFunction *NewF,
   // If we have any arguments that were consumed but are now guaranteed,
   // insert a release_value.
   for (auto &ArgDesc : ArgDescs) {
-    if (!ArgDesc.CalleeRelease)
+    if (ArgDesc.CalleeRelease.empty())
       continue;
     Builder.createReleaseValue(Loc, BB->getBBArg(ArgDesc.Index));
   }
+
+  // Handle @owned to @unowned return value conversion.
+  addRetainsForConvertedDirectResults(Builder, Loc, ReturnValue,
+                                      Optimizer.getResultDescList());
 
   // Function that are marked as @NoReturn must be followed by an 'unreachable'
   // instruction.
@@ -850,7 +984,7 @@ moveFunctionBodyToNewFunctionWithName(SILFunction *F,
   // Otherwise generate the thunk body just in case.
   SILBasicBlock *ThunkBody = F->createBasicBlock();
   for (auto &ArgDesc : ArgDescs) {
-    ThunkBody->createBBArg(ArgDesc.ParameterInfo.getSILType(), ArgDesc.Decl);
+    ThunkBody->createBBArg(ArgDesc.Arg->getType(), ArgDesc.Decl);
   }
   createThunkBody(ThunkBody, NewF, Optimizer);
 
@@ -868,6 +1002,7 @@ moveFunctionBodyToNewFunctionWithName(SILFunction *F,
 /// returns false otherwise.
 static bool optimizeFunctionSignature(llvm::BumpPtrAllocator &BPA,
                                       RCIdentityFunctionInfo *RCIA,
+                                      AliasAnalysis *AA, 
                                       SILFunction *F,
                                       const ApplyList &CallSites) {
   DEBUG(llvm::dbgs() << "Optimizing Function Signature of " << F->getName()
@@ -876,7 +1011,7 @@ static bool optimizeFunctionSignature(llvm::BumpPtrAllocator &BPA,
   assert(!CallSites.empty() && "Unexpected empty set of call sites!");
 
   // Analyze function arguments. If there is no work to be done, exit early.
-  ParameterAnalyzer Analyzer(F, RCIA, BPA);
+  SignatureAnalyzer Analyzer(F, RCIA, AA, BPA);
   if (!Analyzer.analyze()) {
     DEBUG(llvm::dbgs() << "    Has no optimizable arguments... "
                           "bailing...\n");
@@ -911,11 +1046,17 @@ static bool optimizeFunctionSignature(llvm::BumpPtrAllocator &BPA,
   //
   // TODO: If more stuff needs to be placed here, refactor into its own method.
   for (auto &A : Optimizer.getArgDescList()) {
-    if (A.CalleeRelease) {
-      A.CalleeRelease->eraseFromParent();
-      if (A.CalleeReleaseInThrowBlock) {
-        A.CalleeReleaseInThrowBlock->eraseFromParent();
-      }
+    for (auto &X : A.CalleeRelease) 
+      X->eraseFromParent();
+    for (auto &X : A.CalleeReleaseInThrowBlock) 
+      X->eraseFromParent();
+  }
+
+  // And remove all callee retains that we found and made redundant via owned
+  // to unowned conversion.
+  for (ResultDescriptor &RD : Optimizer.getResultDescList()) {
+    for (auto &X : RD.CalleeRetain) {
+      X->eraseFromParent();
     }
   }
 
@@ -986,6 +1127,7 @@ public:
     SILModule *M = getModule();
     auto *BCA = getAnalysis<BasicCalleeAnalysis>();
     auto *RCIA = getAnalysis<RCIdentityAnalysis>();
+    auto *AA = PM->getAnalysis<AliasAnalysis>();
     llvm::BumpPtrAllocator Allocator;
 
     DEBUG(llvm::dbgs() << "**** Optimizing Function Signatures ****\n\n");
@@ -1056,7 +1198,7 @@ public:
 
       // Otherwise, try to optimize the function signature of F.
       Changed |=
-          optimizeFunctionSignature(Allocator, RCIA->get(F), F, CallSites);
+          optimizeFunctionSignature(Allocator, RCIA->get(F), AA, F, CallSites);
     }
 
     // If we changed anything, invalidate the call graph.

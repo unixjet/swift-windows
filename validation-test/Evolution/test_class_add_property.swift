@@ -1,29 +1,18 @@
-// RUN: rm -rf %t && mkdir -p %t/before && mkdir -p %t/after
-
-// RUN: %target-build-swift -emit-library -Xfrontend -enable-resilience -D BEFORE -c %S/Inputs/class_add_property.swift -o %t/before/class_add_property.o
-// RUN: %target-build-swift -emit-module -Xfrontend -enable-resilience -D BEFORE -c %S/Inputs/class_add_property.swift -o %t/before/class_add_property.o
-
-// RUN: %target-build-swift -emit-library -Xfrontend -enable-resilience -D AFTER -c %S/Inputs/class_add_property.swift -o %t/after/class_add_property.o
-// RUN: %target-build-swift -emit-module -Xfrontend -enable-resilience -D AFTER -c %S/Inputs/class_add_property.swift -o %t/after/class_add_property.o
-
-// RUN: %target-build-swift -D BEFORE -c %s -I %t/before -o %t/before/main.o
-// RUN: %target-build-swift -D AFTER -c %s -I %t/after -o %t/after/main.o
-
-// RUN: %target-build-swift %t/before/class_add_property.o %t/before/main.o -o %t/before_before
-// RUN: %target-build-swift %t/before/class_add_property.o %t/after/main.o -o %t/before_after
-// RUN: %target-build-swift %t/after/class_add_property.o %t/before/main.o -o %t/after_before
-// RUN: %target-build-swift %t/after/class_add_property.o %t/after/main.o -o %t/after_after
-
-// RUN: %target-run %t/before_before
-// RUN: %target-run %t/before_after
-// RUN: %target-run %t/after_before
-// RUN: %target-run %t/after_after
-
+// RUN: %target-resilience-test
 // REQUIRES: executable_test
 // REQUIRES: no_asan
 
 import StdlibUnittest
 import class_add_property
+
+// Also import modules which are used by StdlibUnittest internally. This
+// workaround is needed to link all required libraries in case we compile
+// StdlibUnittest with -sil-serialize-all.
+import SwiftPrivate
+import SwiftPrivatePthreadExtras
+#if _runtime(_ObjC)
+import ObjectiveC
+#endif
 
 var ClassAddPropertyTest = TestSuite("ClassAddProperty")
 

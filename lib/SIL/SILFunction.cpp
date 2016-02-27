@@ -95,6 +95,8 @@ SILFunction::SILFunction(SILModule &Module, SILLinkage Linkage,
   else
     Module.functions.push_back(this);
 
+  Module.removeFromZombieList(Name);
+
   // Set our BB list to have this function as its parent. This enables us to
   // splice efficiently basic blocks in between functions.
   BlockList.Parent = this;
@@ -220,11 +222,13 @@ struct SubstDependentSILType
       params.push_back(param.map([&](CanType pt) -> CanType {
         return visit(pt);
       }));
-    
-    SILResultInfo result = t->getResult().map([&](CanType elt) -> CanType {
-        return visit(elt);
-      });
 
+    SmallVector<SILResultInfo, 4> results;
+    for (auto &result : t->getAllResults())
+      results.push_back(result.map([&](CanType pt) -> CanType {
+        return visit(pt);
+      }));
+    
     Optional<SILResultInfo> errorResult;
     if (t->hasErrorResult()) {
       errorResult = t->getErrorResult().map([&](CanType elt) -> CanType {
@@ -235,7 +239,7 @@ struct SubstDependentSILType
     return SILFunctionType::get(t->getGenericSignature(),
                                 t->getExtInfo(),
                                 t->getCalleeConvention(),
-                                params, result, errorResult,
+                                params, results, errorResult,
                                 t->getASTContext());
   }
   
@@ -266,6 +270,12 @@ SILType ArchetypeBuilder::substDependentType(SILModule &M, SILType type) {
   return doSubstDependentSILType(M,
     [&](CanType t) { return substDependentType(t)->getCanonicalType(); },
     type);
+}
+
+Type SILFunction::mapTypeOutOfContext(Type type) const {
+  return ArchetypeBuilder::mapTypeOutOfContext(getModule().getSwiftModule(),
+                                               getContextGenericParams(),
+                                               type);
 }
 
 SILBasicBlock *SILFunction::createBasicBlock() {

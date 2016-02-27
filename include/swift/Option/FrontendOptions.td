@@ -216,6 +216,10 @@ def emit_verbose_sil : Flag<["-"], "emit-verbose-sil">,
 def enable_experimental_patterns : Flag<["-"], "enable-experimental-patterns">,
   HelpText<"Enable experimental 'switch' pattern matching features">;
 
+def enable_experimental_property_behaviors :
+  Flag<["-"], "enable-experimental-property-behaviors">,
+  HelpText<"Enable experimental property behaviors">;
+
 def disable_availability_checking : Flag<["-"],
   "disable-availability-checking">,
   HelpText<"Disable checking for potentially unavailable APIs">;
@@ -320,5 +324,8 @@ def dump_api_path : Separate<["-"], "dump-api-path">,
 def enable_resilience : Flag<["-"], "enable-resilience">,
    HelpText<"Compile the module to export resilient interfaces for all "
             "public declarations by default">;
+
+def group_info_path : Separate<["-"], "group-info-path">,
+  HelpText<"The path to collect the group information of the compiled module">;
 
 } // end let Flags = [FrontendOption, NoDriverOption, HelpHidden]
