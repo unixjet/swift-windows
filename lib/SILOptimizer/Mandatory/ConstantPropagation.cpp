@@ -875,7 +875,9 @@ processFunction(SILFunction &F, bool EnableDiagnostics,
 
         WorkList.remove(I);
         I->eraseFromParent();
-      });
+      },
+      []() {},
+      []() {});
 
   while (!WorkList.empty()) {
     SILInstruction *I = WorkList.pop_back_val();

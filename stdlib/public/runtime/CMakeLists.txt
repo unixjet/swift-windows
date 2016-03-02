@@ -19,6 +19,7 @@ endif()
 
 # Acknowledge that the following sources are known.
 set(LLVM_OPTIONAL_SOURCES
+    CygwinPort.cpp
     Remangle.cpp)
 
 set(swift_runtime_objc_sources)
@@ -34,6 +35,10 @@ endif()
 
 set(swift_runtime_port_sources)
 if("${CMAKE_SYSTEM_NAME}" STREQUAL "CYGWIN")
+  set(swift_runtime_port_sources
+      CygwinPort.cpp)
+endif()
+if("${CMAKE_SYSTEM_NAME}" STREQUAL "Windows")
   set(swift_runtime_port_sources
       CygwinPort.cpp)
 endif()

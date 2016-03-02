@@ -11,7 +11,12 @@
 //===----------------------------------------------------------------------===//
 
 #include <type_traits>
+#if defined(_MSC_VER)
+#include <io.h>
+#include <random>
+#else
 #include <unistd.h>
+#endif
 #include <stdlib.h>
 #include <stdio.h>
 #include <string.h>
@@ -21,14 +26,25 @@
 #include <bsd/stdlib.h>
 #endif
 
+#if defined(_MSC_VER)
+static_assert(std::is_same<long long, swift::__swift_ssize_t>::value,
+			  "__swift_ssize_t is wrong");
+#else
 static_assert(std::is_same<ssize_t, swift::__swift_ssize_t>::value,
               "__swift_ssize_t is wrong");
+#endif
 
 namespace swift {
 
 void _swift_stdlib_free(void *ptr) { free(ptr); }
 
-int _swift_stdlib_putchar_unlocked(int c) { return putchar_unlocked(c); }
+int _swift_stdlib_putchar_unlocked(int c) {
+#if defined(_MSC_VER)
+	return _putc_nolock(c, stdin);
+#else
+	return putchar_unlocked(c);
+#endif
+}
 
 __swift_size_t _swift_stdlib_strlen(const char *s) { return strlen(s); }
 
@@ -50,10 +66,14 @@ int _swift_stdlib_close(int fd) { return close(fd); }
 #if defined(__APPLE__)
 #include <malloc/malloc.h>
 size_t _swift_stdlib_malloc_size(const void *ptr) { return malloc_size(ptr); }
-#elif defined(__GNU_LIBRARY__) || defined(__CYGWIN__)
+#elif defined(__GNU_LIBRARY__) || defined(__CYGWIN__) || defined(_MSC_VER)
 #include <malloc.h>
 size_t _swift_stdlib_malloc_size(const void *ptr) {
+#if defined(_MSC_VER)
+  return _msize(const_cast<void *>(ptr));
+#else
   return malloc_usable_size(const_cast<void *>(ptr));
+#endif
 }
 #elif defined(__FreeBSD__)
 #include <malloc_np.h>
@@ -64,11 +84,27 @@ size_t _swift_stdlib_malloc_size(const void *ptr) {
 #error No malloc_size analog known for this platform/libc.
 #endif
 
-__swift_uint32_t _swift_stdlib_arc4random(void) { return arc4random(); }
+#if defined(_MSC_VER)
+static std::random_device RandomeDevice;
+static std::mt19937 MersenneRandom(RandomeDevice());
+#endif
+
+__swift_uint32_t _swift_stdlib_arc4random(void) {
+#if defined(_MSC_VER)
+  return MersenneRandom();
+#else
+  return arc4random();
+#endif
+}
 
 __swift_uint32_t
 _swift_stdlib_arc4random_uniform(__swift_uint32_t upper_bound) {
+#if defined(_MSC_VER)
+  std::uniform_int_distribution<int> RandomUniform(1, upper_bound);
+  return RandomUniform(MersenneRandom);
+#else
   return arc4random_uniform(upper_bound);
+#endif
 }
 
 } // namespace swift

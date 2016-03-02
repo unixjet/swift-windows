@@ -6,6 +6,7 @@ find_package(PkgConfig)
 
 set(ICU_REQUIRED)
 foreach(MODULE ${ICU_FIND_COMPONENTS})
+  message("foreach ${MODULE}")
   string(TOUPPER "${MODULE}" MODULE)
   string(TOLOWER "${MODULE}" module)
   list(APPEND ICU_REQUIRED 
@@ -21,6 +22,8 @@ foreach(MODULE ${ICU_FIND_COMPONENTS})
 
     find_library(ICU_${MODULE}_LIBRARY NAMES icu${module}
       HINTS ${PC_ICU_${MODULE}_LIBDIR} ${PC_ICU_${MODULE}_LIBRARY_DIRS})
+  message("hint: ${PC_ICU_${MODULE}_LIBDIR} ${PC_ICU_${MODULE}_LIBRARY_DIRS}")
+  message("result of find_library for icu${module} ${ICU_${MODULE}_LIBRARY}")
     set(ICU_${MODULE}_LIBRARIES ${ICU_${MODULE}_LIBRARY})
   endif()
 endforeach()

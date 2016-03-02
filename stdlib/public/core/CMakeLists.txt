@@ -168,6 +168,10 @@ if(CMAKE_SYSTEM_NAME STREQUAL "CYGWIN")
   list(APPEND swift_core_link_flags "${ENV_SYSTEMROOT}/system32/psapi.dll")
 endif()
 
+#if(CMAKE_SYSTEM_NAME STREQUAL "Windows")
+#  list(APPEND swift_core_link_flags "$ENV{SYSTEMROOT}/system32/psapi.dll")
+#endif()
+
 option(SWIFT_CHECK_ESSENTIAL_STDLIB
     "Check core standard library layering by linking its essential subset"
     FALSE)

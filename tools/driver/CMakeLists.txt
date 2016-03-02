@@ -17,11 +17,11 @@ add_swift_executable(swift
 target_link_libraries(swift edit)
 
 add_custom_command(TARGET swift POST_BUILD
-    COMMAND "${CMAKE_COMMAND}" "-E" "create_symlink" "swift" "swiftc"
+    COMMAND "${CMAKE_COMMAND}" "-E" "copy" "swift" "swiftc"
     WORKING_DIRECTORY "${SWIFT_RUNTIME_OUTPUT_INTDIR}")
 
 add_custom_command(TARGET swift POST_BUILD
-    COMMAND "${CMAKE_COMMAND}" "-E" "create_symlink" "swift" "swift-autolink-extract"
+    COMMAND "${CMAKE_COMMAND}" "-E" "copy" "swift" "swift-autolink-extract"
     WORKING_DIRECTORY "${SWIFT_RUNTIME_OUTPUT_INTDIR}")
 
 # If building as part of clang, make sure the headers are installed.

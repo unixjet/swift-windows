@@ -743,7 +743,9 @@ SILCombiner::visitInjectEnumAddrInst(InjectEnumAddrInst *IEAI) {
       SILBasicBlock *DefaultBB = nullptr;
 
       if (SEI->hasDefault()) {
-        auto *IL = B.createIntegerLiteral(SEI->getLoc(), IntTy, APInt(32, SEI->getNumCases(), false));
+        uint64_t InitialValue = SEI->getNumCases();
+        auto *IL = B.createIntegerLiteral(SEI->getLoc(), IntTy,
+                                          APInt(32, InitialValue, false));
         DefaultValue = SILValue(IL);
         DefaultBB = SEI->getDefaultBB();
       }

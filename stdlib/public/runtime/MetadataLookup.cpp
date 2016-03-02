@@ -33,7 +33,11 @@
 #include <link.h>
 #endif
 
+#if defined(_MSC_VER)
+#include <windows.h>
+#else
 #include <dlfcn.h>
+#endif
 #include <mutex>
 
 using namespace swift;
@@ -49,7 +53,7 @@ using namespace Demangle;
 #define SWIFT_TYPE_METADATA_SECTION "__swift2_types"
 #elif defined(__ELF__)
 #define SWIFT_TYPE_METADATA_SECTION ".swift2_type_metadata_start"
-#elif defined(__CYGWIN__)
+#elif defined(__CYGWIN__) || defined(_MSC_VER)
 #define SWIFT_TYPE_METADATA_SECTION ".sw2tymd"
 #endif
 
@@ -93,11 +97,17 @@ static void _initializeCallbacksToInspectDylib();
 struct TypeMetadataState {
   ConcurrentMap<size_t, TypeMetadataCacheEntry> Cache;
   std::vector<TypeMetadataSection> SectionsToScan;
+#if defined(_MSC_VER)
+  std::mutex SectionsToScanLock;
+#else
   pthread_mutex_t SectionsToScanLock;
+#endif
 
   TypeMetadataState() {
     SectionsToScan.reserve(16);
+#if !defined(_MSC_VER)
     pthread_mutex_init(&SectionsToScanLock, nullptr);
+#endif
     _initializeCallbacksToInspectDylib();
   }
 };
@@ -108,9 +118,15 @@ static void
 _registerTypeMetadataRecords(TypeMetadataState &T,
                              const TypeMetadataRecord *begin,
                              const TypeMetadataRecord *end) {
+#if defined(_MSC_VER)
+  T.SectionsToScanLock.lock();
+  T.SectionsToScan.push_back(TypeMetadataSection{ begin, end });
+  T.SectionsToScanLock.unlock();
+#else
   pthread_mutex_lock(&T.SectionsToScanLock);
-  T.SectionsToScan.push_back(TypeMetadataSection{begin, end});
+  T.SectionsToScan.push_back(TypeMetadataSection{ begin, end });
   pthread_mutex_unlock(&T.SectionsToScanLock);
+#endif
 }
 
 static void _addImageTypeMetadataRecordsBlock(const uint8_t *records,
@@ -178,14 +194,24 @@ static int _addImageTypeMetadataRecords(struct dl_phdr_info *info,
   dlclose(handle);
   return 0;
 }
-#elif defined(__CYGWIN__)
+#elif defined(__CYGWIN__) || defined(_MSC_VER)
 static int _addImageTypeMetadataRecords(struct dl_phdr_info *info,
                                         size_t size, void * /*data*/) {
+#if defined(_MSC_VER)
+  HMODULE handle;
+
+  if (!info->dlpi_name || info->dlpi_name[0] == '\0') {
+    handle = GetModuleHandle(nullptr);
+  } else
+    handle = GetModuleHandle(info->dlpi_name);
+#else
   void *handle;
+
   if (!info->dlpi_name || info->dlpi_name[0] == '\0') {
     handle = dlopen(nullptr, RTLD_LAZY);
   } else
     handle = dlopen(info->dlpi_name, RTLD_LAZY | RTLD_NOLOAD);
+#endif
 
   unsigned long recordsSize;
   const uint8_t *records =
@@ -195,7 +221,11 @@ static int _addImageTypeMetadataRecords(struct dl_phdr_info *info,
   if (records) {
     _addImageTypeMetadataRecordsBlock(records, recordsSize);
   }
+#if defined(_MSC_VER)
+  FreeLibrary(handle);
+#else
   dlclose(handle);
+#endif
   return 0;
 }
 #endif
@@ -212,7 +242,7 @@ static void _initializeCallbacksToInspectDylib() {
   // FIXME: Find a way to have this continue to happen after.
   // rdar://problem/19045112
   dl_iterate_phdr(_addImageTypeMetadataRecords, nullptr);
-#elif defined(__CYGWIN__)
+#elif defined(__CYGWIN__) || defined(_MSC_VER)
   _swift_dl_iterate_phdr(_addImageTypeMetadataRecords, nullptr);
 #else
 # error No known mechanism to inspect dynamic libraries on this platform.
@@ -306,9 +336,15 @@ _typeByMangledName(const llvm::StringRef typeName) {
   }
 
   // Check type metadata records
+#if defined(_MSC_VER)
+  T.SectionsToScanLock.lock();
+  foundMetadata = _searchTypeMetadataRecords(T, typeName);
+  T.SectionsToScanLock.unlock();
+#else
   pthread_mutex_lock(&T.SectionsToScanLock);
   foundMetadata = _searchTypeMetadataRecords(T, typeName);
   pthread_mutex_unlock(&T.SectionsToScanLock);
+#endif
 
   // Check protocol conformances table. Note that this has no support for
   // resolving generic types yet.

@@ -843,6 +843,14 @@ namespace {
     evaluateCloseness(DeclContext *dc, Type candArgListType, ArrayRef<CallArgParam> actualArgs);
       
     void filterList(ArrayRef<CallArgParam> actualArgs);
+#if _MSC_VER
+    void filterList(SmallVector<CallArgParam, 4> actualArgs) {
+      return filterList(ArrayRef<CallArgParam>(actualArgs));
+    }
+    void filterList(CallArgParam actualArgs) {
+      return filterList(ArrayRef<CallArgParam>(actualArgs));
+    }
+#endif
     void filterList(Type actualArgsType) {
       return filterList(decomposeArgParamType(actualArgsType));
     }

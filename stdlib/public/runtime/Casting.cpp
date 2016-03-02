@@ -33,6 +33,11 @@
 
 #include <cstring>
 #include <mutex>
+#if defined(_MSC_VER)
+#include <shared_mutex>
+#else
+#include <pthread.h>
+#endif
 #include <type_traits>
 
 // FIXME: Clang defines max_align_t in stddef.h since 3.6.
@@ -346,29 +351,53 @@ TwoWordPair<const char *, uintptr_t>::Return
 swift_getTypeName(const Metadata *type, bool qualified) {
   using Pair = TwoWordPair<const char *, uintptr_t>;
   using Key = llvm::PointerIntPair<const Metadata *, 1, bool>;
-  
+
+#if defined(_MSC_VER)  
+  static Lazy<std::shared_timed_mutex>  SharedMutex;
+#else
   static pthread_rwlock_t TypeNameCacheLock = PTHREAD_RWLOCK_INITIALIZER;
+#endif
   static Lazy<llvm::DenseMap<Key, std::pair<const char *, size_t>>>
     TypeNameCache;
-  
+
   Key key(type, qualified);
   auto &cache = TypeNameCache.get();
-  
+#if defined(_MSC_VER)
+  auto &TypeNameCacheLock = SharedMutex.get();
+#endif
+
+#if defined(_MSC_VER)
+  TypeNameCacheLock.lock_shared();
+#else
   pthread_rwlock_rdlock(&TypeNameCacheLock);
+#endif
   auto found = cache.find(key);
   if (found != cache.end()) {
     auto result = found->second;
-    pthread_rwlock_unlock(&TypeNameCacheLock);
+#if defined(_MSC_VER)
+	TypeNameCacheLock.unlock_shared();
+#else
+	pthread_rwlock_unlock(&TypeNameCacheLock);
+#endif
     return Pair{result.first, result.second};
   }
   
+#if defined(_MSC_VER)
+  TypeNameCacheLock.unlock_shared();
+  TypeNameCacheLock.lock();
+#else
   pthread_rwlock_unlock(&TypeNameCacheLock);
   pthread_rwlock_wrlock(&TypeNameCacheLock);
+#endif
   // Someone may have beaten us to the write lock.
   found = cache.find(key);
   if (found != cache.end()) {
     auto result = found->second;
-    pthread_rwlock_unlock(&TypeNameCacheLock);
+#if defined(_MSC_VER)
+	TypeNameCacheLock.unlock();
+#else
+	pthread_rwlock_unlock(&TypeNameCacheLock);
+#endif
     return Pair{result.first, result.second};
   }
   
@@ -380,7 +409,11 @@ swift_getTypeName(const Metadata *type, bool qualified) {
   memcpy(result, name.data(), size);
   result[size] = 0;
   cache.insert({key, {result, size}});
+#if defined(_MSC_VER)
+  TypeNameCacheLock.unlock();
+#else
   pthread_rwlock_unlock(&TypeNameCacheLock);
+#endif
   return Pair{result, size};
 }
 

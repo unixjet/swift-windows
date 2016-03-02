@@ -27,9 +27,15 @@
 #include <condition_variable>
 #include <new>
 #include <cctype>
+#if defined(_MSC_VER)
+#include <windows.h>
+// Macro max() conflicts with std::max()
+#undef max
+#else
 #include <sys/mman.h>
 #include <pthread.h>
 #include <unistd.h>
+#endif
 #include "llvm/ADT/DenseMap.h"
 #include "llvm/ADT/Hashing.h"
 #include "ErrorObject.h"
@@ -59,17 +65,29 @@ using namespace metadataimpl;
 void *MetadataAllocator::alloc(size_t size) {
 #if defined(__APPLE__)
   const uintptr_t pagesizeMask = vm_page_mask;
+#elif defined(_MSC_VER)
+  SYSTEM_INFO  SystemInfo;
+  GetSystemInfo(&SystemInfo);
+  const uintptr_t pagesizeMask = SystemInfo.dwPageSize - 1;
 #else
   static const uintptr_t pagesizeMask = sysconf(_SC_PAGESIZE) - 1;
 #endif
   // If the requested size is a page or larger, map page(s) for it
   // specifically.
   if (LLVM_UNLIKELY(size > pagesizeMask)) {
+#if defined(_MSC_VER)
+    auto mem =
+        VirtualAlloc(nullptr, (size + pagesizeMask) & ~pagesizeMask,
+                     MEM_TOP_DOWN | MEM_RESERVE | MEM_COMMIT, PAGE_READWRITE);
+    if (!mem)
+      crash("unable to allocate memory for metadata cache");
+#else
     auto mem = mmap(nullptr, (size + pagesizeMask) & ~pagesizeMask,
                     PROT_READ|PROT_WRITE, MAP_ANON|MAP_PRIVATE,
                     VM_TAG_FOR_SWIFT_METADATA, 0);
     if (mem == MAP_FAILED)
       crash("unable to allocate memory for metadata cache");
+#endif
     return mem;
   }
   
@@ -78,12 +96,20 @@ void *MetadataAllocator::alloc(size_t size) {
   // Allocate a new page if we need one.
   if (LLVM_UNLIKELY(((uintptr_t)next & ~pagesizeMask)
                       != (((uintptr_t)end & ~pagesizeMask)))){
+#if defined(_MSC_VER)
+    auto mem =
+        VirtualAlloc(nullptr, pagesizeMask+1,
+                     MEM_TOP_DOWN | MEM_RESERVE | MEM_COMMIT, PAGE_READWRITE);
+    if (!mem)
+      crash("unable to allocate memory for metadata cache");
+#else
     next = (char*)
       mmap(nullptr, pagesizeMask+1, PROT_READ|PROT_WRITE,
            MAP_ANON|MAP_PRIVATE, VM_TAG_FOR_SWIFT_METADATA, 0);
 
     if (next == MAP_FAILED)
       crash("unable to allocate memory for metadata cache");
+#endif
     end = next + size;
   }
   
@@ -2316,12 +2342,18 @@ struct llvm::DenseMapInfo<GlobalString> {
 // StringMap because we don't need to actually copy the string.
 namespace {
 struct ForeignTypeState {
+#if defined(_MSC_VER)
+  std::mutex Lock;
+#else
   pthread_mutex_t Lock;
+#endif
   llvm::DenseMap<GlobalString, const ForeignTypeMetadata *> Types;
   
+#if !defined(_MSC_VER)
   ForeignTypeState() {
     pthread_mutex_init(&Lock, nullptr);
   }
+#endif
 };
 }
 
@@ -2336,7 +2368,11 @@ swift::swift_getForeignTypeMetadata(ForeignTypeMetadata *nonUnique) {
 
   // Okay, insert a new row.
   auto &Foreign = ForeignTypes.get();
+#if defined(_MSC_VER)
+  Foreign.Lock.lock();
+#else
   pthread_mutex_lock(&Foreign.Lock);
+#endif
   auto insertResult = Foreign.Types.insert({GlobalString(nonUnique->getName()),
                                             nonUnique});
   auto uniqueMetadata = insertResult.first->second;
@@ -2354,7 +2390,11 @@ swift::swift_getForeignTypeMetadata(ForeignTypeMetadata *nonUnique) {
   // it will be possible for code to fast-path through this function
   // too soon.
   nonUnique->setCachedUniqueMetadata(uniqueMetadata);
+#if defined(_MSC_VER)
+  Foreign.Lock.unlock();
+#else
   pthread_mutex_unlock(&Foreign.Lock);
+#endif
   return uniqueMetadata;
 }
 

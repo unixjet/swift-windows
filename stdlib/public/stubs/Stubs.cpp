@@ -20,16 +20,25 @@
 #define _WITH_GETLINE
 #endif
 
+#if defined(_MSC_VER)
+#include <string>
+#include <iostream>
+#include <windows.h>
+// Macro max(), min() conflicts with std::max(), std::min()
+#undef max
+#undef min
+#else
 #include <sys/resource.h>
 #include <sys/errno.h>
 #include <unistd.h>
+#endif
 #include <climits>
 #include <cstdarg>
 #include <cstdint>
 #include <cstdio>
 #include <cstdlib>
 #include <cstring>
-#if defined(__CYGWIN__)
+#if defined(__CYGWIN__) || defined(_MSC_VER)
 #include <sstream>
 #include <cmath>
 #define  fmodl(lhs, rhs)  std::fmod(lhs, rhs)
@@ -112,7 +121,7 @@ static inline locale_t getCLocale() {
   // as C locale.
   return nullptr;
 }
-#elif defined(__CYGWIN__)
+#elif defined(__CYGWIN__) || defined(_MSC_VER)
 // In Cygwin, getCLocale() is not used.
 #else
 static locale_t makeCLocale() {
@@ -130,7 +139,7 @@ static locale_t getCLocale() {
 
 #if defined(__APPLE__)
 #define swift_snprintf_l snprintf_l
-#elif defined(__CYGWIN__)
+#elif defined(__CYGWIN__) || defined(_MSC_VER)
 // In Cygwin, swift_snprintf_l() is not used.
 #else
 static int swift_snprintf_l(char *Str, size_t StrSize, locale_t Locale,
@@ -163,7 +172,7 @@ static uint64_t swift_floatingPointToString(char *Buffer, size_t BufferLength,
     Precision = std::numeric_limits<T>::max_digits10;
   }
   
-#if defined(__CYGWIN__)
+#if defined(__CYGWIN__) || defined(_MSC_VER)
   // Cygwin does not support uselocale(), but we can use the locale feature 
   // in stringstream object.
   std::ostringstream ValueStream;
@@ -232,8 +241,19 @@ extern "C" uint64_t swift_float80ToString(char *Buffer, size_t BufferLength,
 /// if an error occurred, or EOF was reached.
 SWIFT_RUNTIME_STDLIB_INTERFACE
 extern "C" ssize_t swift_stdlib_readLine_stdin(char **LinePtr) {
+#if defined(_MSC_VER)
+  if (std::cin.eof()) {
+    *LinePtr = nullptr;
+    return -1;
+  }
+  std::string Line;
+  std::getline(std::cin, Line);
+  *LinePtr = reinterpret_cast<char *>(std::malloc(Line.size() + 1));
+  return Line.size();
+#else
   size_t Capacity = 0;
   return getline(LinePtr, &Capacity, stdin);
+#endif
 }
 
 SWIFT_RUNTIME_STDLIB_INTERFACE
@@ -356,7 +376,7 @@ __mulodi4(di_int a, di_int b, int* overflow)
 }
 #endif
 
-#if defined(__CYGWIN__)
+#if defined(__CYGWIN__) || defined(_MSC_VER)
 // Cygwin does not support uselocale(), but we can use the locale feature 
 // in stringstream object.
 template <typename T>
@@ -434,12 +454,20 @@ extern "C" const char *_swift_stdlib_strtof_clocale(
 
 SWIFT_RUNTIME_STDLIB_INTERFACE
 extern "C" void _swift_stdlib_flockfile_stdout() {
+#if defined(_MSC_VER)
+  _lock_file(stdout);
+#else
   flockfile(stdout);
+#endif
 }
 
 SWIFT_RUNTIME_STDLIB_INTERFACE
 extern "C" void _swift_stdlib_funlockfile_stdout() {
+#if defined(_MSC_VER)
+  _unlock_file(stdout);
+#else
   funlockfile(stdout);
+#endif
 }
 
 SWIFT_RUNTIME_STDLIB_INTERFACE
@@ -449,5 +477,11 @@ extern "C" int _swift_stdlib_putc_stderr(int C) {
 
 SWIFT_RUNTIME_STDLIB_INTERFACE
 extern "C" size_t _swift_stdlib_getHardwareConcurrency() {
+#if defined(_MSC_VER)
+  SYSTEM_INFO SystemInfo;
+  GetSystemInfo(&SystemInfo);
+  return SystemInfo.dwNumberOfProcessors;
+#else
   return sysconf(_SC_NPROCESSORS_ONLN);
+#endif
 }

@@ -95,7 +95,7 @@ NewProjection::NewProjection(SILInstruction *I) : Value() {
   }
   case ValueKind::ProjectBoxInst: {
     auto *PBI = cast<ProjectBoxInst>(I);
-    Value = ValueTy(NewProjectionKind::Box, (unsigned)0);
+    Value = ValueTy(NewProjectionKind::Box, (uintptr_t)0);
     assert(getKind() == NewProjectionKind::Box);
     assert(getIndex() == 0);
     assert(getType(PBI->getOperand()->getType(), PBI->getModule()) ==

@@ -58,6 +58,7 @@ function(get_test_dependencies SDK result_var_name)
      ("${SDK}" STREQUAL "WATCHOS_SIMULATOR") OR
      ("${SDK}" STREQUAL "LINUX") OR
      ("${SDK}" STREQUAL "CYGWIN") OR
+     ("${SDK}" STREQUAL "WINDOWS") OR
      ("${SDK}" STREQUAL "FREEBSD"))
     # No extra dependencies.
   else()

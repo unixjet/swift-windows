@@ -29,6 +29,8 @@
 # define SWIFT_RUNTIME_EXPORT __attribute__((visibility("protected")))
 #elif __CYGWIN__
 # define SWIFT_RUNTIME_EXPORT 
+#elif _MSC_VER
+# define SWIFT_RUNTIME_EXPORT  __declspec(dllexport)
 #else
 // __dllexport/__dllimport for Windows?
 # error "Unimplemented object format"
