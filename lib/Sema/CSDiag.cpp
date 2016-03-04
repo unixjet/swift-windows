@@ -844,18 +844,9 @@ namespace {
     std::pair<CandidateCloseness, CalleeCandidateInfo::FailedArgumentInfo>
     evaluateCloseness(DeclContext *dc, Type candArgListType, ArrayRef<CallArgParam> actualArgs);
       
-    void filterList(ArrayRef<CallArgParam> actualArgs);
-#if _MSC_VER
-    // MSVC confused when choosing a correct method.
-    void filterList(SmallVector<CallArgParam, 4> actualArgs) {
-      return filterList(ArrayRef<CallArgParam>(actualArgs));
-    }
-    void filterList(CallArgParam actualArgs) {
-      return filterList(ArrayRef<CallArgParam>(actualArgs));
-    }
-#endif
+    void filterListArgs(ArrayRef<CallArgParam> actualArgs);
     void filterList(Type actualArgsType) {
-      return filterList(decomposeArgParamType(actualArgsType));
+      return filterListArgs(decomposeArgParamType(actualArgsType));
     }
     void filterList(ClosenessPredicate predicate);
     void filterContextualMemberList(Expr *argExpr);
@@ -1436,7 +1427,7 @@ void CalleeCandidateInfo::collectCalleeCandidates(Expr *fn) {
 /// After the candidate list is formed, it can be filtered down to discard
 /// obviously mismatching candidates and compute a "closeness" for the
 /// resultant set.
-void CalleeCandidateInfo::filterList(ArrayRef<CallArgParam> actualArgs) {
+void CalleeCandidateInfo::filterListArgs(ArrayRef<CallArgParam> actualArgs) {
   // Now that we have the candidate list, figure out what the best matches from
   // the candidate list are, and remove all the ones that aren't at that level.
   filterList([&](UncurriedCandidate candidate) -> ClosenessResultTy {
@@ -1483,7 +1474,7 @@ void CalleeCandidateInfo::filterContextualMemberList(Expr *argExpr) {
     
     CallArgParam param;
     param.Ty = argType;
-    return filterList(param);
+    return filterListArgs(param);
   }
   
   // If we have a tuple expression, form a tuple type.
@@ -1500,7 +1491,7 @@ void CalleeCandidateInfo::filterContextualMemberList(Expr *argExpr) {
     ArgElts.push_back(param);
   }
 
-  return filterList(ArgElts);
+  return filterListArgs(ArgElts);
 }
 
 CalleeCandidateInfo::CalleeCandidateInfo(Type baseType,
