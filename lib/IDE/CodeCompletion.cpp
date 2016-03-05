@@ -4256,9 +4256,18 @@ void CodeCompletionCallbacksImpl::addKeywords(CodeCompletionResultSink &Sink) {
   }
 }
 
+#if defined(_MSC_VER)
+class CodeCompletionTypeContextAnalyzer;
+#endif
+
 namespace  {
   class ExprParentFinder : public ASTWalker {
+#if defined(_MSC_VER)
+    // MSVC needed '::' (http://reviews.llvm.org/D4443)
+    friend class ::CodeCompletionTypeContextAnalyzer;
+#else
     friend class CodeCompletionTypeContextAnalyzer;
+#endif
     Expr *ChildExpr;
     llvm::function_ref<bool(ASTNode)> Predicate;
 

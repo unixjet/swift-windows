@@ -481,6 +481,14 @@ struct ScalarTraits<uint32_t> {
   static bool mustQuote(StringRef) { return false; }
 };
 
+#if defined(_MSC_VER)
+template<>
+struct ScalarTraits<unsigned long> {
+	static void output(const unsigned long &, llvm::raw_ostream &);
+	static bool mustQuote(StringRef) { return false; }
+};
+#endif
+
 template<>
 struct ScalarTraits<uint64_t> {
   static void output(const uint64_t &, llvm::raw_ostream &);

@@ -37,9 +37,12 @@
 #include "llvm/Transforms/IPO.h"
 #include "llvm/Transforms/IPO/PassManagerBuilder.h"
 #include "llvm/Support/Path.h"
-
+#if defined(_MSC_VER)
+#include "Windows.h"
+#define dlopen(x, y)  LoadLibrary(x)
+#else
 #include <dlfcn.h>
-
+#endif
 using namespace swift;
 using namespace swift::immediate;
 

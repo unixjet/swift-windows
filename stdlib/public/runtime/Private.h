@@ -123,7 +123,7 @@ namespace swift {
   Demangle::NodePointer _swift_buildDemanglingForMetadata(const Metadata *type);
 #endif
 
-#if defined(__CYGWIN__)
+#if defined(__CYGWIN__) || defined(_MSC_VER)
   struct dl_phdr_info {
     void *dlpi_addr;
     const char *dlpi_name;

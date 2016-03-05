@@ -72,7 +72,7 @@ add_custom_command_target(unused_var
     COMMAND
       "${CMAKE_COMMAND}" "-E" "make_directory" "${SWIFTLIB_DIR}"
     COMMAND
-      "${CMAKE_COMMAND}" "-E" "create_symlink"
+      "${CMAKE_COMMAND}" "-E" "copy_directory"
       "${clang_headers_location}"
       "${SWIFTLIB_DIR}/clang"
 
@@ -84,10 +84,10 @@ add_custom_command_target(unused_var
     COMMAND
       "${CMAKE_COMMAND}" "-E" "make_directory" "${SWIFTLIB_DIR}/install-tmp/install-tmp"
     COMMAND
-      "${CMAKE_COMMAND}" "-E" "remove"
+      "${CMAKE_COMMAND}" "-E" "remove_directory"
       "${SWIFTLIB_DIR}/install-tmp/install-tmp/clang"
     COMMAND
-      "${CMAKE_COMMAND}" "-E" "create_symlink"
+      "${CMAKE_COMMAND}" "-E" "copy_directory"
       "../clang/${CLANG_VERSION}"
       "${SWIFTLIB_DIR}/install-tmp/install-tmp/clang"
     CUSTOM_TARGET_NAME "symlink_clang_headers"

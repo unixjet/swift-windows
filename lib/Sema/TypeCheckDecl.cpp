@@ -2452,7 +2452,11 @@ static void checkEnumRawValues(TypeChecker &TC, EnumDecl *ED) {
         return TC.conformsToProtocol(rawTy, proto, ED->getDeclContext(), None);
     };
 
+#if _MSC_VER
+    static std::vector<KnownProtocolKind> otherLiteralProtocolKinds = {
+#else
     static auto otherLiteralProtocolKinds = {
+#endif
       KnownProtocolKind::FloatLiteralConvertible,
       KnownProtocolKind::UnicodeScalarLiteralConvertible,
       KnownProtocolKind::ExtendedGraphemeClusterLiteralConvertible,
