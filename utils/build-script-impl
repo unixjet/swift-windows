@@ -980,10 +980,6 @@ for deployment_target in "${STDLIB_DEPLOYMENT_TARGETS[@]}"; do
             build_for_this_target=$(not ${SKIP_BUILD_CYGWIN})
             test_this_target=$(not ${SKIP_TEST_CYGWIN})
             ;;
-        cygwin-*)
-            build_for_this_target=1
-            test_this_target=1
-            ;;
         macosx-*)
             build_for_this_target=$(not ${SKIP_BUILD_OSX})
             test_this_target=$(not ${SKIP_TEST_OSX})
@@ -2280,9 +2276,6 @@ for deployment_target in "${HOST_TARGET}" "${CROSS_TOOLS_DEPLOYMENT_TARGETS[@]}"
                 if [[ $(uname -s) == "FreeBSD" ]]; then
                     LIB_TARGET="freebsd"
                     ARCH_FLAG="--arch=\"${SWIFT_HOST_VARIANT_ARCH}\""
-                fi
-                if [[ $(uname -s) == "CYGWIN_NT-10.0" ]]; then
-                    LIB_TARGET="windows"
                 fi
                 if [[ $(uname -s) == "CYGWIN_NT-10.0" ]]; then
                     LIB_TARGET="windows"
