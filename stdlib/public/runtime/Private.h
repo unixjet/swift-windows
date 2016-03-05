@@ -134,6 +134,8 @@ namespace swift {
                              void *data);
   uint8_t *_swift_getSectionDataPE(void *handle, const char *sectionName,
                                    unsigned long *sectionSize);
+#endif
+#if defined(__CYGWIN__)
   void _swift_once_f(uintptr_t *predicate, void *context,
                      void (*function)(void *));
 #endif
