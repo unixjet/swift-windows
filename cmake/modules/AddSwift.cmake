@@ -229,7 +229,7 @@ function(_add_variant_link_flags)
     list(APPEND result "-lpthread")
   elseif("${LFLAGS_SDK}" STREQUAL "CYGWIN")
     # NO extra libraries required.
-  elseif("${sdk}" STREQUAL "WINDOWS")
+  elseif("${LFLAGS_SDK}" STREQUAL "WINDOWS")
     # No extra libraries required.
   else()
     list(APPEND result "-lobjc")
