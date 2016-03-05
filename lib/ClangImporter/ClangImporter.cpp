@@ -2666,10 +2666,11 @@ FactoryAsInitKind ClangImporter::Implementation::getFactoryAsInit(
       return FactoryAsInitKind::AsClassMethod;
   }
 
+#if !defined(_MSC_VER)
   if (method->hasAttr<clang::SwiftSuppressFactoryAsInitAttr>()) {
     return FactoryAsInitKind::AsClassMethod;
   }
-
+#endif
   return FactoryAsInitKind::Infer;
 }
 
