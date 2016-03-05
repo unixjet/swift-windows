@@ -13,12 +13,16 @@
 #ifndef SWIFT_AST_PRINTOPTIONS_H
 #define SWIFT_AST_PRINTOPTIONS_H
 
-#include "swift/AST/Attr.h"
+#include "swift/Basic/STLExtras.h"
+#include "swift/AST/AttrKind.h"
+#include "swift/AST/Identifier.h"
 #include <vector>
 
 namespace swift {
 class GenericParamList;
 class CanType;
+class Decl;
+class ValueDecl;
 class ExtensionDecl;
 class NominalTypeDecl;
 class TypeBase;
@@ -26,27 +30,47 @@ class DeclContext;
 class Type;
 enum DeclAttrKind : unsigned;
 class PrinterArchetypeTransformer;
+class SynthesizedExtensionAnalyzer;
 
 /// Necessary information for archetype transformation during printing.
 struct ArchetypeTransformContext {
   Type getTypeBase();
   NominalTypeDecl *getNominal();
-  PrinterArchetypeTransformer *getTransformer() { return Transformer.get(); }
+  PrinterArchetypeTransformer *getTransformer();
   bool isPrintingSynthesizedExtension();
   bool isPrintingTypeInterface();
   ArchetypeTransformContext(PrinterArchetypeTransformer *Transformer);
   ArchetypeTransformContext(PrinterArchetypeTransformer *Transformer,
                             Type T);
   ArchetypeTransformContext(PrinterArchetypeTransformer *Transformer,
-                            NominalTypeDecl *NTD);
+                            NominalTypeDecl *NTD,
+                            SynthesizedExtensionAnalyzer *Analyzer);
   Type transform(Type Input);
   StringRef transform(StringRef Input);
+  bool shouldPrintRequirement(ExtensionDecl *ED, StringRef Req);
+  ~ArchetypeTransformContext();
 private:
-  std::shared_ptr<PrinterArchetypeTransformer> Transformer;
+  struct Implementation;
+  Implementation &Impl;
+};
 
-  // When printing a type interface, this is the type to print.
-  // When synthesizing extensions, this is the target nominal.
-  llvm::PointerUnion<TypeBase*, NominalTypeDecl*> TypeBaseOrNominal;
+struct SynthesizedExtensionInfo {
+  ExtensionDecl *Ext = nullptr;
+  std::vector<StringRef> KnownSatisfiedRequirements;
+  operator bool() const { return Ext; }
+};
+
+class SynthesizedExtensionAnalyzer {
+  struct Implementation;
+  Implementation &Impl;
+
+public:
+  SynthesizedExtensionAnalyzer(NominalTypeDecl *Target);
+  ~SynthesizedExtensionAnalyzer();
+  ArrayRef<ExtensionDecl*> getAllSynthesizedExtensions(
+    std::vector<ExtensionDecl*> &Scratch);
+  bool isInSynthesizedExtension(const ValueDecl *VD);
+  bool shouldPrintRequirement(ExtensionDecl *ED, StringRef Req);
 };
 
 /// Options for printing AST nodes.
@@ -284,7 +308,8 @@ struct PrintOptions {
 
   void setArchetypeTransformForQuickHelp(Type T, DeclContext *DC);
 
-  void initArchetypeTransformerForSynthesizedExtensions(NominalTypeDecl *D);
+  void initArchetypeTransformerForSynthesizedExtensions(NominalTypeDecl *D,
+                                    SynthesizedExtensionAnalyzer *SynAnalyzer);
 
   void clearArchetypeTransformerForSynthesizedExtensions();
 

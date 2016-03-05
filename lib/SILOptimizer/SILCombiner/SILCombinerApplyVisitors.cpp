@@ -195,7 +195,7 @@ bool PartialApplyCombiner::allocateTemporaries() {
     // temporaries. This may fail if the frontier is located on a critical edge
     // which we may not split (no CFG changes in SILCombine).
     ValueLifetimeAnalysis VLA(PAI);
-    if (!VLA.computeFrontier(PAFrontier))
+    if (!VLA.computeFrontier(PAFrontier, ValueLifetimeAnalysis::DontModifyCFG))
       return false;
   }
 

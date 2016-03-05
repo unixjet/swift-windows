@@ -733,8 +733,8 @@ specializePartialApply(PartialApplyInst *PartialApply,
 
     if (PAFrontier.empty()) {
       ValueLifetimeAnalysis VLA(PartialApply);
-      if (VLA.computeFrontierAllowingCFGChanges(PAFrontier))
-        CFGChanged = true;
+      CFGChanged |= !VLA.computeFrontier(PAFrontier,
+                                      ValueLifetimeAnalysis::AllowToModifyCFG);
       assert(!PAFrontier.empty() && "partial_apply must have at least one use "
                                     "to release the returned function");
     }

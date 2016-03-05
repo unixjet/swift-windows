@@ -1588,6 +1588,15 @@ public:
   void printDeclPost(const Decl *D) override {
     OS << "</decl>";
   }
+  void printStructurePre(PrintStructureKind Kind, const Decl *D) override {
+    if (D)
+      printDeclPre(D);
+  }
+  void printStructurePost(PrintStructureKind Kind, const Decl *D) override {
+    if (D)
+      printDeclPost(D);
+  }
+
 
   void printSynthesizedExtensionPre(const ExtensionDecl *ED,
                                     const NominalTypeDecl *NTD) override {

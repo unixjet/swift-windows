@@ -17,6 +17,7 @@
 #include "swift/AST/Decl.h"
 #include "swift/AST/Module.h"
 #include "swift/AST/NameLookup.h"
+#include "swift/AST/PrintOptions.h"
 #include "swift/Basic/PrimitiveParsing.h"
 #include "swift/ClangImporter/ClangImporter.h"
 #include "swift/ClangImporter/ClangModule.h"
@@ -82,6 +83,13 @@ private:
   void printSynthesizedExtensionPost(const ExtensionDecl *ED,
                                      const NominalTypeDecl *NTD) override {
     return OtherPrinter.printSynthesizedExtensionPost(ED, NTD);
+  }
+
+  void printStructurePre(PrintStructureKind Kind, const Decl *D) override {
+    return OtherPrinter.printStructurePre(Kind, D);
+  }
+  void printStructurePost(PrintStructureKind Kind, const Decl *D) override {
+    return OtherPrinter.printStructurePost(Kind, D);
   }
 
   void printNamePre(PrintNameContext Context) override {
@@ -158,35 +166,6 @@ static void adjustPrintOptions(PrintOptions &AdjustedOptions) {
   AdjustedOptions.VarInitializers = false;
 
   AdjustedOptions.PrintDefaultParameterPlaceholder = true;
-}
-
-void findExtensionsFromConformingProtocols(Decl *D,
-                                           llvm::SmallPtrSetImpl<ExtensionDecl*> &Results) {
-  NominalTypeDecl* NTD = dyn_cast<NominalTypeDecl>(D);
-  if (!NTD || NTD->getKind() == DeclKind::Protocol)
-    return;
-  std::vector<NominalTypeDecl*> Unhandled;
-  auto addTypeLocNominal = [&](TypeLoc TL){
-    if (TL.getType()) {
-      if (auto D = TL.getType()->getAnyNominal()) {
-        Unhandled.push_back(D);
-      }
-    }
-  };
-  for (auto TL : NTD->getInherited()) {
-    addTypeLocNominal(TL);
-  }
-  while(!Unhandled.empty()) {
-    NominalTypeDecl* Back = Unhandled.back();
-    Unhandled.pop_back();
-    for (ExtensionDecl *E : Back->getExtensions()) {
-      if(E->isConstrainedExtension())
-        Results.insert(E);
-      for (auto TL : Back->getInherited()) {
-        addTypeLocNominal(TL);
-      }
-    }
-  }
 }
 
 ArrayRef<StringRef>
@@ -420,7 +399,7 @@ void swift::ide::printSubmoduleInterface(
   auto PrintDecl = [&](Decl *D) -> bool {
     ASTPrinter &Printer = *PrinterToUse;
     if (!shouldPrint(D, AdjustedOptions)) {
-      Printer.avoidPrintDeclPost(D);
+      Printer.callAvoidPrintDeclPost(D);
       return false;
     }
     if (auto Ext = dyn_cast<ExtensionDecl>(D)) {
@@ -451,7 +430,7 @@ void swift::ide::printSubmoduleInterface(
           // Print Ext and add sub-types of Ext.
           for (auto Ext : NTD->getExtensions()) {
             if (!shouldPrint(Ext, AdjustedOptions)) {
-              Printer.avoidPrintDeclPost(Ext);
+              Printer.callAvoidPrintDeclPost(Ext);
               continue;
             }
             if (Ext->hasClangNode())
@@ -467,10 +446,11 @@ void swift::ide::printSubmoduleInterface(
             continue;
 
           // Print synthesized extensions.
-          llvm::SmallPtrSet<ExtensionDecl *, 10> ExtensionsFromConformances;
-          findExtensionsFromConformingProtocols(D, ExtensionsFromConformances);
-          AdjustedOptions.initArchetypeTransformerForSynthesizedExtensions(NTD);
-          for (auto ET : ExtensionsFromConformances) {
+          std::vector<ExtensionDecl*> scratch;
+          SynthesizedExtensionAnalyzer Analyzer(NTD);
+          AdjustedOptions.initArchetypeTransformerForSynthesizedExtensions(NTD,
+                                                                    &Analyzer);
+          for (auto ET : Analyzer.getAllSynthesizedExtensions(scratch)) {
             if (!shouldPrint(ET, AdjustedOptions))
               continue;
             Printer << "\n";
@@ -618,7 +598,7 @@ void swift::ide::printHeaderInterface(
   for (auto *D : ClangDecls) {
     ASTPrinter &Printer = *PrinterToUse;
     if (!shouldPrint(D, AdjustedOptions)) {
-      Printer.avoidPrintDeclPost(D);
+      Printer.callAvoidPrintDeclPost(D);
       continue;
     }
     if (D->print(Printer, AdjustedOptions))

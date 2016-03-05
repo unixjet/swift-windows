@@ -58,6 +58,8 @@ swift::isInstructionTriviallyDead(SILInstruction *I) {
   // mark_uninitialized is never dead.
   if (isa<MarkUninitializedInst>(I))
     return false;
+  if (isa<MarkUninitializedBehaviorInst>(I))
+    return false;
 
   if (isa<DebugValueInst>(I) || isa<DebugValueAddrInst>(I))
     return false;
@@ -1111,70 +1113,88 @@ SILInstruction *ValueLifetimeAnalysis:: findLastUserInBlock(SILBasicBlock *BB) {
   llvm_unreachable("Expected to find use of value in block!");
 }
 
-ValueLifetimeAnalysis::ComputeResult ValueLifetimeAnalysis::
-computeFrontierImpl(Frontier &Fr, bool AllowedToModifyCFG) {
-  ComputeResult Result = ComputeResult::Success;
+bool ValueLifetimeAnalysis::computeFrontier(Frontier &Fr, Mode mode) {
+  bool NoCriticalEdges = true;
 
   // Exit-blocks from the lifetime region. The value if live at the end of
   // a predecessor block but not in the frontier block itself.
   llvm::SmallSetVector<SILBasicBlock *, 16> FrontierBlocks;
 
-  // Blocks where the value is live somewhere inside the block but not at the
-  // end of the block.
-  llvm::SmallPtrSet<SILBasicBlock *, 16> NotLiveOutBlocks;
+  // Blocks where the value is live at the end of the block and which have
+  // a frontier block as successor.
+  llvm::SmallSetVector<SILBasicBlock *, 16> LiveOutBlocks;
 
   /// The lifetime ends if we have a live block and a not-live successor.
   for (SILBasicBlock *BB : LiveBlocks) {
     bool LiveInSucc = false;
+    bool DeadInSucc = false;
     for (const SILSuccessor &Succ : BB->getSuccessors()) {
       if (LiveBlocks.count(Succ)) {
         LiveInSucc = true;
       } else {
-        // It's an "exit" edge from the lifetime region.
-        FrontierBlocks.insert(Succ);
+        DeadInSucc = true;
       }
     }
     if (!LiveInSucc) {
       // The value is not live in any of the successor blocks. This means the
       // block contains a last use of the value. The next instruction after
       // the last use is part of the frontier.
-      NotLiveOutBlocks.insert(BB);
       SILBasicBlock::iterator Iter(findLastUserInBlock(BB));
       Fr.push_back(&*next(Iter));
+    } else if (DeadInSucc && mode != IgnoreExitEdges) {
+      // The value is not live in some of the successor blocks.
+      LiveOutBlocks.insert(BB);
+      for (const SILSuccessor &Succ : BB->getSuccessors()) {
+        if (!LiveBlocks.count(Succ)) {
+          // It's an "exit" edge from the lifetime region.
+          FrontierBlocks.insert(Succ);
+        }
+      }
     }
   }
   // Handle "exit" edges from the lifetime region.
+  llvm::SmallPtrSet<SILBasicBlock *, 16> UnhandledFrontierBlocks;
   for (SILBasicBlock *FrontierBB: FrontierBlocks) {
     bool needSplit = false;
-    // If the value is live only in part of the precessor blocks we have to
+    // If the value is live only in part of the predecessor blocks we have to
     // split those predecessor edges.
     for (SILBasicBlock *Pred : FrontierBB->getPreds()) {
-      if (!LiveBlocks.count(Pred) || NotLiveOutBlocks.count(Pred)) {
+      if (!LiveOutBlocks.count(Pred)) {
         needSplit = true;
         break;
       }
     }
     if (needSplit) {
-      if (!AllowedToModifyCFG)
-        return ComputeResult::Fail;
-
-      // Split the predecessor edges which come from the lifetime region.
-      for (SILBasicBlock *Pred : FrontierBB->getPreds()) {
-        if (LiveBlocks.count(Pred) && !NotLiveOutBlocks.count(Pred)) {
-          SILBasicBlock *NewBlock = splitIfCriticalEdge(Pred, FrontierBB);
-          assert(NewBlock && "actually not a critical edge?");
-
-          // The single terminator instruction is part of the frontier.
-          Fr.push_back(&*NewBlock->begin());
-          Result = ComputeResult::SuccessWithSplitEdges;
-        }
-      }
+      if (mode == DontModifyCFG)
+        return false;
+      // We need to split the critical edge to create a frontier instruction.
+      UnhandledFrontierBlocks.insert(FrontierBB);
     } else {
       // The first instruction of the exit-block is part of the frontier.
       Fr.push_back(&*FrontierBB->begin());
     }
   }
-  return Result;
+  // Split critical edges from the lifetime region to not yet handled frontier
+  // blocks.
+  for (SILBasicBlock *FrontierPred : LiveOutBlocks) {
+    auto *T = FrontierPred->getTerminator();
+    // Cache the successor blocks because splitting critical edges invalidates
+    // the successor list iterator of T.
+    llvm::SmallVector<SILBasicBlock *, 4> SuccBlocks;
+    for (const SILSuccessor &Succ : T->getSuccessors())
+      SuccBlocks.push_back(Succ);
+
+    for (unsigned i = 0, e = SuccBlocks.size(); i != e; ++i) {
+      if (UnhandledFrontierBlocks.count(SuccBlocks[i])) {
+        assert(isCriticalEdge(T, i) && "actually not a critical edge?");
+        SILBasicBlock *NewBlock = splitEdge(T, i);
+        // The single terminator instruction is part of the frontier.
+        Fr.push_back(&*NewBlock->begin());
+        NoCriticalEdges = false;
+      }
+    }
+  }
+  return NoCriticalEdges;
 }
 
 bool ValueLifetimeAnalysis::isWithinLifetime(SILInstruction *Inst) {
@@ -1185,24 +1205,22 @@ bool ValueLifetimeAnalysis::isWithinLifetime(SILInstruction *Inst) {
   for (const SILSuccessor &Succ : BB->getSuccessors()) {
     // If the value is live at the beginning of any successor block it is also
     // live at the end of BB and therefore Inst is definitely in the lifetime
-    // region (Note that we don't check in upward direction agains the value's
+    // region (Note that we don't check in upward direction against the value's
     // definition).
     if (LiveBlocks.count(Succ))
       return true;
   }
   // The value is live in the block but not at the end of the block. Check if
   // Inst is located before (or at) the last use.
-  bool InLifeRange = false;
   for (auto II = BB->rbegin(); II != BB->rend(); ++II) {
     if (UserSet.count(&*II)) {
-      InLifeRange = true;
-    }
-    if (InLifeRange && Inst == &*II)
       return true;
+    }
+    if (Inst == &*II)
+      return false;
   }
   llvm_unreachable("Expected to find use of value in block!");
 }
-
 
 //===----------------------------------------------------------------------===//
 //                    Casts Optimization and Simplification

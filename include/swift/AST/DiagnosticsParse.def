@@ -148,6 +148,9 @@ NOTE(note_in_decl_extension,none,
 WARNING(inout_as_attr_deprecated,none,
         "'inout' before a parameter name is deprecated, place it before the parameter type instead",
         ())
+WARNING(line_directive_style_deprecated,none,
+        "#line directive is deprecated, please use #setline instead",
+        ())
 
 ERROR(declaration_same_line_without_semi,none,
       "consecutive declarations on a line must be separated by ';'", ())
@@ -256,6 +259,9 @@ ERROR(addressor_with_getter,none,
 ERROR(addressor_with_setter,none,
       "%select{variable|subscript}0 cannot provide both 'address' and "
       "a setter; use an ordinary getter instead", (unsigned))
+ERROR(behavior_multiple_vars,none,
+      "applying property behavior with parameter to multiple variables is "
+      "not supported", ())
 
 // Import
 ERROR(decl_expected_module_name,none,
@@ -340,6 +346,8 @@ ERROR(subscript_static,none,
       "subscript cannot be marked %0", (StaticSpellingKind))
 
 // initializer
+ERROR(invalid_nested_init,none,
+      "missing '%select{super.|self.}0' at initializer invocation", (bool))
 ERROR(initializer_decl_wrong_scope,none,
       "initializers may only be declared within a type", ())
 ERROR(expected_lparen_initializer,PointsToFirstBadToken,
@@ -543,10 +551,6 @@ ERROR(sil_witness_assoc_not_found,none,
       "sil associated type decl not found %0", (Identifier))
 ERROR(sil_witness_protocol_conformance_not_found,none,
       "sil protocol conformance not found", ())
-
-// SIL Default Witness Table
-ERROR(sil_invalid_minimum_witness_table_size,none,
-      "minimum witness table size must be an integer", ())
 
 // SIL Coverage Map
 ERROR(sil_coverage_func_not_found, none,

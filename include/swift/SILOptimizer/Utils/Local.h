@@ -244,35 +244,26 @@ public:
     propagateLiveness();
   }
 
-  /// Computes the lifetime frontier for the value.
-  /// Returns true on success. It can fail if the lifetime frontier is located
-  /// on a critical edge. Which means that getting the corrseponding frontier
-  /// instruction would require splitting that critical edge.
-  bool computeFrontier(Frontier &Fr) {
-    switch (computeFrontierImpl(Fr, true)) {
-      case ComputeResult::Success:
-        return true;
-      case ComputeResult::Fail:
-        return false;
-      case ComputeResult::SuccessWithSplitEdges:
-        llvm_unreachable("Not allowed to split edges");
-    }
-  }
+  enum Mode {
+    /// Don't split critical edges if the frontier instructions are located on
+    /// a critical edges. Instead fail.
+    DontModifyCFG,
+    
+    /// Split critical edges if the frontier instructions are located on
+    /// a critical edges.
+    AllowToModifyCFG,
+    
+    /// Ignore exit edges from the lifetime region at all.
+    IgnoreExitEdges
+  };
 
-  /// Computes the lifetime frontier for the value.
-  /// If the frontier is located on a critical edge the edge is split by
-  /// inserting a new basic block.
-  /// Returns true if new blocks are inserted.
-  bool computeFrontierAllowingCFGChanges(Frontier &Fr) {
-    switch (computeFrontierImpl(Fr, true)) {
-      case ComputeResult::Success:
-        return false;
-      case ComputeResult::SuccessWithSplitEdges:
-        return true;
-      case ComputeResult::Fail:
-        llvm_unreachable("Cannot fail when allowed to split edges");
-    }
-  }
+  /// Computes and returns the lifetime frontier for the value in \p Fr.
+  /// Returns true if all instructions in the frontier could be found in
+  /// non-critical edges.
+  /// Returns false if some frontier instructions are located on critical edges.
+  /// In this case, if \p mode is AllowToModifyCFG, those critical edges are
+  /// split, otherwise nothing is done and the returned \p Fr is not valid.
+  bool computeFrontier(Frontier &Fr, Mode mode);
 
   /// Returns true if the instruction \p Inst is located within the value's
   /// lifetime.
@@ -296,21 +287,6 @@ private:
 
   /// Returns the last use of the value in the live block \p BB.
   SILInstruction *findLastUserInBlock(SILBasicBlock *BB);
-
-  enum class ComputeResult {
-    /// The frontier could be computed and not critical edges were split.
-    Success,
-
-    /// The frontier could be computed but critical edges were split.
-    SuccessWithSplitEdges,
-
-    /// The frontier could not be computed without splitting critical edges.
-    Fail
-  };
-
-  /// Computes and returns the lifetime frontier for the value in \p Fr.
-  /// If \p AllowedToModifyCFG is true, the function may split critical edges.
-  ComputeResult computeFrontierImpl(Frontier &Fr, bool AllowedToModifyCFG);
 };
 
 /// Base class for BB cloners.

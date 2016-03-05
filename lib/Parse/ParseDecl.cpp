@@ -1423,10 +1423,6 @@ bool Parser::parseTypeAttribute(TypeAttributes &Attributes, bool justChecking) {
   // Determine which attribute it is, and diagnose it if unknown.
   TypeAttrKind attr = TypeAttributes::getAttrKindFromString(Tok.getText());
 
-  // noescape is only valid as a type attribute in SIL mode.
-  if (attr == TAK_noescape && !isInSILMode())
-    attr = TAK_Count;
-
   if (attr == TAK_Count) {
     if (justChecking) return true;
 
@@ -1635,8 +1631,8 @@ bool Parser::parseDeclAttributeList(DeclAttributes &Attributes,
       Token next = peekToken();
       auto Kind = TypeAttributes::getAttrKindFromString(next.getText());
 
-      // noescape is only valid as a decl attribute and type attribute (in SIL
-      // mode) but we disambiguate it as a decl attribute.
+      // noescape is only valid as a decl attribute and type attribute (in
+      // parameter lists) but we disambiguate it as a decl attribute.
       if (Kind == TAK_noescape)
         Kind = TAK_Count;
 
@@ -1706,10 +1702,11 @@ static bool isKeywordPossibleDeclStart(const Token &Tok) {
   case tok::kw_var:
   case tok::pound_if:
   case tok::identifier:
+  case tok::pound_setline:
     return true;
   case tok::pound_line:
-    // #line at the start of the line is a directive, #line within a line is
-    // an expression.
+    // #line at the start of the line is a directive, but it's deprecated.
+    // #line within a line is an expression.
     return Tok.isAtStartOfLine();
 
   case tok::kw_try:
@@ -1740,6 +1737,11 @@ static bool isParenthesizedUnowned(Parser &P) {
 bool Parser::isStartOfDecl() {
   // If this is obviously not the start of a decl, then we're done.
   if (!isKeywordPossibleDeclStart(Tok)) return false;
+
+  // 'init' invocation is not start of a declaration
+  if (Tok.is(tok::kw_init)) {
+    return !isa<ConstructorDecl>(CurDeclContext);
+  }
   
   // The protocol keyword needs more checking to reject "protocol<Int>".
   if (Tok.is(tok::kw_protocol)) {
@@ -2093,8 +2095,11 @@ ParserStatus Parser::parseDecl(SmallVectorImpl<Decl*> &Entries,
       }
       break;
     }
+    case tok::pound_setline:
+      Status = parseLineDirective(false);
+      break;
     case tok::pound_line:
-      Status = parseLineDirective();
+      Status = parseLineDirective(true);
       break;
 
     case tok::kw_func:
@@ -2556,15 +2561,20 @@ Parser::parseDeclExtension(ParseDeclOptions Flags, DeclAttributes &Attributes) {
   return DCC.fixupParserResult(status, ext);
 }
 
-ParserStatus Parser::parseLineDirective() {
-  SourceLoc Loc = consumeToken(tok::pound_line);
+ParserStatus Parser::parseLineDirective(bool isLine) {
+  SourceLoc Loc = consumeToken(isLine ? tok::pound_line
+                                      : tok::pound_setline);
+  if (isLine) {
+    diagnose(Loc, diag::line_directive_style_deprecated)
+        .fixItReplace(Loc, "#setline");
+  }
   bool WasInPoundLineEnvironment = InPoundLineEnvironment;
   if (WasInPoundLineEnvironment) {
     SourceMgr.closeVirtualFile(Loc);
     InPoundLineEnvironment = false;
   }
 
-  // #line\n returns to the main buffer.
+  // #setline\n returns to the main buffer.
   if (Tok.isAtStartOfLine()) {
     if (!WasInPoundLineEnvironment) {
       diagnose(Tok, diag::unexpected_line_directive);
@@ -2573,7 +2583,7 @@ ParserStatus Parser::parseLineDirective() {
     return makeParserSuccess();
   }
 
-  // #line 42 "file.swift"\n
+  // #setline 42 "file.swift"\n
   if (Tok.isNot(tok::integer_literal)) {
     diagnose(Tok, diag::expected_line_directive_number);
     return makeParserError();
@@ -2594,7 +2604,9 @@ ParserStatus Parser::parseLineDirective() {
     return makeParserError();
   }
 
-  auto Filename = getStringLiteralIfNotInterpolated(*this, Loc, Tok, "#line");
+  auto Filename = getStringLiteralIfNotInterpolated(*this, Loc, Tok,
+                                                    isLine ? "#line"
+                                                           : "#setline");
   if (!Filename.hasValue())
     return makeParserError();
 
@@ -3956,14 +3968,64 @@ ParserStatus Parser::parseDeclVar(ParseDeclOptions Flags,
     if (consumeIf(tok::kw___behavior)) {
       auto type = parseType(diag::expected_behavior_name,
                             /*handle completion*/ true);
-      // TODO: recovery. could scan to next closing bracket
       if (type.isParseError())
         return makeParserError();
       if (type.hasCodeCompletion())
         return makeParserCodeCompletionStatus();
+      
+      // Parse a following trailing closure argument.
+      // FIXME: Handle generalized parameters.
+      Expr *paramExpr = nullptr;
+      if (Tok.is(tok::l_brace)) {
+        // Record the variables that we're trying to set up.  This allows us
+        // to cleanly reject "var x = x" when "x" isn't bound to an enclosing
+        // decl (even though names aren't injected into scope when the parameter
+        // is parsed).
+        SmallVector<VarDecl *, 4> Vars;
+        Vars.append(DisabledVars.begin(), DisabledVars.end());
+        pattern->collectVariables(Vars);
+        
+        llvm::SaveAndRestore<decltype(DisabledVars)>
+        RestoreCurVars(DisabledVars, Vars);
+        
+        llvm::SaveAndRestore<decltype(DisabledVarReason)>
+        RestoreReason(DisabledVarReason, diag::var_init_self_referential);
 
+        // Set up a decl context for the closure.
+        // This will be recontextualized to a method we synthesize during
+        // type checking.
+        if (!CurDeclContext->isLocalContext() && !topLevelDecl && !initContext)
+          initContext = Context.createPatternBindingContext(CurDeclContext);
+        Optional<ParseFunctionBody> initParser;
+        Optional<ContextChange> topLevelParser;
+        if (topLevelDecl)
+          topLevelParser.emplace(*this, topLevelDecl,
+                                 &State->getTopLevelContext());
+        if (initContext)
+          initParser.emplace(*this, initContext);
+
+        auto closure = parseExprClosure();
+        usedInitContext = true;
+        if (closure.isParseError())
+          return makeParserError();
+        if (closure.hasCodeCompletion())
+          return makeParserCodeCompletionStatus();
+        paramExpr = closure.get();
+      }
+
+      unsigned numVars = 0;
       pattern->forEachVariable([&](VarDecl *VD) {
-        VD->addBehavior(type.get(), nullptr);
+        ++numVars;
+        // TODO: Support parameter closure with multiple vars. This is tricky
+        // since the behavior's parameter type may be dependent on the
+        // property type, so we'd need to clone the closure expr for each var
+        // to re-type-check it.
+        if (numVars > 1 && paramExpr) {
+          diagnose(paramExpr->getLoc(), diag::behavior_multiple_vars);
+          paramExpr = nullptr;
+        }
+        
+        VD->addBehavior(type.get(), paramExpr);
       });
     // If we syntactically match the second decl-var production, with a
     // var-get-set clause, parse the var-get-set clause.

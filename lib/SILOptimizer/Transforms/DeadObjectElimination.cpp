@@ -635,8 +635,8 @@ static bool removeAndReleaseArray(SILValue NewArrayValue, bool &CFGChanged) {
   // paths in which some object initialization occurs.
   SILSSAUpdater SSAUp;
   ValueLifetimeAnalysis::Frontier ArrayFrontier;
-  if (VLA.computeFrontierAllowingCFGChanges(ArrayFrontier))
-    CFGChanged = true;
+  CFGChanged |= !VLA.computeFrontier(ArrayFrontier,
+                                     ValueLifetimeAnalysis::IgnoreExitEdges);
 
   DeadStorage.visitStoreLocations([&] (ArrayRef<StoreInst*> Stores) {
       insertReleases(Stores, ArrayFrontier, SSAUp);
