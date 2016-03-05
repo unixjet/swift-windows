@@ -25,7 +25,7 @@ do
   grep 'target x86_64' $f > /dev/null
   if [ $? -eq 0 ]
   then
-    sed -e 's/-target/-Wno-macro-redefined -target/' $f  > tmp.out
+    sed -e 's/>-target/>-Wno-macro-redefined -target/' $f  > tmp.out
     mv tmp.out $f
   fi
 done
