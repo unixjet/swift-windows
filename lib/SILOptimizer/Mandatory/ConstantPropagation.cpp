@@ -875,9 +875,14 @@ processFunction(SILFunction &F, bool EnableDiagnostics,
 
         WorkList.remove(I);
         I->eraseFromParent();
+#if defined(_MSC_VER)
+      // The default parameter didn't work in MSVC.
       },
       []() {},
       []() {});
+#else
+      });
+#endif
 
   while (!WorkList.empty()) {
     SILInstruction *I = WorkList.pop_back_val();

@@ -19,7 +19,7 @@
 #define __SWIFT_MALLOC_H__
 
 #include <cassert>
-#if _MSC_VER
+#if defined(_MSC_VER)
 #include <malloc.h>
 #else
 #include <cstdlib>
@@ -27,11 +27,11 @@
 
 namespace swift {
 
-// FIXME: Use C11 aligned_alloc or Windows _aligned_malloc if available.
+// FIXME: Use C11 aligned_alloc if available.
 inline void *AlignedAlloc(size_t size, size_t align) {
 #if defined(_MSC_VER)
   void *r = _aligned_malloc(size, align);
-  assert(r != NULL && "aligned_alloc failed");
+  assert(r != NULL && "_aligned_malloc failed");
   return r;
 #else
   // posix_memalign only accepts alignments greater than sizeof(void*).

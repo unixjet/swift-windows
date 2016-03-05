@@ -264,7 +264,7 @@ void ScalarTraits<uint32_t>::output(const uint32_t &Val,
 #if defined(_MSC_VER)
 void ScalarTraits<unsigned long>::output(const unsigned long &Val,
                                          raw_ostream &Out) {
-	Out << Val;
+  Out << Val;
 }
 #endif
 

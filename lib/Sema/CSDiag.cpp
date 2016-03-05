@@ -846,6 +846,7 @@ namespace {
       
     void filterList(ArrayRef<CallArgParam> actualArgs);
 #if _MSC_VER
+    // MSVC confused when choosing a correct method.
     void filterList(SmallVector<CallArgParam, 4> actualArgs) {
       return filterList(ArrayRef<CallArgParam>(actualArgs));
     }
