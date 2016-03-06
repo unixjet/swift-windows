@@ -1,0 +1,226 @@
+
+******************************************************
+Install cmake-3.4.3-win32-x86.exe
+
+Install Python 2.7.11.msi
+
+Install libxml2-2.9.3-win32-x86_64.7z
+
+Install pkg-config_0.26-1_win32.zip
+
+  http://stackoverflow.com/questions/1710922/how-to-install-pkg-config-in-windows
+  http://ftp.gnome.org/pub/gnome/binaries/win32/dependencies/pkg-config_0.26-1_win32.zip
+  http://ftp.gnome.org/pub/gnome/binaries/win32/glib/2.28/glib_2.28.8-1_win32.zip
+  http://ftp.gnome.org/pub/gnome/binaries/win32/dependencies/gettext-runtime_0.18.1.1-2_win32.zip
+
+  //??  set PKG_CONFIG_PATH=c:\pkg-config\conf
+
+Install UUID
+  ???
+  
+Install ICU
+  http://site.icu-project.org/download/56#TOC-ICU4C-Download
+  icu4c-56_1-Win64-msvc10.zip
+
+ 
+Replace include dir
+  C:\Program Files (x86)\Microsoft Visual Studio 14.0\VC\Clang 3.7\include
+ 
+
+set PATH=C:\Program Files (x86)\CMake\bin;%PATH%
+set WORKDIR=c:\work\swift_msvc
+
+// Build CMARK
+mkdir %WORKDIR%\build\firsttime\cmark
+cd %WORKDIR%\build\firsttime\cmark
+cmake -G "Visual Studio 14 2015 Win64" -D CMAKE_BUILD_TYPE=RELEASE ..\..\..\cmark
+
+// Build LLVM with CLANG
+cd %WORKDIR%\llvm\tools
+mklink /d clang ..\..\clang
+
+mkdir %WORKDIR%\build\firsttime\llvm
+cd %WORKDIR%\build\firsttime\llvm
+cmake -G "Visual Studio 14 2015 Win64" -D CMAKE_BUILD_TYPE=RELEASE ..\..\..\llvm
+
+// Build Swift
+
+mkdir %WORKDIR%\build\firsttime\swift
+set PATH=%WORKDIR%\build\firsttime\llvm\release\bin;%PATH%
+cd %WORKDIR%\build\firsttime\swift
+cmake -Tv140_swift_clang_3_8 -G "Visual Studio 14 2015 Win64" -DCMAKE_BUILD_TYPE=Release -DLIBXML2_LIBRARIES=c:\libxml2\lib\libxml2.a  -DLIBXML2_INCLUDE_DIR=c:\libxml2\include  -DPKG_CONFIG_EXECUTABLE=c:\pkg-config\bin\pkg-config.exe -DUUID_INCLUDE_DIR=c:\uuid\include -DUUID_LIBRARY=c:\uuid\lib\uuid.lib -DICU_UC_INCLUDE_DIR=c:\icu\include -DICU_UC_LIBRARIES=c:\icu\lib64\icuuc.lib -DICU_I18N_INCLUDE_DIR=c:\icu\include -DICU_I18N_LIBRARIES=c:\icu\lib64\icuin.lib -DSWIFT_INCLUDE_DOCS=FALSE -DSWIFT_PATH_TO_CMARK_BUILD=%WORKDIR%\build\firsttime\cmark -DSWIFT_PATH_TO_CMARK_SOURCE=%WORKDIR%\cmark ..\..\..\swift
+
+관리자모드로 Cygwin64 Terminal 
+cd c:/Work/swift_msvc/build/firsttime/swift
+sh ../../../swift/misc/remove_unknown_option.sh
+
+//In notepad++, Edit tools/driver/swift.vcxproj
+// replace libclang([^.]*).a  ->  clang\1.lib
+// replace swift\libcmark.a ->  build\firsttime\cmark\src\Release\cmark_static.lib
+// remove  edit.lib  
+// replace copy  swift  XXX  => copy  swift.exe XXX.exe
+sh ../../../swift/misc/patch_swift_vcxproj.sh
+
+todo: uuid.lib(uuid.obj) : /GL로 컴파일한 MSIL .netmodule 또는 모듈이 있습니다. /LTCG를 지정하여 링크를 다시 시작하십시오. /LTCG를 링크 명령줄에 추가하면 링커 성능이 향상됩니다.
+todo: LINK : warning LNK4044: '/LC:/Work/swift_msvc/build/firsttime/swift/Release/lib/swift/windows' 옵션을 인식할 수 없습니다. 무시됩니다.
+
+"c:\Program Files (x86)\MSBuild\14.0\Bin\MSBuild.exe" /p:Configuration=Release ALL_BUILD.vcxproj 
+ 
+******************************************************
+* vsproj processing
+
+  v (swift-demangle.exe)
+    (swift-ide-test.exe)  // libxml header needed
+  v (sil-opt.exe)
+  v (sil-extract.exe)
+  v  swift.exe
+  v (swift-llvm-opt.exe)
+  v (lldb-moduleimport-test.exe)
+  v  SwiftCore.dll
+  v  SwiftOnoneSupport.dll
+    (SwiftExperimental.dll)
+  v (SwiftPrivate.dll)
+     
+------------------
+// MSVC-TODO
+
+- Toolchain 'Windows'를 Cygwin과 같이 쓸 수 없음
+    Cygwin, Msvc, Mingw로 분할 필요
+
+- libuuid 빌드해야 됨
+
+- libicu 빌드해야 됨
+
+------------------
+
+
+it need?
+-DLLVM_DEFAULT_TARGET_TRIPLE=x86_64-windows-msvc
+-DLLVM_USE_CRT_RELEASE=MT 
+set CMAKE_INSTALL_PREFIX=$WORKDIR\build\firsttime\llvm
+//set LLVM_TARGETS_TO_BUILD=x86_64-unknown-windows-msvc
+
+set PATH=C:\Program Files (x86)\Microsoft Visual Studio 14.0\VC\Clang 3.7\bin\x86;%PATH%
+
+
+* Libs/libuuid-devel      2.25.2-2
+*      /libicu-devel       56.1-1
+*      /libedit-devel      20130712-1
+v      /libxml2-devel      2.9.3-1
+      /libsqlite3-devel   3.9.2-1
+      /swig               3.0.7-1
+      /libncurses-devel   6.0-1.20151017
+v      /pkg-config         0.29-1
+      /libiconv-devel     1.14-3
+      
+
+--------
+// 탐색할 인클루드 디렉토리 리스트
+g++ -E -x c++ - -v < /dev/null 
+clang++ -E -x c++ - -v < /dev/null
+
+=============================
+Linux CMAKE option
+
+/usr/bin/cmake -G Ninja -DCMAKE_C_COMPILER:PATH=/usr/bin/clang -DCMAKE_CXX_COMPILER:PATH=/usr/bin/clang++ '-DCMAKE_C_FLAGS= -fno-stack-protector' '-DCMAKE_CXX_FLAGS= -fno-stack-protector' -DCMAKE_BUILD_TYPE:STRING=Release -DLLVM_ENABLE_ASSERTIONS:BOOL=TRUE -DSWIFT_ANALYZE_CODE_COVERAGE:BOOL=FALSE -DSWIFT_STDLIB_BUILD_TYPE:STRING=Debug -DSWIFT_STDLIB_ASSERTIONS:BOOL=TRUE -DSWIFT_NATIVE_LLVM_TOOLS_PATH:STRING= -DSWIFT_NATIVE_CLANG_TOOLS_PATH:STRING= -DSWIFT_NATIVE_SWIFT_TOOLS_PATH:STRING= -DSWIFT_BUILD_TOOLS:BOOL=TRUE -DSWIFT_BUILD_STDLIB:BOOL=TRUE -DSWIFT_SERIALIZE_STDLIB_UNITTEST:BOOL=FALSE -DSWIFT_BUILD_SDK_OVERLAY:BOOL=TRUE -DSWIFT_BUILD_STATIC_STDLIB:BOOL=FALSE -DSWIFT_BUILD_PERF_TESTSUITE:BOOL=FALSE  -DSWIFT_INCLUDE_TESTS:BOOL=TRUE -DSWIFT_INSTALL_COMPONENTS:STRING= -DSWIFT_EMBED_BITCODE_SECTION:BOOL=FALSE -DSWIFT_DARWIN_XCRUN_TOOLCHAIN:STRING=default -DSWIFT_AST_VERIFIER:BOOL=TRUE -DSWIFT_SIL_VERIFY_ALL:BOOL=FALSE -DSWIFT_RUNTIME_ENABLE_DTRACE:BOOL=FALSE -DSWIFT_RUNTIME_ENABLE_LEAK_CHECKER:BOOL=FALSE -DCMAKE_INSTALL_PREFIX:PATH=/usr -DLLVM_CONFIG:PATH=/home/tinysun/Work/swift/build/Ninja-ReleaseAssert+stdlib-DebugAssert/llvm-linux-x86_64/bin/llvm-config         -DSWIFT_PATH_TO_CLANG_SOURCE:PATH=/home/tinysun/Work/swift/llvm/tools/clang -DSWIFT_PATH_TO_CLANG_BUILD:PATH=/home/tinysun/Work/swift/build/Ninja-ReleaseAssert+stdlib-DebugAssert/llvm-linux-x86_64 -DSWIFT_PATH_TO_LLVM_SOURCE:PATH=/home/tinysun/Work/swift/llvm -DSWIFT_PATH_TO_LLVM_BUILD:PATH=/home/tinysun/Work/swift/build/Ninja-ReleaseAssert+stdlib-DebugAssert/llvm-linux-x86_64 -DSWIFT_PATH_TO_CMARK_SOURCE:PATH=/home/tinysun/Work/swift/cmark -DSWIFT_PATH_TO_CMARK_BUILD:PATH=/home/tinysun/Work/swift/build/Ninja-ReleaseAssert+stdlib-DebugAssert/cmark-linux-x86_64 -DSWIFT_CMARK_LIBRARY_DIR:PATH=/home/tinysun/Work/swift/build/Ninja-ReleaseAssert+stdlib-DebugAssert/cmark-linux-x86_64/src /home/tinysun/Work/swift/swift
+
+
+===================================
+MS Compile option for my build clang 3.8.0 - msvc
+// captured from clang-c2 driver
+
+clang  -cc1 -triple x86_64-pc-windows-msvc19.0.0 -emit-obj -mrelax-all -disable-free -disable-llvm-verifier -main-file-name once_flag_size.cpp -mrelocation-model pic -pic-level 2 -mthread-model posix -fmath-errno -masm-verbose -mconstructor-aliases -munwind-tables -target-cpu x86-64 -momit-leaf-frame-pointer -v -dwarf-column-info -resource-dir "C:\\Program Files (x86)\\Microsoft Visual Studio 14.0\\VC\\Clang 3.7\\bin\\x86\\..\\lib\\clang\\3.7.0" -internal-isystem "C:\\Program Files (x86)\\Microsoft Visual Studio 14.0\\VC\\Clang 3.7\\bin\\x86\\..\\lib\\clang\\3.7.0\\include" -internal-isystem "C:\\Program Files (x86)\\Microsoft Visual Studio 14.0\\VC\\INCLUDE" -internal-isystem "C:\\Program Files (x86)\\Microsoft Visual Studio 14.0\\VC\\ATLMFC\\INCLUDE" -internal-isystem "C:\\Program Files (x86)\\Windows Kits\\10\\include\\10.0.10586.0\\ucrt" -internal-isystem "C:\\Program Files (x86)\\Windows Kits\\NETFXSDK\\4.6.1\\include\\um" -internal-isystem "C:\\Program Files (x86)\\Windows Kits\\10\\include\\10.0.10586.0\\shared" -internal-isystem "C:\\Program Files (x86)\\Windows Kits\\10\\include\\10.0.10586.0\\um" -internal-isystem "C:\\Program Files (x86)\\Windows Kits\\10\\include\\10.0.10586.0\\winrt" -std=c++11 -fdeprecated-macro -fdebug-compilation-dir "c:\\Work\\compiler_bug" -ferror-limit 19 -fmessage-length 120 -mstackrealign -fms-extensions -fms-compatibility -fms-compatibility-version=19 -fdelayed-template-parsing -fobjc-runtime=gnustep -fdiagnostics-show-option -fcolor-diagnostics -o "C:\\Users\\Han\\AppData\\Local\\Temp\\once_flag_size-2566aa.o" -x c++ once_flag_size.cpp
+
+
+/////
+
+for basename() link workaround,
+clang tt.cpp -D__USER_LABEL_PREFIX__= -Wno-macro-redefined
+
+
+/////
+// LINKING swiftCore.dll   
+    // swiftRuntime.lib, swiftStdlibStubs.lib, Swift.obj
+
+cd c:\Work\swift_msvc\build\firsttime\swift\stdlib\public\core
+
+DEF 파일 만들기
+    create objfiles.txt  
+    -------------
+    C:\Work\swift_msvc\build\firsttime\swift\stdlib\public\core\windows\x86_64\Swift.obj
+
+    cmake -E __create_def  allexp.def objfiles.txt
+
+    allexp.def에 아래 추가
+      _TMSS
+      _TMSi
+      _TMVs10_ArrayBody
+      _TMVs5UInt8
+      _TWPSis33_BuiltinIntegerLiteralConvertibles
+      _TWPSis18_SignedIntegerTypes
+      _TWPSis16ForwardIndexTypes
+      _TWPVs6UInt32s19UnsignedIntegerTypes
+      _TMVs6UInt32
+      _TMVs18_StringBufferIVars
+      _TMVs6UInt16
+      _TMVs4Int8
+      _TMVs6UInt64
+      _TMSb
+      _TMVs5Int32
+      _TMps16OutputStreamType
+      _swiftEmptyArrayStorage
+
+  또는 
+     dlltool -z allexp.def --export-all-symbols ./windows/x86_64/Swift.obj
+     sed -e 's/"//g' allexp.def > ttt.def; mv ttt.def allexp.def
+     아래의 심볼에 대해 DATA 속성 제거
+       _TMSS
+      
+     dlltool -z allexp2.def --export-all-symbols ../../../Release/lib/swift/windows/x86_64/swiftRuntime.lib      
+     dlltool -z allexp3.def --export-all-symbols ../../../Release/lib/swift/windows/x86_64/swiftStdlibStubs.lib
+
+  아래의 심볼에 대해 DATA 속성 제거
+    _TZvOs7Process5_argcVs5Int32
+    globalinit_33_1BDF70FFC18749BAB495A73B459ED2F0_token3
+    _TZvOs7Process11_unsafeArgvGSpGSpVs4Int8__
+
+
+link.exe /ERRORREPORT:PROMPT /OUT:"C:\Work\swift_msvc\build\firsttime\swift\Release\bin\swiftCore.dll" /INCREMENTAL:NO /NOLOGO /LIBPATH:C:/Work/swift_msvc/build/firsttime/llvm/Release/lib /LIBPATH:C:/Work/swift_msvc/build/firsttime/llvm/Release/lib/Release /LIBPATH:C:/Work/swift_msvc/build/firsttime/llvm/Release/lib /LIBPATH:C:/Work/swift_msvc/build/firsttime/llvm/Release/lib/Release kernel32.lib user32.lib gdi32.lib winspool.lib shell32.lib ole32.lib oleaut32.lib uuid.lib comdlg32.lib advapi32.lib ..\..\..\Release\lib\swift\windows\x86_64\swiftRuntime.lib ..\..\..\Release\lib\swift\windows\x86_64\swiftStdlibStubs.lib C:\icu\lib64\icuuc.lib C:\icu\lib64\icui18n.lib /MANIFEST /MANIFESTUAC:"level='asInvoker' uiAccess='false'" /manifest:embed /PDB:"C:/Work/swift_msvc/build/firsttime/swift/Release/bin/swiftCore.pdb" /SUBSYSTEM:CONSOLE /TLBID:1 /DYNAMICBASE /NXCOMPAT /IMPLIB:"C:\Work\swift_msvc\build\firsttime\swift\Release\lib\swift\windows\x86_64\swiftCore.lib" /MACHINE:X64  /machine:x64 /DLL C:\Work\swift_msvc\build\firsttime\swift\stdlib\public\core\windows\x86_64\Swift.obj /DEF:allexp.def
+
+
+
+cd c:\Work\swift_msvc\build\firsttime\swift\stdlib\public\SwiftOnoneSupport
+
+dlltool -z allexp.def --export-all-symbols ../../../stdlib/public/SwiftOnoneSupport/windows/x86_64/SwiftOnoneSupport.obj
+sed -e 's/"//g' allexp.def > ttt.def; mv ttt.def allexp.def
+
+link.exe /ERRORREPORT:PROMPT /OUT:"C:\Work\swift_msvc\build\firsttime\swift\Release\bin\swiftSwiftOnoneSupport.dll" /INCREMENTAL:NO /NOLOGO /LIBPATH:C:/Work/swift_msvc/build/firsttime/llvm/Release/lib /LIBPATH:C:/Work/swift_msvc/build/firsttime/llvm/Release/lib/Release /LIBPATH:C:/Work/swift_msvc/build/firsttime/llvm/Release/lib /LIBPATH:C:/Work/swift_msvc/build/firsttime/llvm/Release/lib/Release kernel32.lib user32.lib gdi32.lib winspool.lib shell32.lib ole32.lib oleaut32.lib uuid.lib comdlg32.lib advapi32.lib ..\..\..\Release\lib\swift\windows\x86_64\swiftCore.lib /MANIFEST /MANIFESTUAC:"level='asInvoker' uiAccess='false'" /manifest:embed /PDB:"C:/Work/swift_msvc/build/firsttime/swift/Release/bin/swiftSwiftOnoneSupport.pdb" /SUBSYSTEM:CONSOLE /TLBID:1 /DYNAMICBASE /NXCOMPAT /IMPLIB:"C:/Work/swift_msvc/build/firsttime/swift/Release/lib/swift/windows/x86_64/swiftSwiftOnoneSupport.lib" /MACHINE:X64  /machine:x64 /DLL C:\Work\swift_msvc\build\firsttime\swift\stdlib\public\SwiftOnoneSupport\windows\x86_64\SwiftOnoneSupport.obj    /DEF:allexp.def msvcrt.lib
+
+
+
+cd c:\Work\swift_msvc\build\firsttime\swift\stdlib\private\SwiftPrivate
+
+DEF 파일 만들기
+  create objfiles.txt  
+  -------------
+  C:\Work\swift_msvc\build\firsttime\swift\stdlib\private\SwiftPrivate\windows\x86_64\SwiftPrivate.obj
+
+  cmake -E __create_def  allexp.def objfiles.txt
+  또는 
+     dlltool -z allexp.def --export-all-symbols ./stdlib/private/SwiftPrivate/windows/x86_64/SwiftPrivate.obj
+     sed -e 's/"//g' allexp.def > ttt.def; mv ttt.def allexp.def
+  
+
+link.exe /ERRORREPORT:PROMPT /OUT:"C:\Work\swift_msvc\build\firsttime\swift\Release\bin\swiftSwiftPrivate.dll" /INCREMENTAL:NO /NOLOGO /LIBPATH:C:/Work/swift_msvc/build/firsttime/llvm/Release/lib /LIBPATH:C:/Work/swift_msvc/build/firsttime/llvm/Release/lib/Release /LIBPATH:C:/Work/swift_msvc/build/firsttime/llvm/Release/lib /LIBPATH:C:/Work/swift_msvc/build/firsttime/llvm/Release/lib/Release kernel32.lib user32.lib gdi32.lib winspool.lib shell32.lib ole32.lib oleaut32.lib uuid.lib comdlg32.lib advapi32.lib ..\..\..\Release\lib\swift\windows\x86_64\swiftCore.lib /MANIFEST /MANIFESTUAC:"level='asInvoker' uiAccess='false'" /manifest:embed /PDB:"C:/Work/swift_msvc/build/firsttime/swift/Release/bin/swiftSwiftPrivate.pdb" /SUBSYSTEM:CONSOLE /TLBID:1 /DYNAMICBASE /NXCOMPAT /IMPLIB:"C:/Work/swift_msvc/build/firsttime/swift/Release/lib/swift/windows/x86_64/swiftSwiftPrivate.lib" /MACHINE:X64  /machine:x64 /DLL C:\Work\swift_msvc\build\firsttime\swift\stdlib\private\SwiftPrivate\windows\x86_64\SwiftPrivate.obj /DEF:allexp.def msvcrt.lib
+
+=======================
+copy  swiftCore.dll  ..\lib\swift\windows\libswiftCore.dll
+copy  swiftSwiftOnoneSupport.dll  ..\lib\swift\windows\libswiftSwiftOnoneSupport.dll
+=======================
+Hello 컴파일하기
+
+cd c:\Work\swift_msvc\build\firsttime\swift\Release\bin
+
+swiftc.exe -c hello.swift -o hello.obj
+
+link /out:hello.exe hello.obj ../lib/swift/windows/x86_64/swiftCore.lib ../lib/swift/windows/x86_64/swiftSwiftOnoneSupport.lib msvcrt.lib  

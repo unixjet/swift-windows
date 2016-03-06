@@ -22,6 +22,10 @@ if("${CMAKE_SYSTEM_NAME}" STREQUAL "CYGWIN")
   set(swift_runtime_port_sources
       CygwinPort.cpp)
 endif()
+if("${CMAKE_SYSTEM_NAME}" STREQUAL "Windows")
+  set(swift_runtime_port_sources
+      CygwinPort.cpp)
+endif()
     
 set(swift_runtime_objc_sources)
 set(swift_runtime_unicode_normalization_sources)
