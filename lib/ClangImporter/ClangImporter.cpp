@@ -2039,7 +2039,7 @@ auto ClangImporter::Implementation::importFullName(
         if (!shouldImportAsInitializer(method, initPrefixLength,
                                        result.InitKind)) {
           // We cannot import this as an initializer anyway.
-          return ImportedName();
+          return { };
         }
 
         // If this swift_name attribute maps a factory method to an

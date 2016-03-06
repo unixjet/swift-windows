@@ -469,13 +469,17 @@ class CastOptimizer {
 
 public:
   CastOptimizer(std::function<void (SILInstruction *I, ValueBase *V)> ReplaceInstUsesAction,
-                std::function<void (SILInstruction *)> EraseAction = [](SILInstruction*){},
-                std::function<void ()> WillSucceedAction = [](){},
+                std::function<void (SILInstruction *)> EraseAction,
+                std::function<void ()> WillSucceedAction,
                 std::function<void ()> WillFailAction = [](){})
     : ReplaceInstUsesAction(ReplaceInstUsesAction),
       EraseInstAction(EraseAction),
       WillSucceedAction(WillSucceedAction),
       WillFailAction(WillFailAction) {}
+
+  CastOptimizer(std::function<void (SILInstruction *I, ValueBase *V)> ReplaceInstUsesAction,
+                std::function<void (SILInstruction *)> EraseAction = [](SILInstruction*){})
+    : CastOptimizer(ReplaceInstUsesAction, EraseAction, [](){}, [](){}) {}
 
   /// Simplify checked_cast_br. It may change the control flow.
   SILInstruction *
