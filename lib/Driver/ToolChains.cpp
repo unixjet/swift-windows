@@ -1423,6 +1423,7 @@ toolchains::Windows::constructInvocation(const LinkJobAction &job,
 
   // Always add the stdlib
   Arguments.push_back("-lswiftCore");
+  Arguments.push_back("-lswiftSwiftOnoneSupport");
 
   // Add any autolinking scripts to the arguments
   for (const Job *Cmd : context.Inputs) {

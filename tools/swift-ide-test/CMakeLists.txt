@@ -27,3 +27,6 @@ add_custom_command(TARGET swift-ide-test POST_BUILD
       "${SWIFT_SOURCE_DIR}/utils/swift-api-dump.py"
       "${SWIFT_RUNTIME_OUTPUT_INTDIR}/swift-api-dump.py"
     COMMENT "Creating development symlink for swift-api-dump.py")
+
+set_property(TARGET swift-ide-test APPEND_STRING PROPERTY
+    LINK_FLAGS " -Wl,--allow-multiple-definition")

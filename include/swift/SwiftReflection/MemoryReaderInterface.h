@@ -26,7 +26,11 @@
 extern "C" {
 #endif
 
+#if defined(__CYGWIN__)
+#define addr_t intptr_t
+#else
 typedef uint64_t addr_t;
+#endif
 
 typedef struct MemoryReaderImpl {
   /// Get the size in bytes of the target's pointer type.

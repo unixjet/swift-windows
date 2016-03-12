@@ -59,3 +59,6 @@ if(SWIFT_HOST_VARIANT STREQUAL "linux")
       FILES "${SWIFT_RUNTIME_OUTPUT_INTDIR}/swift-autolink-extract"
       DESTINATION "bin")
 endif()
+
+set_property(TARGET swift APPEND_STRING PROPERTY
+      LINK_FLAGS " -Wl,--allow-multiple-definition")
