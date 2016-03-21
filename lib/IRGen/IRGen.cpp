@@ -456,6 +456,9 @@ static llvm::TargetMachine *createTargetMachine(IRGenOptions &Opts,
   auto cmodel = CodeModel::Default;
   if (Triple.isWindowsCygwinEnvironment())
     cmodel = CodeModel::Large;
+  if (Triple.isKnownWindowsMSVCEnvironment())
+    cmodel = CodeModel::Large;
+
   llvm::TargetMachine *TargetMachine
     = Target->createTargetMachine(Triple.str(), CPU,
                                   targetFeatures, TargetOpts, Reloc::PIC_,

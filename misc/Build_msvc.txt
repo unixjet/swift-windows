@@ -48,21 +48,12 @@ cmake -G "Visual Studio 14 2015 Win64" -D CMAKE_BUILD_TYPE=RELEASE ..\..\..\llvm
 mkdir %WORKDIR%\build\firsttime\swift
 set PATH=%WORKDIR%\build\firsttime\llvm\release\bin;%PATH%
 cd %WORKDIR%\build\firsttime\swift
-cmake -Tv140_swift_clang_3_8 -G "Visual Studio 14 2015 Win64" -DCMAKE_BUILD_TYPE=Release -DLIBXML2_LIBRARIES=c:\libxml2\lib\libxml2.a  -DLIBXML2_INCLUDE_DIR=c:\libxml2\include  -DPKG_CONFIG_EXECUTABLE=c:\pkg-config\bin\pkg-config.exe -DUUID_INCLUDE_DIR=c:\uuid\include -DUUID_LIBRARY=c:\uuid\lib\uuid.lib -DICU_UC_INCLUDE_DIR=c:\icu\include -DICU_UC_LIBRARIES=c:\icu\lib64\icuuc.lib -DICU_I18N_INCLUDE_DIR=c:\icu\include -DICU_I18N_LIBRARIES=c:\icu\lib64\icuin.lib -DSWIFT_INCLUDE_DOCS=FALSE -DSWIFT_PATH_TO_CMARK_BUILD=%WORKDIR%\build\firsttime\cmark -DSWIFT_PATH_TO_CMARK_SOURCE=%WORKDIR%\cmark ..\..\..\swift
 
-관리자모드로 Cygwin64 Terminal 
+cmake -Tv140_clang_3_9_swift -G "Visual Studio 14 2015 Win64" -DCMAKE_BUILD_TYPE=Release -DLIBXML2_LIBRARIES=c:\libxml2\lib\libxml2.a  -DLIBXML2_INCLUDE_DIR=c:\libxml2\include  -DPKG_CONFIG_EXECUTABLE=c:\pkg-config\bin\pkg-config.exe -DUUID_INCLUDE_DIR=c:\uuid\include -DUUID_LIBRARY=c:\uuid\lib\uuid.lib -DICU_UC_INCLUDE_DIR=c:\icu\include -DICU_UC_LIBRARIES=c:\icu\lib64\icuuc.lib -DICU_I18N_INCLUDE_DIR=c:\icu\include -DICU_I18N_LIBRARIES=c:\icu\lib64\icuin.lib -DSWIFT_INCLUDE_DOCS=FALSE -DSWIFT_PATH_TO_CMARK_BUILD=%WORKDIR%\build\firsttime\cmark -DSWIFT_PATH_TO_CMARK_SOURCE=%WORKDIR%\cmark ..\..\..\swift
+
+Cygwin64 Terminal (In Administrator Mode)
 cd c:/Work/swift_msvc/build/firsttime/swift
-sh ../../../swift/misc/remove_unknown_option.sh
-
-//In notepad++, Edit tools/driver/swift.vcxproj
-// replace libclang([^.]*).a  ->  clang\1.lib
-// replace swift\libcmark.a ->  build\firsttime\cmark\src\Release\cmark_static.lib
-// remove  edit.lib  
-// replace copy  swift  XXX  => copy  swift.exe XXX.exe
-sh ../../../swift/misc/patch_swift_vcxproj.sh
-
-todo: uuid.lib(uuid.obj) : /GL로 컴파일한 MSIL .netmodule 또는 모듈이 있습니다. /LTCG를 지정하여 링크를 다시 시작하십시오. /LTCG를 링크 명령줄에 추가하면 링커 성능이 향상됩니다.
-todo: LINK : warning LNK4044: '/LC:/Work/swift_msvc/build/firsttime/swift/Release/lib/swift/windows' 옵션을 인식할 수 없습니다. 무시됩니다.
+sh ../../../swift/misc/patch_all.sh
 
 "c:\Program Files (x86)\MSBuild\14.0\Bin\MSBuild.exe" /p:Configuration=Release ALL_BUILD.vcxproj 
  
@@ -82,17 +73,6 @@ todo: LINK : warning LNK4044: '/LC:/Work/swift_msvc/build/firsttime/swift/Releas
   v (SwiftPrivate.dll)
      
 ------------------
-// MSVC-TODO
-
-- Toolchain 'Windows'를 Cygwin과 같이 쓸 수 없음
-    Cygwin, Msvc, Mingw로 분할 필요
-
-- libuuid 빌드해야 됨
-
-- libicu 빌드해야 됨
-
-------------------
-
 
 it need?
 -DLLVM_DEFAULT_TARGET_TRIPLE=x86_64-windows-msvc
@@ -114,11 +94,6 @@ v      /pkg-config         0.29-1
       /libiconv-devel     1.14-3
       
 
---------
-// 탐색할 인클루드 디렉토리 리스트
-g++ -E -x c++ - -v < /dev/null 
-clang++ -E -x c++ - -v < /dev/null
-
 =============================
 Linux CMAKE option
 
@@ -133,18 +108,14 @@ clang  -cc1 -triple x86_64-pc-windows-msvc19.0.0 -emit-obj -mrelax-all -disable-
 
 
 /////
-
-for basename() link workaround,
-clang tt.cpp -D__USER_LABEL_PREFIX__= -Wno-macro-redefined
-
-
-/////
 // LINKING swiftCore.dll   
     // swiftRuntime.lib, swiftStdlibStubs.lib, Swift.obj
 
-cd c:\Work\swift_msvc\build\firsttime\swift\stdlib\public\core
-
-DEF 파일 만들기
+// In Cygwin
+cd c:/Work/swift_msvc/build/firsttime/swift/stdlib/public/core
+dlltool -z allexp.def --export-all-symbols ./windows/x86_64/Swift.obj ../../../Release/lib/swift/windows/x86_64/swiftRuntime.lib  ../../../Release/lib/swift/windows/x86_64/swiftStdlibStubs.lib
+sed -e 's/"//g' -e 's/DATA$//' allexp.def > ttt.def; mv ttt.def allexp.def
+  또는 
     create objfiles.txt  
     -------------
     C:\Work\swift_msvc\build\firsttime\swift\stdlib\public\core\windows\x86_64\Swift.obj
@@ -170,37 +141,31 @@ DEF 파일 만들기
       _TMps16OutputStreamType
       _swiftEmptyArrayStorage
 
-  또는 
-     dlltool -z allexp.def --export-all-symbols ./windows/x86_64/Swift.obj
-     sed -e 's/"//g' allexp.def > ttt.def; mv ttt.def allexp.def
-     아래의 심볼에 대해 DATA 속성 제거
-       _TMSS
-      
-     dlltool -z allexp2.def --export-all-symbols ../../../Release/lib/swift/windows/x86_64/swiftRuntime.lib      
-     dlltool -z allexp3.def --export-all-symbols ../../../Release/lib/swift/windows/x86_64/swiftStdlibStubs.lib
+      아래의 심볼에 대해 DATA 속성 제거
+        _TZvOs7Process5_argcVs5Int32
+        globalinit_33_1BDF70FFC18749BAB495A73B459ED2F0_token3
+        _TZvOs7Process11_unsafeArgvGSpGSpVs4Int8__
 
-  아래의 심볼에 대해 DATA 속성 제거
-    _TZvOs7Process5_argcVs5Int32
-    globalinit_33_1BDF70FFC18749BAB495A73B459ED2F0_token3
-    _TZvOs7Process11_unsafeArgvGSpGSpVs4Int8__
-
-
+// In VS2015 x64 Native Tool Command Prompt
+cd c:/Work/swift_msvc/build/firsttime/swift/stdlib/public/core
 link.exe /ERRORREPORT:PROMPT /OUT:"C:\Work\swift_msvc\build\firsttime\swift\Release\bin\swiftCore.dll" /INCREMENTAL:NO /NOLOGO /LIBPATH:C:/Work/swift_msvc/build/firsttime/llvm/Release/lib /LIBPATH:C:/Work/swift_msvc/build/firsttime/llvm/Release/lib/Release /LIBPATH:C:/Work/swift_msvc/build/firsttime/llvm/Release/lib /LIBPATH:C:/Work/swift_msvc/build/firsttime/llvm/Release/lib/Release kernel32.lib user32.lib gdi32.lib winspool.lib shell32.lib ole32.lib oleaut32.lib uuid.lib comdlg32.lib advapi32.lib ..\..\..\Release\lib\swift\windows\x86_64\swiftRuntime.lib ..\..\..\Release\lib\swift\windows\x86_64\swiftStdlibStubs.lib C:\icu\lib64\icuuc.lib C:\icu\lib64\icui18n.lib /MANIFEST /MANIFESTUAC:"level='asInvoker' uiAccess='false'" /manifest:embed /PDB:"C:/Work/swift_msvc/build/firsttime/swift/Release/bin/swiftCore.pdb" /SUBSYSTEM:CONSOLE /TLBID:1 /DYNAMICBASE /NXCOMPAT /IMPLIB:"C:\Work\swift_msvc\build\firsttime\swift\Release\lib\swift\windows\x86_64\swiftCore.lib" /MACHINE:X64  /machine:x64 /DLL C:\Work\swift_msvc\build\firsttime\swift\stdlib\public\core\windows\x86_64\Swift.obj /DEF:allexp.def
 
 
 
-cd c:\Work\swift_msvc\build\firsttime\swift\stdlib\public\SwiftOnoneSupport
-
+// In Cygwin
+cd c:/Work/swift_msvc/build/firsttime/swift/stdlib/public/SwiftOnoneSupport
 dlltool -z allexp.def --export-all-symbols ../../../stdlib/public/SwiftOnoneSupport/windows/x86_64/SwiftOnoneSupport.obj
-sed -e 's/"//g' allexp.def > ttt.def; mv ttt.def allexp.def
+sed -e 's/"//g' -e 's/DATA$//' allexp.def > ttt.def; mv ttt.def allexp.def
 
+// In VS2015 x64 Native Tool Command Prompt
+cd c:/Work/swift_msvc/build/firsttime/swift/stdlib/public/SwiftOnoneSupport
 link.exe /ERRORREPORT:PROMPT /OUT:"C:\Work\swift_msvc\build\firsttime\swift\Release\bin\swiftSwiftOnoneSupport.dll" /INCREMENTAL:NO /NOLOGO /LIBPATH:C:/Work/swift_msvc/build/firsttime/llvm/Release/lib /LIBPATH:C:/Work/swift_msvc/build/firsttime/llvm/Release/lib/Release /LIBPATH:C:/Work/swift_msvc/build/firsttime/llvm/Release/lib /LIBPATH:C:/Work/swift_msvc/build/firsttime/llvm/Release/lib/Release kernel32.lib user32.lib gdi32.lib winspool.lib shell32.lib ole32.lib oleaut32.lib uuid.lib comdlg32.lib advapi32.lib ..\..\..\Release\lib\swift\windows\x86_64\swiftCore.lib /MANIFEST /MANIFESTUAC:"level='asInvoker' uiAccess='false'" /manifest:embed /PDB:"C:/Work/swift_msvc/build/firsttime/swift/Release/bin/swiftSwiftOnoneSupport.pdb" /SUBSYSTEM:CONSOLE /TLBID:1 /DYNAMICBASE /NXCOMPAT /IMPLIB:"C:/Work/swift_msvc/build/firsttime/swift/Release/lib/swift/windows/x86_64/swiftSwiftOnoneSupport.lib" /MACHINE:X64  /machine:x64 /DLL C:\Work\swift_msvc\build\firsttime\swift\stdlib\public\SwiftOnoneSupport\windows\x86_64\SwiftOnoneSupport.obj    /DEF:allexp.def msvcrt.lib
 
 
 
-cd c:\Work\swift_msvc\build\firsttime\swift\stdlib\private\SwiftPrivate
+// In Cygwin
+cd c:/Work/swift_msvc/build/firsttime/swift/stdlib/private/SwiftPrivate
 
-DEF 파일 만들기
   create objfiles.txt  
   -------------
   C:\Work\swift_msvc\build\firsttime\swift\stdlib\private\SwiftPrivate\windows\x86_64\SwiftPrivate.obj
@@ -208,19 +173,41 @@ DEF 파일 만들기
   cmake -E __create_def  allexp.def objfiles.txt
   또는 
      dlltool -z allexp.def --export-all-symbols ./stdlib/private/SwiftPrivate/windows/x86_64/SwiftPrivate.obj
-     sed -e 's/"//g' allexp.def > ttt.def; mv ttt.def allexp.def
+     sed -e 's/"//g' -e 's/DATA$//' allexp.def > ttt.def; mv ttt.def allexp.def
   
-
+// In VS2015 x64 Native Tool Command Prompt
+cd c:\Work\swift_msvc\build\firsttime\swift\stdlib\private\SwiftPrivate
 link.exe /ERRORREPORT:PROMPT /OUT:"C:\Work\swift_msvc\build\firsttime\swift\Release\bin\swiftSwiftPrivate.dll" /INCREMENTAL:NO /NOLOGO /LIBPATH:C:/Work/swift_msvc/build/firsttime/llvm/Release/lib /LIBPATH:C:/Work/swift_msvc/build/firsttime/llvm/Release/lib/Release /LIBPATH:C:/Work/swift_msvc/build/firsttime/llvm/Release/lib /LIBPATH:C:/Work/swift_msvc/build/firsttime/llvm/Release/lib/Release kernel32.lib user32.lib gdi32.lib winspool.lib shell32.lib ole32.lib oleaut32.lib uuid.lib comdlg32.lib advapi32.lib ..\..\..\Release\lib\swift\windows\x86_64\swiftCore.lib /MANIFEST /MANIFESTUAC:"level='asInvoker' uiAccess='false'" /manifest:embed /PDB:"C:/Work/swift_msvc/build/firsttime/swift/Release/bin/swiftSwiftPrivate.pdb" /SUBSYSTEM:CONSOLE /TLBID:1 /DYNAMICBASE /NXCOMPAT /IMPLIB:"C:/Work/swift_msvc/build/firsttime/swift/Release/lib/swift/windows/x86_64/swiftSwiftPrivate.lib" /MACHINE:X64  /machine:x64 /DLL C:\Work\swift_msvc\build\firsttime\swift\stdlib\private\SwiftPrivate\windows\x86_64\SwiftPrivate.obj /DEF:allexp.def msvcrt.lib
 
 =======================
+cd c:/Work/swift_msvc/build/firsttime/swift/Release/bin
 copy  swiftCore.dll  ..\lib\swift\windows\libswiftCore.dll
 copy  swiftSwiftOnoneSupport.dll  ..\lib\swift\windows\libswiftSwiftOnoneSupport.dll
 =======================
-Hello 컴파일하기
+Compiling Hello
 
-cd c:\Work\swift_msvc\build\firsttime\swift\Release\bin
+cd c:/Work/swift_msvc/build/firsttime/swift/Release/bin
+
+swiftc -emit-ir hello.swift -o hello.ll
+// hello.ll Editing
+  declare %swift.type* @rt_swift_getExistentialTypeMetadata(i64, %swift.protocol**) #4
+  @_TMLP_ = external global %swift.type*, align 8
+
+clang++ -c hello.ll -o hello.obj -mcmodel=large
+"\Program Files\LLVM\bin\lld" -flavor link /out:hello.exe hello.obj ..\lib\swift\windows\x86_64\swiftRuntime.lib C:\icu\lib64\icuuc.lib C:\icu\lib64\icui18n.lib ..\lib\swift\windows\x86_64\swiftStdlibStubs.lib C:\Work\swift_msvc\build\firsttime\swift\stdlib\public\core\windows\x86_64\Swift.obj 
+
+
 
 swiftc.exe -c hello.swift -o hello.obj
 
-link /out:hello.exe hello.obj ../lib/swift/windows/x86_64/swiftCore.lib ../lib/swift/windows/x86_64/swiftSwiftOnoneSupport.lib msvcrt.lib  
+"\Program Files\LLVM\bin\lld" -flavor link /out:hello.exe hello.obj ../lib/swift/windows/x86_64/swiftCore.lib ../lib/swift/windows/x86_64/swiftSwiftOnoneSupport.lib msvcrt.lib  
+==> _TZvOs7Process5_argcVs5Int32 변수 linking이 안됨
+
+"\Program Files\LLVM\bin\lld" -flavor link /out:hello.exe hello.obj ..\lib\swift\windows\x86_64\swiftRuntime.lib C:\icu\lib64\icuuc.lib C:\icu\lib64\icui18n.lib ..\lib\swift\windows\x86_64\swiftStdlibStubs.lib C:\Work\swift_msvc\build\firsttime\swift\stdlib\public\core\windows\x86_64\Swift.obj C:/Work/swift_msvc/build/firsttime/swift/stdlib/public/SwiftOnoneSupport/windows/x86_64/SwiftOnoneSupport.obj
+==> multiple defined error
+
+"\Program Files\LLVM\bin\lld" -flavor link /out:hello.exe hello.obj ..\lib\swift\windows\x86_64\swiftRuntime.lib C:\icu\lib64\icuuc.lib C:\icu\lib64\icui18n.lib ..\lib\swift\windows\x86_64\swiftStdlibStubs.lib C:\Work\swift_msvc\build\firsttime\swift\stdlib\public\core\windows\x86_64\Swift.obj  ../lib/swift/windows/x86_64/swiftSwiftOnoneSupport.lib
+==> runtime error
+
+ld -o hello.exe hello.obj  swiftCore.lib ..\lib\swift\windows\x86_64\swiftStdlibStubs.lib ..\lib\swift\windows\x86_64\swiftRuntime.lib  C:\icu\lib64\icui18n.lib C:\icu\lib64\icuuc.lib  "c:\Program Files (x86)\Microsoft Visual Studio 14.0\VC\lib\amd64\msvcrt.lib"  "c:\Program Files (x86)\Microsoft Visual Studio 14.0\VC\lib\amd64\msvcprt.lib"    "c:\Program Files (x86)\Microsoft Visual Studio 14.0\VC\lib\amd64\vcruntime.lib" "c:\Program Files (x86)\Windows Kits\10\Lib\10.0.10586.0\ucrt\x64\ucrt.lib" "c:\Program Files (x86)\Windows Kits\10\Lib\10.0.10586.0\um\x64\kernel32.lib"
+==> ios_base 관련 생성자를 찾음
