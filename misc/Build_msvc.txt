@@ -114,7 +114,7 @@ clang  -cc1 -triple x86_64-pc-windows-msvc19.0.0 -emit-obj -mrelax-all -disable-
 // In Cygwin
 cd c:/Work/swift_msvc/build/firsttime/swift/stdlib/public/core
 dlltool -z allexp.def --export-all-symbols ./windows/x86_64/Swift.obj ../../../Release/lib/swift/windows/x86_64/swiftRuntime.lib  ../../../Release/lib/swift/windows/x86_64/swiftStdlibStubs.lib
-sed -e 's/"//g' -e 's/DATA$//' allexp.def > ttt.def; mv ttt.def allexp.def
+sed -e 's/"//g' allexp.def > ttt.def; mv ttt.def allexp.def
   또는 
     create objfiles.txt  
     -------------
@@ -159,7 +159,7 @@ sed -e 's/"//g' -e 's/DATA$//' allexp.def > ttt.def; mv ttt.def allexp.def
 
 // In VS2015 x64 Native Tool Command Prompt
 cd c:/Work/swift_msvc/build/firsttime/swift/stdlib/public/SwiftOnoneSupport
-link.exe /ERRORREPORT:PROMPT /OUT:"C:\Work\swift_msvc\build\firsttime\swift\Release\bin\swiftSwiftOnoneSupport.dll" /INCREMENTAL:NO /NOLOGO /LIBPATH:C:/Work/swift_msvc/build/firsttime/llvm/Release/lib /LIBPATH:C:/Work/swift_msvc/build/firsttime/llvm/Release/lib/Release /LIBPATH:C:/Work/swift_msvc/build/firsttime/llvm/Release/lib /LIBPATH:C:/Work/swift_msvc/build/firsttime/llvm/Release/lib/Release kernel32.lib user32.lib gdi32.lib winspool.lib shell32.lib ole32.lib oleaut32.lib uuid.lib comdlg32.lib advapi32.lib ..\..\..\Release\lib\swift\windows\x86_64\swiftCore.lib /MANIFEST /MANIFESTUAC:"level='asInvoker' uiAccess='false'" /manifest:embed /PDB:"C:/Work/swift_msvc/build/firsttime/swift/Release/bin/swiftSwiftOnoneSupport.pdb" /SUBSYSTEM:CONSOLE /TLBID:1 /DYNAMICBASE /NXCOMPAT /IMPLIB:"C:/Work/swift_msvc/build/firsttime/swift/Release/lib/swift/windows/x86_64/swiftSwiftOnoneSupport.lib" /MACHINE:X64  /machine:x64 /DLL C:\Work\swift_msvc\build\firsttime\swift\stdlib\public\SwiftOnoneSupport\windows\x86_64\SwiftOnoneSupport.obj    /DEF:allexp.def msvcrt.lib
+"\Program Files\LLVM\bin\lld" -flavor link /ERRORREPORT:PROMPT /OUT:"C:\Work\swift_msvc\build\firsttime\swift\Release\bin\swiftSwiftOnoneSupport.dll" /INCREMENTAL:NO /NOLOGO /LIBPATH:C:/Work/swift_msvc/build/firsttime/llvm/Release/lib /LIBPATH:C:/Work/swift_msvc/build/firsttime/llvm/Release/lib/Release /LIBPATH:C:/Work/swift_msvc/build/firsttime/llvm/Release/lib /LIBPATH:C:/Work/swift_msvc/build/firsttime/llvm/Release/lib/Release kernel32.lib user32.lib gdi32.lib winspool.lib shell32.lib ole32.lib oleaut32.lib uuid.lib comdlg32.lib advapi32.lib ..\..\..\Release\lib\swift\windows\x86_64\swiftCore.lib /MANIFEST /MANIFESTUAC:"level='asInvoker' uiAccess='false'" /manifest:embed /PDB:"C:/Work/swift_msvc/build/firsttime/swift/Release/bin/swiftSwiftOnoneSupport.pdb" /SUBSYSTEM:CONSOLE /TLBID:1 /DYNAMICBASE /NXCOMPAT /IMPLIB:"C:/Work/swift_msvc/build/firsttime/swift/Release/lib/swift/windows/x86_64/swiftSwiftOnoneSupport.lib" /MACHINE:X64  /machine:x64 /DLL C:\Work\swift_msvc\build\firsttime\swift\stdlib\public\SwiftOnoneSupport\windows\x86_64\SwiftOnoneSupport.obj    /DEF:allexp.def msvcrt.lib
 
 
 
@@ -184,30 +184,59 @@ cd c:/Work/swift_msvc/build/firsttime/swift/Release/bin
 copy  swiftCore.dll  ..\lib\swift\windows\libswiftCore.dll
 copy  swiftSwiftOnoneSupport.dll  ..\lib\swift\windows\libswiftSwiftOnoneSupport.dll
 =======================
-Compiling Hello
 
+//////////////////////////////////////////////////////////////////////////////////////////////////////////
+/// COMPILING Hello IN STATIC -- WORKING
+/// 
 cd c:/Work/swift_msvc/build/firsttime/swift/Release/bin
 
-swiftc -emit-ir hello.swift -o hello.ll
-// hello.ll Editing
-  declare %swift.type* @rt_swift_getExistentialTypeMetadata(i64, %swift.protocol**) #4
-  @_TMLP_ = external global %swift.type*, align 8
+lib /out:libswiftCore.lib  ..\lib\swift\windows\x86_64\swiftRuntime.lib  ..\lib\swift\windows\x86_64\swiftStdlibStubs.lib C:\Work\swift_msvc\build\firsttime\swift\stdlib\public\core\windows\x86_64\Swift.obj
 
-clang++ -c hello.ll -o hello.obj -mcmodel=large
-"\Program Files\LLVM\bin\lld" -flavor link /out:hello.exe hello.obj ..\lib\swift\windows\x86_64\swiftRuntime.lib C:\icu\lib64\icuuc.lib C:\icu\lib64\icui18n.lib ..\lib\swift\windows\x86_64\swiftStdlibStubs.lib C:\Work\swift_msvc\build\firsttime\swift\stdlib\public\core\windows\x86_64\Swift.obj 
+swiftc -c Hello.swift -o Hello.obj -O
+link /out:hello.exe hello.obj libswiftCore.lib C:\icu\lib64\icuuc.lib C:\icu\lib64\icui18n.lib /MERGE:.rdata=.rodata /FORCE:MULTIPLE
+
+//////////////////////////////////////////////////////////////////////////////////////////////////////////
+
+////////////////////////////////////////////////////////
+/// Manually import -- NOT WORK
+///
+/// To add __imp_ prefix, edit the swiftc-generated *.ll and compile it to *.obj with clang
+swiftc -frontend -emit-ir -primary-file Hello.swift -target x86_64-pc-windows-msvc -disable-objc-interop -color-diagnostics -module-name Hello -o Hello.ll
+* Editing hello.ll to add __imp_ prefix   
+clang++ -c hello.ll -o hello.obj -mcmodel=large -target x86_64-pc-windows-msvc19.0.0
+
+link /out:hello.exe hello.obj "C:\Work\swift_msvc\build\firsttime\swift\Release\lib\swift\windows\x86_64\swiftCore.lib" /MERGE:.rdata=.rodata /force:multiple msvcrt.lib
+///////////////////////////////////
 
 
+/////////////////////////////////////////////
+/// Modify output of swiftc (edit llvm)
+///
+/// To remove duplicate symbol, edit the swiftc-generated *.ll and compile it to *.obj with clang
+swiftc -frontend -emit-ir -primary-file Hello.swift -target x86_64-pc-windows-msvc -disable-objc-interop -color-diagnostics -module-name Hello -o Hello.ll
 
-swiftc.exe -c hello.swift -o hello.obj
+* Editing hello.ll to remove duplicate symbol
+    Replace 'define linkonce_odr' to 'declare' and remove function body
+    For variables, replace '(Var Name) = linkonce_odr' to '(Var Name) = external' and remove initializing with null
+clang++ -c hello.ll -o hello.obj -mcmodel=large -target x86_64-pc-windows-msvc19.0.0
+///////////////////////////////////
 
-"\Program Files\LLVM\bin\lld" -flavor link /out:hello.exe hello.obj ../lib/swift/windows/x86_64/swiftCore.lib ../lib/swift/windows/x86_64/swiftSwiftOnoneSupport.lib msvcrt.lib  
-==> _TZvOs7Process5_argcVs5Int32 변수 linking이 안됨
 
-"\Program Files\LLVM\bin\lld" -flavor link /out:hello.exe hello.obj ..\lib\swift\windows\x86_64\swiftRuntime.lib C:\icu\lib64\icuuc.lib C:\icu\lib64\icui18n.lib ..\lib\swift\windows\x86_64\swiftStdlibStubs.lib C:\Work\swift_msvc\build\firsttime\swift\stdlib\public\core\windows\x86_64\Swift.obj C:/Work/swift_msvc/build/firsttime/swift/stdlib/public/SwiftOnoneSupport/windows/x86_64/SwiftOnoneSupport.obj
-==> multiple defined error
+///////////////////////////////////
+// For reference (from .vcxproj)
+swiftc -c -sdk / -target x86_64-pc-windows-msvc -O -I C:/Work/swift_msvc/build/firsttime/swift/Release/lib/swift/windows/x86_64 -module-cache-path C:/Work/swift_msvc/build/firsttime/swift/Release/clang-module-cache -no-link-objc-runtime -Xfrontend -sil-serialize-all -parse-stdlib -module-link-name swiftSwiftOnoneSupport -force-single-frontend-invocation -parse-as-library -emit-module -emit-module-path C:/Work/swift_msvc/build/firsttime/swift/Release/lib/swift/windows/x86_64/SwiftOnoneSupport.swiftmodule -o C:/Work/swift_msvc/build/firsttime/swift/stdlib/public/SwiftOnoneSupport/windows/x86_64/SwiftOnoneSupport.obj C:/Work/swift_msvc/swift/stdlib/public/SwiftOnoneSupport/SwiftOnoneSupport.swift
+///////////////////////////////////
 
-"\Program Files\LLVM\bin\lld" -flavor link /out:hello.exe hello.obj ..\lib\swift\windows\x86_64\swiftRuntime.lib C:\icu\lib64\icuuc.lib C:\icu\lib64\icui18n.lib ..\lib\swift\windows\x86_64\swiftStdlibStubs.lib C:\Work\swift_msvc\build\firsttime\swift\stdlib\public\core\windows\x86_64\Swift.obj  ../lib/swift/windows/x86_64/swiftSwiftOnoneSupport.lib
-==> runtime error
+
+/////////////////////////////////////////////////////////
+// Replace LINK.exe with mingw64's ld.exe -- NOT WORK
+// (it will solve import problem with auto-import feature)
+//
+// msvcr100.dll, msvcp100.dll, icuuc56.dll, icuin56.dll, 
+// msvcp140.dll, vcruntime140.dll, ucrtbase.dll, cryptbase.dll
+// kernelbase.dll, bcryptprimitives.dll, sechost.dll
+// kernel32.dll, msvcrt.dll, rpcrt4.dll, advapi32.dll, ntdll.dll
 
 ld -o hello.exe hello.obj  swiftCore.lib ..\lib\swift\windows\x86_64\swiftStdlibStubs.lib ..\lib\swift\windows\x86_64\swiftRuntime.lib  C:\icu\lib64\icui18n.lib C:\icu\lib64\icuuc.lib  "c:\Program Files (x86)\Microsoft Visual Studio 14.0\VC\lib\amd64\msvcrt.lib"  "c:\Program Files (x86)\Microsoft Visual Studio 14.0\VC\lib\amd64\msvcprt.lib"    "c:\Program Files (x86)\Microsoft Visual Studio 14.0\VC\lib\amd64\vcruntime.lib" "c:\Program Files (x86)\Windows Kits\10\Lib\10.0.10586.0\ucrt\x64\ucrt.lib" "c:\Program Files (x86)\Windows Kits\10\Lib\10.0.10586.0\um\x64\kernel32.lib"
-==> ios_base 관련 생성자를 찾음
+==> _7ios_base 관련 생성자를 찾음 // ??_7ios_base@std@@6B@
+

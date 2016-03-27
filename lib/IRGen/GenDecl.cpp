@@ -1199,6 +1199,8 @@ llvm::GlobalValue::VISIBILITY##Visibility }
   llvm::GlobalValue::VisibilityTypes PublicDefinitionVisibility;
   switch (IGM.TargetInfo.OutputObjectFormat) {
   case llvm::Triple::ELF:
+  //FIXME: what effect in COFF ?
+  case llvm::Triple::COFF:
     // Use protected visibility for public symbols we define.
     // ld.so doesn't support relative relocations at load time, which interferes
     // with our metadata formats.

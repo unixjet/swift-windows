@@ -40,7 +40,7 @@ void _swift_stdlib_free(void *ptr) { free(ptr); }
 
 int _swift_stdlib_putchar_unlocked(int c) {
 #if defined(_MSC_VER)
-	return _putc_nolock(c, stdin);
+	return _putc_nolock(c, stdout);
 #else
 	return putchar_unlocked(c);
 #endif

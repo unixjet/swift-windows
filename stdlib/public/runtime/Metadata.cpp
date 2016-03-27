@@ -97,10 +97,10 @@ void *MetadataAllocator::alloc(size_t size) {
   if (LLVM_UNLIKELY(((uintptr_t)next & ~pagesizeMask)
                       != (((uintptr_t)end & ~pagesizeMask)))){
 #if defined(_MSC_VER)
-    auto mem =
-        VirtualAlloc(nullptr, pagesizeMask+1,
-                     MEM_TOP_DOWN | MEM_RESERVE | MEM_COMMIT, PAGE_READWRITE);
-    if (!mem)
+    next = (char *)
+      VirtualAlloc(nullptr, pagesizeMask+1,
+                   MEM_TOP_DOWN | MEM_RESERVE | MEM_COMMIT, PAGE_READWRITE);
+    if (!next)
       crash("unable to allocate memory for metadata cache");
 #else
     next = (char*)
