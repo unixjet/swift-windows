@@ -632,6 +632,17 @@ static void diagnoseSubElementFailure(Expr *destExpr,
   // If the expression is the result of a call, it is an rvalue, not a mutable
   // lvalue.
   if (auto *AE = dyn_cast<ApplyExpr>(immInfo.first)) {
+    // Handle literals, which are a call to the conversion function.
+    auto argsTuple =
+      dyn_cast<TupleExpr>(AE->getArg()->getSemanticsProvidingExpr());
+    if (isa<CallExpr>(AE) && AE->isImplicit() && argsTuple &&
+        argsTuple->getNumElements() == 1 &&
+        isa<LiteralExpr>(argsTuple->getElement(0)->
+                         getSemanticsProvidingExpr())) {
+      TC.diagnose(loc, diagID, "literals are not mutable");
+      return;
+    }
+
     std::string name = "call";
     if (isa<PrefixUnaryExpr>(AE) || isa<PostfixUnaryExpr>(AE))
       name = "unary operator";
@@ -659,7 +670,6 @@ static void diagnoseSubElementFailure(Expr *destExpr,
         .highlight(ICE->getSourceRange());
       return;
     }
-  
 
   TC.diagnose(loc, unknownDiagID, destExpr->getType())
     .highlight(immInfo.first->getSourceRange());
@@ -989,6 +999,11 @@ static bool argumentMismatchIsNearMiss(Type argType, Type paramType) {
 static bool findGenericSubstitutions(DeclContext *dc, Type paramType,
                                      Type actualArgType,
                                      TypeSubstitutionMap &archetypesMap) {
+  // Type visitor doesn't handle unresolved types.
+  if (paramType->is<UnresolvedType>() ||
+      actualArgType->is<UnresolvedType>())
+    return false;
+  
   class GenericVisitor : public TypeMatcher<GenericVisitor> {
     DeclContext *dc;
     TypeSubstitutionMap &archetypesMap;
@@ -1617,7 +1632,8 @@ bool CalleeCandidateInfo::diagnoseGenericParameterErrors(Expr *badArgExpr) {
   bool foundFailure = false;
   TypeSubstitutionMap archetypesMap;
   
-  if (!findGenericSubstitutions(failedArgument.declContext, failedArgument.parameterType,
+  if (!findGenericSubstitutions(failedArgument.declContext,
+                                failedArgument.parameterType,
                                 argType, archetypesMap))
     return false;
 
@@ -1863,16 +1879,15 @@ static bool isConversionConstraint(const Constraint *C) {
 /// low that we would only like to issue an error message about it if there is
 /// nothing else interesting we can scrape out of the constraint system.
 static bool isLowPriorityConstraint(Constraint *C) {
-  // If the member constraint is a ".Generator" lookup to find the generator
+  // If the member constraint is a ".Iterator" lookup to find the iterator
   // type in a foreach loop, or a ".Element" lookup to find its element type,
   // then it is very low priority: We will get a better and more useful
-  // diagnostic from the failed conversion to SequenceType that will fail as
-  // well.
+  // diagnostic from the failed conversion to Sequence that will fail as well.
   if (C->getKind() == ConstraintKind::TypeMember) {
     if (auto *loc = C->getLocator())
       for (auto Elt : loc->getPath())
         if (Elt.getKind() == ConstraintLocator::GeneratorElementType ||
-            Elt.getKind() == ConstraintLocator::SequenceGeneratorType)
+            Elt.getKind() == ConstraintLocator::SequenceIteratorProtocol)
           return true;
   }
 
@@ -2467,10 +2482,9 @@ bool FailureDiagnosis::diagnoseGeneralConversionFailure(Constraint *constraint){
 
   
   if (auto PT = toType->getAs<ProtocolType>()) {
-    
-    // Check for "=" converting to BooleanType.  The user probably meant ==.
+    // Check for "=" converting to Boolean.  The user probably meant ==.
     if (auto *AE = dyn_cast<AssignExpr>(expr->getValueProvidingExpr()))
-      if (PT->getDecl()->isSpecificProtocol(KnownProtocolKind::BooleanType)) {
+      if (PT->getDecl()->isSpecificProtocol(KnownProtocolKind::Boolean)) {
         diagnose(AE->getEqualLoc(), diag::use_of_equal_instead_of_equality)
         .fixItReplace(AE->getEqualLoc(), "==")
         .highlight(AE->getDest()->getLoc())
@@ -2966,6 +2980,24 @@ bool FailureDiagnosis::diagnoseCalleeResultContextualConversionError() {
              contextualResultType);
     return true;
   default:
+    // Check to see if all of the viable candidates produce the same result,
+    // this happens for things like "==" and "&&" operators.
+    if (auto resultTy = calleeInfo[0].getResultType()) {
+      for (unsigned i = 1, e = calleeInfo.size(); i != e; ++i)
+        if (auto ty = calleeInfo[i].getResultType())
+          if (!resultTy->isEqual(ty)) {
+            resultTy = Type();
+            break;
+          }
+      if (resultTy) {
+        diagnose(expr->getLoc(), diag::candidates_no_match_result_type,
+                 calleeInfo.declName, calleeInfo[0].getResultType(),
+                 contextualResultType);
+        return true;
+      }
+    }
+
+    // Otherwise, produce a candidate set.
     diagnose(expr->getLoc(), diag::no_candidates_match_result_type,
              calleeInfo.declName, contextualResultType);
     calleeInfo.suggestPotentialOverloads(expr->getLoc(), /*isResult*/true);
@@ -3011,10 +3043,24 @@ bool FailureDiagnosis::diagnoseContextualConversionError() {
   // it can work without it.  If so, the contextual type is the problem.  We
   // force a recheck, because "expr" is likely in our table with the extra
   // contextual constraint that we know we are relaxing.
-  auto exprType = getTypeOfTypeCheckedChildIndependently(expr,TCC_ForceRecheck);
+  TCCOptions options = TCC_ForceRecheck;
+  if (contextualType->is<InOutType>())
+    options |= TCC_AllowLValue;
+
+  auto recheckedExpr = typeCheckChildIndependently(expr, options);
+  auto exprType = recheckedExpr ? recheckedExpr->getType() : Type();
   
   // If it failed and diagnosed something, then we're done.
   if (!exprType) return true;
+
+  // If we contextually had an inout type, and got a non-lvalue result, then
+  // we fail with a mutability error.
+  if (contextualType->is<InOutType>() && !exprType->is<LValueType>()) {
+    diagnoseSubElementFailure(recheckedExpr, recheckedExpr->getLoc(), *CS,
+                              diag::cannot_pass_rvalue_inout_subelement,
+                              diag::cannot_pass_rvalue_inout);
+    return true;
+  }
 
   // Try to find the contextual type in a variety of ways.  If the constraint
   // system had a contextual type specified, we use it - it will have a purpose
@@ -3302,8 +3348,7 @@ typeCheckArgumentChildIndependently(Expr *argExpr, Type argType,
       }
     
     auto CTPurpose = argType ? CTP_CallArgument : CTP_Unused;
-    return typeCheckChildIndependently(argExpr, argType,
-                                       CTPurpose, options);
+    return typeCheckChildIndependently(argExpr, argType, CTPurpose, options);
   }
 
   // If we know the requested argType to use, use computeTupleShuffle to produce
@@ -4522,7 +4567,7 @@ bool FailureDiagnosis::visitIfExpr(IfExpr *IE) {
   auto falseExpr = typeCheckChildIndependently(IE->getElseExpr());
   if (!falseExpr) return true;
 
-  // Check for "=" converting to BooleanType.  The user probably meant ==.
+  // Check for "=" converting to Boolean.  The user probably meant ==.
   if (auto *AE = dyn_cast<AssignExpr>(condExpr->getValueProvidingExpr())) {
     diagnose(AE->getEqualLoc(), diag::use_of_equal_instead_of_equality)
       .fixItReplace(AE->getEqualLoc(), "==")
@@ -4533,7 +4578,7 @@ bool FailureDiagnosis::visitIfExpr(IfExpr *IE) {
 
   // If the condition wasn't of boolean type, diagnose the problem.
   auto booleanType = CS->TC.getProtocol(IE->getQuestionLoc(),
-                                        KnownProtocolKind::BooleanType);
+                                        KnownProtocolKind::Boolean);
   if (!booleanType) return true;
 
   if (!CS->TC.conformsToProtocol(condExpr->getType(), booleanType, CS->DC,
@@ -5310,6 +5355,41 @@ void ConstraintSystem::diagnoseFailureForExpr(Expr *expr) {
   diagnosis.diagnoseAmbiguity(expr);
 }
 
+static void noteArchetypeSource(const TypeLoc &loc, ArchetypeType *archetype,
+                                TypeChecker &tc) {
+  GenericTypeDecl *FoundDecl = nullptr;
+  
+  // Walk the TypeRepr to find the type in question.
+  if (auto typerepr = loc.getTypeRepr()) {
+    struct FindGenericTypeDecl : public ASTWalker {
+      GenericTypeDecl *&FoundDecl;
+      FindGenericTypeDecl(GenericTypeDecl *&FoundDecl) : FoundDecl(FoundDecl) {
+      }
+      
+      bool walkToTypeReprPre(TypeRepr *T) override {
+        // If we already emitted the note, we're done.
+        if (FoundDecl) return false;
+        
+        if (auto ident = dyn_cast<ComponentIdentTypeRepr>(T))
+          FoundDecl = dyn_cast_or_null<GenericTypeDecl>(ident->getBoundDecl());
+        // Keep walking.
+        return true;
+      }
+    } findGenericTypeDecl(FoundDecl);
+    
+    typerepr->walk(findGenericTypeDecl);
+  }
+  
+  // If we didn't find the type in the TypeRepr, fall back to the type in the
+  // type checked expression.
+  if (!FoundDecl)
+    FoundDecl = loc.getType()->getAnyGeneric();
+  
+  if (FoundDecl)
+    tc.diagnose(FoundDecl, diag::archetype_declared_in_type, archetype,
+                FoundDecl->getDeclaredType());
+}
+
 
 /// Emit an error message about an unbound generic parameter existing, and
 /// emit notes referring to the target of a diagnostic, e.g., the function
@@ -5328,6 +5408,7 @@ static void diagnoseUnboundArchetype(Expr *overallExpr,
       .highlight(ECE->getCastTypeLoc().getSourceRange());
 
     // Emit a note specifying where this came from, if we can find it.
+    noteArchetypeSource(ECE->getCastTypeLoc(), archetype, tc);
     if (auto *ND = ECE->getCastTypeLoc().getType()
           ->getNominalOrBoundGenericNominal())
       tc.diagnose(ND, diag::archetype_declared_in_type, archetype,
@@ -5346,9 +5427,8 @@ static void diagnoseUnboundArchetype(Expr *overallExpr,
 
 
   if (auto TE = dyn_cast<TypeExpr>(anchor)) {
-    if (auto *ND = TE->getInstanceType()->getNominalOrBoundGenericNominal())
-      tc.diagnose(ND, diag::archetype_declared_in_type, archetype,
-                  ND->getDeclaredType());
+    // Emit a note specifying where this came from, if we can find it.
+    noteArchetypeSource(TE->getTypeLoc(), archetype, tc);
     return;
   }
 

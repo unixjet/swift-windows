@@ -190,8 +190,8 @@ static const Decl *getDeclForContext(const DeclContext *DC) {
   case DeclContextKind::AbstractClosureExpr:
     // FIXME: What about default functions?
     llvm_unreachable("shouldn't serialize decls from anonymous closures");
-  case DeclContextKind::NominalTypeDecl:
-    return cast<NominalTypeDecl>(DC);
+  case DeclContextKind::GenericTypeDecl:
+    return cast<GenericTypeDecl>(DC);
   case DeclContextKind::ExtensionDecl:
     return cast<ExtensionDecl>(DC);
   case DeclContextKind::TopLevelCodeDecl:
@@ -487,13 +487,17 @@ void Serializer::writeBlockInfoBlock() {
   BLOCK_RECORD(sil_block, SIL_GLOBALVAR);
   BLOCK_RECORD(sil_block, SIL_INST_CAST);
   BLOCK_RECORD(sil_block, SIL_INIT_EXISTENTIAL);
-  BLOCK_RECORD(sil_block, SIL_WITNESSTABLE);
+  BLOCK_RECORD(sil_block, SIL_WITNESS_TABLE);
   BLOCK_RECORD(sil_block, SIL_WITNESS_METHOD_ENTRY);
   BLOCK_RECORD(sil_block, SIL_WITNESS_BASE_ENTRY);
   BLOCK_RECORD(sil_block, SIL_WITNESS_ASSOC_PROTOCOL);
   BLOCK_RECORD(sil_block, SIL_WITNESS_ASSOC_ENTRY);
+  BLOCK_RECORD(sil_block, SIL_DEFAULT_WITNESS_TABLE);
+  BLOCK_RECORD(sil_block, SIL_DEFAULT_WITNESS_TABLE_ENTRY);
+  BLOCK_RECORD(sil_block, SIL_DEFAULT_WITNESS_TABLE_NO_ENTRY);
   BLOCK_RECORD(sil_block, SIL_GENERIC_OUTER_PARAMS);
   BLOCK_RECORD(sil_block, SIL_INST_WITNESS_METHOD);
+  BLOCK_RECORD(sil_block, SIL_SPECIALIZE_ATTR);
 
   // These layouts can exist in both decl blocks and sil blocks.
 #define BLOCK_RECORD_WITH_NAMESPACE(K, X) emitRecordID(Out, X, #X, nameBuffer)
@@ -527,8 +531,10 @@ void Serializer::writeBlockInfoBlock() {
   BLOCK_RECORD(sil_index_block, SIL_VTABLE_OFFSETS);
   BLOCK_RECORD(sil_index_block, SIL_GLOBALVAR_NAMES);
   BLOCK_RECORD(sil_index_block, SIL_GLOBALVAR_OFFSETS);
-  BLOCK_RECORD(sil_index_block, SIL_WITNESSTABLE_NAMES);
-  BLOCK_RECORD(sil_index_block, SIL_WITNESSTABLE_OFFSETS);
+  BLOCK_RECORD(sil_index_block, SIL_WITNESS_TABLE_NAMES);
+  BLOCK_RECORD(sil_index_block, SIL_WITNESS_TABLE_OFFSETS);
+  BLOCK_RECORD(sil_index_block, SIL_DEFAULT_WITNESS_TABLE_NAMES);
+  BLOCK_RECORD(sil_index_block, SIL_DEFAULT_WITNESS_TABLE_OFFSETS);
 
 #undef BLOCK
 #undef BLOCK_RECORD
@@ -1034,7 +1040,6 @@ void Serializer::writeNormalConformance(
   SmallVector<DeclID, 32> data;
   unsigned numValueWitnesses = 0;
   unsigned numTypeWitnesses = 0;
-  unsigned numDefaultedDefinitions = 0;
 
   // Collect the set of protocols inherited by this conformance.
   SmallVector<ProtocolDecl *, 8> inheritedProtos;
@@ -1067,20 +1072,6 @@ void Serializer::writeNormalConformance(
     return false;
   });
 
-  SmallVector<ValueDecl *, 4> defaultedDefinitions{
-    conformance->getDefaultedDefinitions().begin(),
-    conformance->getDefaultedDefinitions().end()
-  };
-  llvm::array_pod_sort(defaultedDefinitions.begin(), defaultedDefinitions.end(),
-                       [](ValueDecl * const *left, ValueDecl * const *right) {
-    return (*left)->getFullName().compare((*right)->getFullName());
-  });
-
-  for (auto defaulted : defaultedDefinitions) {
-    data.push_back(addDeclRef(defaulted));
-    ++numDefaultedDefinitions;
-  }
-
   unsigned numInheritedConformances = inheritedProtos.size();
   unsigned abbrCode
     = DeclTypeAbbrCodes[NormalProtocolConformanceLayout::Code];
@@ -1090,7 +1081,6 @@ void Serializer::writeNormalConformance(
                                               numValueWitnesses,
                                               numTypeWitnesses,
                                               numInheritedConformances,
-                                              numDefaultedDefinitions,
                                               data);
 
   // Write inherited conformances.
@@ -1285,6 +1275,31 @@ void Serializer::writeMembers(DeclRange members, bool isClass) {
   MembersLayout::emitRecord(Out, ScratchRecord, abbrCode, memberIDs);
 }
 
+void Serializer::writeDefaultWitnessTable(const ProtocolDecl *proto,
+                                   const std::array<unsigned, 256> &abbrCodes) {
+  using namespace decls_block;
+
+  SmallVector<DeclID, 16> witnessIDs;
+
+  unsigned abbrCode = abbrCodes[DefaultWitnessTableLayout::Code];
+  for (auto member : proto->getMembers()) {
+    if (auto *value = dyn_cast<ValueDecl>(member)) {
+      ConcreteDeclRef witness = proto->getDefaultWitness(value);
+      if (!witness)
+        continue;
+
+      DeclID requirementID = addDeclRef(value);
+      DeclID witnessID = addDeclRef(witness.getDecl());
+      witnessIDs.push_back(requirementID);
+      witnessIDs.push_back(witnessID);
+
+      // FIXME: Substitutions
+    }
+  }
+  DefaultWitnessTableLayout::emitRecord(Out, ScratchRecord,
+                                        abbrCode, witnessIDs);
+}
+
 static serialization::AccessorKind getStableAccessorKind(swift::AccessorKind K){
   switch (K) {
   case swift::AccessorKind::NotAccessor:
@@ -1337,13 +1352,13 @@ void Serializer::writeCrossReference(const DeclContext *DC, uint32_t pathLen) {
                            addModuleRef(cast<Module>(DC)), pathLen);
     break;
 
-  case DeclContextKind::NominalTypeDecl: {
+  case DeclContextKind::GenericTypeDecl: {
     writeCrossReference(DC->getParent(), pathLen + 1);
 
-    auto nominal = cast<NominalTypeDecl>(DC);
+    auto generic = cast<GenericTypeDecl>(DC);
     abbrCode = DeclTypeAbbrCodes[XRefTypePathPieceLayout::Code];
     XRefTypePathPieceLayout::emitRecord(Out, ScratchRecord, abbrCode,
-                                        addIdentifierRef(nominal->getName()),
+                                        addIdentifierRef(generic->getName()),
                                         false);
     break;
   }
@@ -1621,7 +1636,16 @@ void Serializer::writeDeclAttribute(const DeclAttribute *DA) {
                                       theAttr->Name);
     return;
   }
-  
+
+  case DAK_CDecl: {
+    auto *theAttr = cast<CDeclAttr>(DA);
+    auto abbrCode = DeclTypeAbbrCodes[CDeclDeclAttrLayout::Code];
+    CDeclDeclAttrLayout::emitRecord(Out, ScratchRecord, abbrCode,
+                                    theAttr->isImplicit(),
+                                    theAttr->Name);
+    return;
+  }
+
   case DAK_Alignment: {
     auto *theAlignment = cast<AlignmentAttr>(DA);
     auto abbrCode = DeclTypeAbbrCodes[AlignmentDeclAttrLayout::Code];
@@ -1776,6 +1800,15 @@ void Serializer::writeDeclAttribute(const DeclAttribute *DA) {
                                                blob);
     return;
   }
+  case DAK_Specialize: {
+    auto abbrCode = DeclTypeAbbrCodes[SpecializeDeclAttrLayout::Code];
+    SmallVector<TypeID, 8> typeIDs;
+    for (auto tl : cast<SpecializeAttr>(DA)->getTypeLocs())
+      typeIDs.push_back(addTypeRef(tl.getType()));
+
+    SpecializeDeclAttrLayout::emitRecord(Out, ScratchRecord, abbrCode, typeIDs);
+    return;
+  }
   }
 }
 
@@ -1810,7 +1843,7 @@ void Serializer::writeDeclContext(const DeclContext *DC) {
   switch (DC->getContextKind()) {
   case DeclContextKind::AbstractFunctionDecl:
   case DeclContextKind::SubscriptDecl:
-  case DeclContextKind::NominalTypeDecl:
+  case DeclContextKind::GenericTypeDecl:
   case DeclContextKind::ExtensionDecl:
     declOrDeclContextID = addDeclRef(getDeclForContext(DC));
     isDecl = true;
@@ -2176,6 +2209,7 @@ void Serializer::writeDecl(const Decl *D) {
                                 addTypeRef(typeAlias->getInterfaceType()),
                                 typeAlias->isImplicit(),
                                 rawAccessLevel);
+    writeGenericParams(typeAlias->getGenericParams(), DeclTypeAbbrCodes);
     break;
   }
 
@@ -2360,6 +2394,7 @@ void Serializer::writeDecl(const Decl *D) {
     writeGenericParams(proto->getGenericParams(), DeclTypeAbbrCodes);
     writeRequirements(proto->getGenericRequirements());
     writeMembers(proto->getMembers(), true);
+    writeDefaultWitnessTable(proto, DeclTypeAbbrCodes);
     break;
   }
 
@@ -2970,7 +3005,7 @@ void Serializer::writeType(Type ty) {
             fnTy->isNoReturn(),
             fnTy->throws(),
             genericParams);
-    
+
     // Write requirements.
     writeRequirements(fnTy->getRequirements());
     break;
@@ -3258,6 +3293,7 @@ void Serializer::writeAllDeclsAndTypes() {
   registerDeclTypeAbbr<FuncLayout>();
   registerDeclTypeAbbr<PatternBindingLayout>();
   registerDeclTypeAbbr<ProtocolLayout>();
+  registerDeclTypeAbbr<DefaultWitnessTableLayout>();
   registerDeclTypeAbbr<PrefixOperatorLayout>();
   registerDeclTypeAbbr<PostfixOperatorLayout>();
   registerDeclTypeAbbr<InfixOperatorLayout>();
@@ -3419,6 +3455,7 @@ struct DeclCommentTableData {
   StringRef Brief;
   RawComment Raw;
   uint32_t Group;
+  uint32_t Order;
 };
 
 class DeclCommentTableInfo {
@@ -3451,6 +3488,9 @@ public:
 
     // Group Id.
     dataLength += numLen;
+
+    // Source order.
+    dataLength += numLen;
     endian::Writer<little> writer(out);
     writer.write<uint32_t>(keyLength);
     writer.write<uint32_t>(dataLength);
@@ -3473,6 +3513,7 @@ public:
       out << C.RawText;
     }
     writer.write<uint32_t>(data.Group);
+    writer.write<uint32_t>(data.Order);
   }
 };
 
@@ -3513,7 +3554,11 @@ class YamlGroupInputParser {
         if (auto *FileEntry= dyn_cast<llvm::yaml::ScalarNode>(&Entry)) {
           llvm::SmallString<16> FileNameStorage;
           StringRef FileName = FileEntry->getValue(FileNameStorage);
-          Map[FileName] = CombinedName;
+          llvm::SmallString<32> GroupNameAndFileName;
+          GroupNameAndFileName.append(CombinedName);
+          GroupNameAndFileName.append(Separator);
+          GroupNameAndFileName.append(llvm::sys::path::stem(FileName));
+          Map[FileName] = GroupNameAndFileName.str();
         } else if (Entry.getType() == llvm::yaml::Node::NodeKind::NK_Mapping) {
           if(parseRoot(Map, &Entry, *pCombined))
             return true;
@@ -3581,8 +3626,8 @@ class DeclGroupNameContext {
     const bool Enable;
     GroupNameCollector(bool Enable) : Enable(Enable) {}
     virtual ~GroupNameCollector() = default;
-    virtual StringRef getGroupNameInternal(const ValueDecl *VD) = 0;
-    StringRef getGroupName(const ValueDecl *VD) {
+    virtual StringRef getGroupNameInternal(const Decl *VD) = 0;
+    StringRef getGroupName(const Decl *VD) {
       return Enable ? getGroupNameInternal(VD) : StringRef(NullGroupName);
     };
   };
@@ -3590,7 +3635,7 @@ class DeclGroupNameContext {
   // FIXME: Implement better name collectors.
   struct GroupNameCollectorFromFileName : public GroupNameCollector {
     GroupNameCollectorFromFileName(bool Enable) : GroupNameCollector(Enable) {}
-    StringRef getGroupNameInternal(const ValueDecl *VD) override {
+    StringRef getGroupNameInternal(const Decl *VD) override {
       auto PathOp = VD->getDeclContext()->getParentSourceFile()->getBufferID();
       if (!PathOp.hasValue())
         return NullGroupName;
@@ -3602,11 +3647,13 @@ class DeclGroupNameContext {
   class GroupNameCollectorFromJson : public GroupNameCollector {
     StringRef RecordPath;
     FileNameToGroupNameMap* pMap = nullptr;
+    ASTContext &Ctx;
 
   public:
-    GroupNameCollectorFromJson(StringRef RecordPath) :
-      GroupNameCollector(!RecordPath.empty()), RecordPath(RecordPath) {}
-    StringRef getGroupNameInternal(const ValueDecl *VD) override {
+    GroupNameCollectorFromJson(StringRef RecordPath, ASTContext &Ctx) :
+      GroupNameCollector(!RecordPath.empty()), RecordPath(RecordPath),
+      Ctx(Ctx) {}
+    StringRef getGroupNameInternal(const Decl *VD) override {
       // We need the file path, so there has to be a location.
       if (VD->getLoc().isInvalid())
         return NullGroupName;
@@ -3627,7 +3674,11 @@ class DeclGroupNameContext {
         return NullGroupName;
       StringRef FileName = llvm::sys::path::filename(FullPath);
       auto Found = pMap->find(FileName);
-      return Found == pMap->end() ? NullGroupName : Found->second;
+      if (Found == pMap->end()) {
+        Ctx.Diags.diagnose(SourceLoc(), diag::error_no_group_info, FileName);
+        return NullGroupName;
+      }
+      return Found->second;
     }
   };
 
@@ -3636,9 +3687,9 @@ class DeclGroupNameContext {
   std::unique_ptr<GroupNameCollector> pNameCollector;
 
 public:
-  DeclGroupNameContext(StringRef RecordPath) :
-    pNameCollector(new GroupNameCollectorFromJson(RecordPath)) {}
-  uint32_t getGroupSequence(const ValueDecl *VD) {
+  DeclGroupNameContext(StringRef RecordPath, ASTContext &Ctx) :
+    pNameCollector(new GroupNameCollectorFromJson(RecordPath, Ctx)) {}
+  uint32_t getGroupSequence(const Decl *VD) {
     return Map.insert(std::make_pair(pNameCollector->getGroupName(VD),
                                      Map.size())).first->second;
   }
@@ -3681,9 +3732,14 @@ static void writeDeclCommentTable(
     llvm::SmallString<512> USRBuffer;
     llvm::OnDiskChainedHashTableGenerator<DeclCommentTableInfo> generator;
     DeclGroupNameContext &GroupContext;
+    unsigned SourceOrder;
 
     DeclCommentTableWriter(DeclGroupNameContext &GroupContext) :
       GroupContext(GroupContext) {}
+
+    void resetSourceOrder() {
+      SourceOrder = 0;
+    }
 
     StringRef copyString(StringRef String) {
       char *Mem = static_cast<char *>(Arena.Allocate(String.size(), 1));
@@ -3691,15 +3747,55 @@ static void writeDeclCommentTable(
       return StringRef(Mem, String.size());
     }
 
+    void writeDocForExtensionDecl(ExtensionDecl *ED) {
+      RawComment Raw = ED->getRawComment();
+      if (Raw.Comments.empty() && !GroupContext.isEnable())
+        return;
+      // Compute USR.
+      {
+        USRBuffer.clear();
+        llvm::raw_svector_ostream OS(USRBuffer);
+        if (ide::printExtensionUSR(ED, OS))
+          return;
+      }
+      generator.insert(copyString(USRBuffer.str()),
+                       { ED->getBriefComment(), Raw,
+                         GroupContext.getGroupSequence(ED),
+                         SourceOrder ++ });
+    }
+
     bool walkToDeclPre(Decl *D) override {
+      if (auto *ED = dyn_cast<ExtensionDecl>(D)) {
+        writeDocForExtensionDecl(ED);
+        return true;
+      }
+
       auto *VD = dyn_cast<ValueDecl>(D);
       if (!VD)
         return true;
 
-      // Skip the decl if it does not have a comment.
       RawComment Raw = VD->getRawComment();
-      if (Raw.Comments.empty() && !GroupContext.isEnable())
-        return true;
+      // When building the stdlib we intend to
+      // serialize unusual comments.  This situation is represented by
+      // GroupContext.isEnable().  In that case, we perform fewer serialization checks.
+      if (!GroupContext.isEnable()) {
+        // Skip the decl if it cannot have a comment.
+        if (!VD->canHaveComment()) {
+          return true;
+        }
+
+        // Skip the decl if it does not have a comment.
+        if (Raw.Comments.empty())
+          return true;
+
+        // Skip the decl if it's not visible to clients.
+        // The use of getEffectiveAccess is unusual here;
+        // we want to take the testability state into account
+        // and emit documentation if and only if they are visible to clients
+        // (which means public ordinarily, but public+internal when testing enabled).
+        if (VD->getEffectiveAccess() != Accessibility::Public)
+          return true;
+      }
 
       // Compute USR.
       {
@@ -3711,7 +3807,8 @@ static void writeDeclCommentTable(
 
       generator.insert(copyString(USRBuffer.str()),
                        { VD->getBriefComment(), Raw,
-                         GroupContext.getGroupSequence(VD) });
+                         GroupContext.getGroupSequence(VD),
+                         SourceOrder ++ });
       return true;
     }
   };
@@ -3719,9 +3816,10 @@ static void writeDeclCommentTable(
   DeclCommentTableWriter Writer(GroupContext);
 
   ArrayRef<const FileUnit *> files = SF ? SF : M->getFiles();
-  for (auto nextFile : files)
+  for (auto nextFile : files) {
+    Writer.resetSourceOrder();
     const_cast<FileUnit *>(nextFile)->walk(Writer);
-
+  }
   SmallVector<uint64_t, 8> scratch;
   llvm::SmallString<32> hashTableBlob;
   uint32_t tableOffset;
@@ -4023,7 +4121,7 @@ void Serializer::writeToStream(raw_ostream &os, ModuleOrSourceFile DC,
 }
 
 void Serializer::writeDocToStream(raw_ostream &os, ModuleOrSourceFile DC,
-                                  StringRef GroupInfoPath) {
+                                  StringRef GroupInfoPath, ASTContext &Ctx) {
   Serializer S{MODULE_DOC_SIGNATURE, DC};
   // FIXME: This is only really needed for debugging. We don't actually use it.
   S.writeDocBlockInfoBlock();
@@ -4033,7 +4131,7 @@ void Serializer::writeDocToStream(raw_ostream &os, ModuleOrSourceFile DC,
     S.writeDocHeader();
     {
       BCBlockRAII restoreBlock(S.Out, COMMENT_BLOCK_ID, 4);
-      DeclGroupNameContext GroupContext(GroupInfoPath);
+      DeclGroupNameContext GroupContext(GroupInfoPath, Ctx);
       comment_block::DeclCommentListLayout DeclCommentList(S.Out);
       writeDeclCommentTable(DeclCommentList, S.SF, S.M, GroupContext);
       comment_block::GroupNamesLayout GroupNames(S.Out);
@@ -4113,7 +4211,8 @@ void swift::serialize(ModuleOrSourceFile DC,
     (void)withOutputFile(getContext(DC), options.DocOutputPath,
                          [&](raw_ostream &out) {
       SharedTimer timer("Serialization (swiftdoc)");
-      Serializer::writeDocToStream(out, DC, options.GroupInfoPath);
+      Serializer::writeDocToStream(out, DC, options.GroupInfoPath,
+                                   getContext(DC));
     });
   }
 }

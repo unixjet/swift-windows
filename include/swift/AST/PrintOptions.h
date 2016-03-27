@@ -31,6 +31,7 @@ class Type;
 enum DeclAttrKind : unsigned;
 class PrinterArchetypeTransformer;
 class SynthesizedExtensionAnalyzer;
+struct PrintOptions;
 
 /// Necessary information for archetype transformation during printing.
 struct ArchetypeTransformContext {
@@ -47,30 +48,50 @@ struct ArchetypeTransformContext {
                             SynthesizedExtensionAnalyzer *Analyzer);
   Type transform(Type Input);
   StringRef transform(StringRef Input);
+
   bool shouldPrintRequirement(ExtensionDecl *ED, StringRef Req);
+
   ~ArchetypeTransformContext();
 private:
   struct Implementation;
   Implementation &Impl;
 };
 
-struct SynthesizedExtensionInfo {
-  ExtensionDecl *Ext = nullptr;
-  std::vector<StringRef> KnownSatisfiedRequirements;
-  operator bool() const { return Ext; }
-};
+typedef std::pair<ExtensionDecl*, bool> ExtensionAndIsSynthesized;
+typedef llvm::function_ref<void(ArrayRef<ExtensionAndIsSynthesized>)>
+  ExtensionGroupOperation;
 
 class SynthesizedExtensionAnalyzer {
   struct Implementation;
   Implementation &Impl;
-
 public:
-  SynthesizedExtensionAnalyzer(NominalTypeDecl *Target);
+  SynthesizedExtensionAnalyzer(NominalTypeDecl *Target,
+                               PrintOptions Options,
+                               bool IncludeUnconditional = true);
   ~SynthesizedExtensionAnalyzer();
-  ArrayRef<ExtensionDecl*> getAllSynthesizedExtensions(
-    std::vector<ExtensionDecl*> &Scratch);
+
+  enum class MergeGroupKind : char {
+    All,
+    MergeableWithTypeDef,
+    UnmergeableWithTypeDef,
+  };
+
+  void forEachExtensionMergeGroup(MergeGroupKind Kind,
+                                  ExtensionGroupOperation Fn);
   bool isInSynthesizedExtension(const ValueDecl *VD);
   bool shouldPrintRequirement(ExtensionDecl *ED, StringRef Req);
+  bool hasMergeGroup(MergeGroupKind Kind);
+};
+
+struct BracketOptions {
+  bool shouldOpenExtension = true;
+  bool shouldCloseExtension = true;
+  bool shouldCloseNominal = true;
+  void reset() {
+    shouldOpenExtension = true;
+    shouldCloseExtension = true;
+    shouldCloseNominal = true;
+  }
 };
 
 /// Options for printing AST nodes.
@@ -105,6 +126,9 @@ struct PrintOptions {
 
   /// \brief Whether to print a placeholder for default parameters.
   bool PrintDefaultParameterPlaceholder = true;
+
+  /// \brief Whether to print enum raw value expressions.
+  bool EnumRawValues = false;
 
   /// \brief Whether to prefer printing TypeReprs instead of Types,
   /// if a TypeRepr is available.  This allows us to print the original
@@ -152,6 +176,7 @@ struct PrintOptions {
   bool SkipPrivateStdlibDecls = false;
 
   /// Whether to skip underscored stdlib protocols.
+  /// Protocols marked with @_show_in_interface are still printed.
   bool SkipUnderscoredStdlibProtocols = false;
 
   /// Whether to skip extensions that don't add protocols or no members.
@@ -229,6 +254,10 @@ struct PrintOptions {
     BothAlways,
   };
 
+  /// Whether to print the doc-comment from the conformance if a member decl
+  /// has no associated doc-comment by itself.
+  bool ElevateDocCommentFromConformance = false;
+
   /// Whether to print the content of an extension decl inside the type decl where it
   /// extends from.
   std::function<bool(const ExtensionDecl *)> printExtensionContentAsMembers =
@@ -254,12 +283,14 @@ struct PrintOptions {
   /// \brief Print dependent types as references into this generic parameter
   /// list.
   GenericParamList *ContextGenericParams = nullptr;
-  
+
   /// \brief Print types with alternative names from their canonical names.
   llvm::DenseMap<CanType, Identifier> *AlternativeTypeNames = nullptr;
 
   /// \brief The information for converting archetypes to specialized types.
   std::shared_ptr<ArchetypeTransformContext> TransformContext;
+
+  BracketOptions BracketOptions;
 
   /// Retrieve the set of options for verbose printing to users.
   static PrintOptions printVerbose() {
@@ -298,7 +329,11 @@ struct PrintOptions {
     result.SkipUnavailable = true;
     result.SkipImplicit = true;
     result.SkipPrivateStdlibDecls = true;
+    result.SkipUnderscoredStdlibProtocols = true;
     result.SkipDeinit = true;
+    result.ExcludeAttrList.push_back(DAK_WarnUnusedResult);
+    result.EmptyLineBetweenMembers = true;
+    result.ElevateDocCommentFromConformance = true;
     return result;
   }
 
@@ -374,12 +409,14 @@ struct PrintOptions {
   /// Print in the style of quick help declaration.
   static PrintOptions printQuickHelpDeclaration() {
     PrintOptions PO;
+    PO.EnumRawValues = true;
     PO.PrintDefaultParameterPlaceholder = true;
     PO.PrintImplicitAttrs = false;
     PO.PrintFunctionRepresentationAttrs = false;
     PO.PrintDocumentationComments = false;
     PO.ExcludeAttrList.push_back(DAK_Available);
     PO.ExcludeAttrList.push_back(DAK_Swift3Migration);
+    PO.ExcludeAttrList.push_back(DAK_WarnUnusedResult);
     PO.SkipPrivateStdlibDecls = true;
     PO.ExplodeEnumCaseDecls = true;
     return PO;

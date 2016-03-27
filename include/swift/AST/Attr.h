@@ -23,6 +23,7 @@
 #include "swift/Basic/Range.h"
 #include "swift/AST/Identifier.h"
 #include "swift/AST/AttrKind.h"
+#include "swift/AST/ConcreteDeclRef.h"
 #include "swift/AST/KnownProtocols.h"
 #include "swift/AST/Ownership.h"
 #include "swift/AST/PlatformKind.h"
@@ -38,6 +39,7 @@ class ASTContext;
 struct PrintOptions;
 class Decl;
 class ClassDecl;
+struct TypeLoc;
 
 class InfixData {
   unsigned Precedence : 8;
@@ -513,6 +515,24 @@ public:
 
   static bool classof(const DeclAttribute *DA) {
     return DA->getKind() == DAK_SILGenName;
+  }
+};
+
+/// Defines the @_cdecl attribute.
+class CDeclAttr : public DeclAttribute {
+public:
+  CDeclAttr(StringRef Name, SourceLoc AtLoc, SourceRange Range, bool Implicit)
+    : DeclAttribute(DAK_CDecl, AtLoc, Range, Implicit),
+      Name(Name) {}
+
+  CDeclAttr(StringRef Name, bool Implicit)
+    : CDeclAttr(Name, SourceLoc(), SourceRange(), /*Implicit=*/true) {}
+
+  /// The symbol name.
+  const StringRef Name;
+
+  static bool classof(const DeclAttribute *DA) {
+    return DA->getKind() == DAK_CDecl;
   }
 };
 
@@ -1052,10 +1072,10 @@ public:
 ///
 /// \code
 /// struct X {
-///   @warn_unused_result(message="this string affects your health")
+///   @warn_unused_result(message: "this string affects your health")
 ///   func methodA() -> String { ... }
 ///
-///   @warn_unused_result(mutable_variant="jumpInPlace")
+///   @warn_unused_result(mutable_variant: "jumpInPlace")
 ///   func jump() -> X { ... }
 ///
 ///   mutating func jumpInPlace() { ... }
@@ -1115,6 +1135,36 @@ public:
 
   static bool classof(const DeclAttribute *DA) {
     return DA->getKind() == DAK_Swift3Migration;
+  }
+};
+
+/// The @_specialize attribute, which forces specialization on the specified
+/// type list.
+class SpecializeAttr : public DeclAttribute {
+  unsigned numTypes;
+  ConcreteDeclRef specializedDecl;
+
+  TypeLoc *getTypeLocData() {
+    return reinterpret_cast<TypeLoc *>(this + 1);
+  }
+
+  SpecializeAttr(SourceLoc atLoc, SourceRange Range,
+                 ArrayRef<TypeLoc> typeLocs);
+
+public:
+  static SpecializeAttr *create(ASTContext &Ctx, SourceLoc atLoc,
+                                SourceRange Range, ArrayRef<TypeLoc> typeLocs);
+
+  ArrayRef<TypeLoc> getTypeLocs() const;
+
+  MutableArrayRef<TypeLoc> getTypeLocs();
+
+  ConcreteDeclRef getConcreteDecl() const { return specializedDecl; }
+
+  void setConcreteDecl(ConcreteDeclRef ref) { specializedDecl = ref; }
+
+  static bool classof(const DeclAttribute *DA) {
+    return DA->getKind() == DAK_Specialize;
   }
 };
 

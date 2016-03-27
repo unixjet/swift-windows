@@ -997,7 +997,11 @@ RValue RValueEmitter::visitOptionalTryExpr(OptionalTryExpr *E, SGFContext C) {
   // If control branched to the failure block, inject .None into the
   // result type.
   SGF.B.emitBlock(catchBB);
-  (void)catchBB->createBBArg(SILType::getExceptionType(SGF.getASTContext()));
+  FullExpr catchCleanups(SGF.Cleanups, E);
+  auto *errorArg = catchBB->createBBArg(
+      SILType::getExceptionType(SGF.getASTContext()));
+  (void) SGF.emitManagedRValueWithCleanup(errorArg);
+  catchCleanups.pop();
 
   if (isByAddress) {
     SGF.emitInjectOptionalNothingInto(E, optInit->getAddress(), optTL);
@@ -3090,10 +3094,10 @@ ProtocolDecl *SILGenFunction::getPointerProtocol() {
     return *SGM.PointerProtocol;
   
   SmallVector<ValueDecl*, 1> lookup;
-  getASTContext().lookupInSwiftModule("_PointerType", lookup);
+  getASTContext().lookupInSwiftModule("_Pointer", lookup);
   // FIXME: Should check for protocol in Sema
-  assert(lookup.size() == 1 && "no _PointerType protocol");
-  assert(isa<ProtocolDecl>(lookup[0]) && "_PointerType is not a protocol");
+  assert(lookup.size() == 1 && "no _Pointer protocol");
+  assert(isa<ProtocolDecl>(lookup[0]) && "_Pointer is not a protocol");
   SGM.PointerProtocol = cast<ProtocolDecl>(lookup[0]);
   return cast<ProtocolDecl>(lookup[0]);
 }
@@ -3106,12 +3110,11 @@ Substitution SILGenFunction::getPointerSubstitution(Type pointerType) {
   auto conformance
     = Ctx.getStdlibModule()->lookupConformance(pointerType, pointerProto,
                                                nullptr);
-  assert(conformance.getInt() == ConformanceKind::Conforms
-         && "not a _Pointer type");
+  assert(conformance && "not a _Pointer type");
 
   // FIXME: Cache this
   ProtocolConformanceRef conformances[] = {
-    ProtocolConformanceRef(conformance.getPointer())
+    ProtocolConformanceRef(*conformance)
   };
   auto conformancesCopy = Ctx.AllocateCopy(conformances);
   

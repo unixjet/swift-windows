@@ -912,16 +912,39 @@ public:
 
     case SILLinkage::Shared:
     case SILLinkage::SharedExternal:
-        // This handles some kind of generated functions, like constructors
-        // of clang imported types.
-        // TODO: check why those functions are not fragile anyway and make
-        // a less conservative check here.
-        return true;
+      // This allows fragile functions to reference thunks, generated
+      // methods on Clang types, and optimizer specializations.
+      return true;
 
     case SILLinkage::Public:
     case SILLinkage::PublicExternal:
       return true;
     }
+  }
+
+  bool isValidLinkageForFragileRef(const SILFunction *RefF) {
+    if (RefF->isFragile() ||
+        RefF->isExternalDeclaration()) {
+      return true;
+    }
+
+    return isValidLinkageForFragileRef(RefF->getLinkage());
+  }
+
+  /// Returns true if \p FRI is only used as a callee and will always be
+  /// inlined at those call sites.
+  static bool isAlwaysInlined(FunctionRefInst *FRI) {
+    if (FRI->getReferencedFunction()->getInlineStrategy() != AlwaysInline &&
+        !FRI->getReferencedFunction()->isTransparent()) {
+      return false;
+    }
+
+    for (auto use : FRI->getUses()) {
+      auto site = FullApplySite::isa(use->getUser());
+      if (!site || site.getCallee() != FRI)
+        return false;
+    }
+    return true;
   }
 
   void checkFunctionRefInst(FunctionRefInst *FRI) {
@@ -931,9 +954,8 @@ public:
             "function_ref should have a context-free function result");
     if (F.isFragile()) {
       SILFunction *RefF = FRI->getReferencedFunction();
-      require(RefF->isFragile()
-                || isValidLinkageForFragileRef(RefF->getLinkage())
-                || RefF->isExternalDeclaration(),
+      require(isAlwaysInlined(FRI)
+                || isValidLinkageForFragileRef(RefF),
               "function_ref inside fragile function cannot "
               "reference a private or hidden symbol");
     }
@@ -1161,6 +1183,13 @@ public:
     // TODO: This instruction could in principle be generalized.
     require(I->getOperand()->getType().hasRetainablePointerRepresentation(),
             "Source value must be a reference type or optional thereof");
+  }
+  
+  void checkSetDeallocatingInst(SetDeallocatingInst *I) {
+    require(I->getOperand()->getType().isObject(),
+            "Source value should be an object value");
+    require(I->getOperand()->getType().hasRetainablePointerRepresentation(),
+            "Source value must be a reference type");
   }
   
   void checkCopyBlockInst(CopyBlockInst *I) {
@@ -2077,7 +2106,7 @@ public:
       require(toCanTy.getClassOrBoundGenericClass(),
               "downcast must convert to a class type");
       require(SILType::getPrimitiveObjectType(fromCanTy).
-              isSuperclassOf(SILType::getPrimitiveObjectType(toCanTy)),
+              isBindableToSuperclassOf(SILType::getPrimitiveObjectType(toCanTy)),
               "downcast must convert to a subclass");
     }
   }
@@ -2231,7 +2260,7 @@ public:
                          ->getInstanceType());
       require(instTy->getClassOrBoundGenericClass(),
               "upcast must convert a class metatype to a class metatype");
-      require(instTy->isSuperclassOf(opInstTy, nullptr),
+      require(instTy->isExactSuperclassOf(opInstTy, nullptr),
               "upcast must cast to a superclass or an existential metatype");
       return;
     }
@@ -2257,7 +2286,7 @@ public:
 
     require(ToTy.getClassOrBoundGenericClass(),
             "upcast must convert a class instance to a class type");
-    require(ToTy.isSuperclassOf(FromTy),
+    require(ToTy.isExactSuperclassOf(FromTy),
             "upcast must cast to a superclass");
   }
 
@@ -2546,15 +2575,18 @@ public:
       SILValue casevalue;
       SILValue result;
       std::tie(casevalue, result) = I->getCase(i);
-      auto  *il = dyn_cast<IntegerLiteralInst>(casevalue);
-      require(il,
-              "select_value case operands should refer to integer literals");
-      APInt elt = il->getValue();
+      
+      if (!isa<SILUndef>(casevalue)) {
+        auto  *il = dyn_cast<IntegerLiteralInst>(casevalue);
+        require(il,
+                "select_value case operands should refer to integer literals");
+        APInt elt = il->getValue();
 
-      require(!seenCaseValues.count(elt),
-              "select_value dispatches on same case value more than once");
+        require(!seenCaseValues.count(elt),
+                "select_value dispatches on same case value more than once");
 
-      seenCaseValues.insert(elt);
+        seenCaseValues.insert(elt);
+      }
 
       requireSameType(I->getOperand()->getType(), casevalue->getType(),
                       "select_value case value must match type of operand");
@@ -3197,6 +3229,8 @@ void SILWitnessTable::verify(const SILModule &M) const {
     assert(getEntries().size() == 0 &&
            "A witness table declaration should not have any entries.");
 
+  auto *protocol = getConformance()->getProtocol();
+
   // Currently all witness tables have public conformances, thus witness tables
   // should not reference SILFunctions without public/public_external linkage.
   // FIXME: Once we support private conformances, update this.
@@ -3206,6 +3240,16 @@ void SILWitnessTable::verify(const SILModule &M) const {
       if (F) {
         assert(!isLessVisibleThan(F->getLinkage(), getLinkage()) &&
                "Witness tables should not reference less visible functions.");
+        assert(F->getLoweredFunctionType()->getRepresentation() ==
+               SILFunctionTypeRepresentation::WitnessMethod &&
+               "Witnesses must have witness_method representation.");
+        auto *witnessSelfProtocol = F->getLoweredFunctionType()
+            ->getDefaultWitnessMethodProtocol(*M.getSwiftModule());
+        assert((witnessSelfProtocol == nullptr ||
+                witnessSelfProtocol == protocol) &&
+               "Witnesses must either have a concrete Self, or an "
+               "an abstract Self that is constrained to their "
+               "protocol.");
       }
     }
 #endif
@@ -3214,29 +3258,22 @@ void SILWitnessTable::verify(const SILModule &M) const {
 /// Verify that a default witness table follows invariants.
 void SILDefaultWitnessTable::verify(const SILModule &M) const {
 #ifndef NDEBUG
-  assert(!isDeclaration() &&
-         "Default witness table declarations should not exist.");
-  assert(!getProtocol()->hasFixedLayout() &&
-         "Default witness table declarations for fixed-layout protocols should "
-         "not exist.");
-  assert(getProtocol()->getParentModule() == M.getSwiftModule() &&
-         "Default witness table declarations must appear in the same "
-         "module as their protocol.");
-
-  // All default witness tables have public conformances, thus default
-  // witness tables should not reference SILFunctions without
-  // public/public_external linkage.
   for (const Entry &E : getEntries()) {
     if (!E.isValid())
       continue;
 
     SILFunction *F = E.getWitness();
-    assert(!isLessVisibleThan(F->getLinkage(), SILLinkage::Public) &&
-           "Default witness tables should not reference internal "
-           "or private functions.");
+    assert(!isLessVisibleThan(F->getLinkage(), getLinkage()) &&
+           "Default witness tables should not reference "
+           "less visible functions.");
     assert(F->getLoweredFunctionType()->getRepresentation() ==
            SILFunctionTypeRepresentation::WitnessMethod &&
            "Default witnesses must have witness_method representation.");
+    auto *witnessSelfProtocol = F->getLoweredFunctionType()
+        ->getDefaultWitnessMethodProtocol(*M.getSwiftModule());
+    assert(witnessSelfProtocol == getProtocol() &&
+           "Default witnesses must have an abstract Self parameter "
+           "constrained to their protocol.");
   }
 #endif
 }

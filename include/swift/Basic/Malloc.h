@@ -15,8 +15,8 @@
 //
 //===----------------------------------------------------------------------===//
 
-#ifndef __SWIFT_MALLOC_H__
-#define __SWIFT_MALLOC_H__
+#ifndef SWIFT_BASIC_MALLOC_H
+#define SWIFT_BASIC_MALLOC_H
 
 #include <cassert>
 #if defined(_MSC_VER)
@@ -42,7 +42,7 @@ inline void *AlignedAlloc(size_t size, size_t align) {
   void *r;
   int res = posix_memalign(&r, align, size);
   assert(res == 0 && "posix_memalign failed");
-  (void)res; // Silence the unused variable warning
+  (void)res; // Silence the unused variable warning.
   return r;
 #endif
 }
@@ -55,6 +55,6 @@ inline void AlignedFree(void *p) {
 #endif
 }
   
-}
+} // end namespace swift
 
-#endif
+#endif // SWIFT_BASIC_MALLOC_H

@@ -62,6 +62,14 @@ class ReflectionContext {
 
   std::vector<ReflectionInfo> ReflectionInfos;
   std::unordered_map<StoredPointer, TypeRefPointer> TypeRefCache;
+  std::unordered_map<StoredPointer, SharedTargetMetadataRef<Runtime>>
+  MetadataCache;
+
+  std::unordered_map<StoredPointer,
+                     std::pair<SharedTargetNominalTypeDescriptorRef<Runtime>,
+                               StoredPointer>>
+  NominalTypeDescriptorCache;
+
   MemoryReader &Reader;
 
   void dumpTypeRef(const std::string &MangledName,
@@ -84,12 +92,35 @@ class ReflectionContext {
     }
 
     auto Casted = reinterpret_cast<TargetMetadata<Runtime> *>(Buffer);
-    return SharedTargetMetadataRef<Runtime>(Casted,
-                                            [](void *Meta){
-                                              free((void*)Meta);
-                                            });
+    auto Meta = SharedTargetMetadataRef<Runtime>(Casted, free);
+    MetadataCache.insert({Address, Meta});
+    return Meta;
   }
-  
+
+  const AssociatedTypeDescriptor *
+  lookupAssociatedTypes(const std::string &MangledTypeName,
+                        const DependentMemberTypeRef *DependentMember) {
+    // Cache missed - we need to look through all of the assocty sections
+    // for all images that we've been notified about.
+    for (auto &Info : ReflectionInfos) {
+      for (const auto &AssocTyDescriptor : Info.assocty) {
+        std::string ConformingTypeName(AssocTyDescriptor.ConformingTypeName);
+        if (ConformingTypeName.compare(MangledTypeName) != 0)
+          continue;
+        std::string ProtocolMangledName(AssocTyDescriptor.ProtocolTypeName);
+        auto DemangledProto = Demangle::demangleTypeAsNode(ProtocolMangledName);
+        auto TR = TypeRef::fromDemangleNode(DemangledProto);
+
+        auto &Conformance = *DependentMember->getProtocol();
+        if (auto Protocol = dyn_cast<ProtocolTypeRef>(TR.get())) {
+          if (*Protocol != Conformance)
+            continue;
+          return &AssocTyDescriptor;
+        }
+      }
+    }
+    return nullptr;
+  }
 
 public:
   ReflectionContext(MemoryReader &Reader) : Reader(Reader) {}
@@ -97,7 +128,12 @@ public:
   void dumpFieldSection(std::ostream &OS) const {
     for (const auto &sections : ReflectionInfos) {
       for (const auto &descriptor : sections.fieldmd) {
-        dumpTypeRef(descriptor.getMangledTypeName(), OS);
+        auto TypeName
+          = Demangle::demangleTypeAsString(descriptor.getMangledTypeName());
+        OS << TypeName << "\n";
+        for (size_t i = 0; i < TypeName.size(); ++i)
+          OS << '-';
+        OS << "\n";
         for (auto &field : descriptor) {
           OS << field.getFieldName() << ": ";
           dumpTypeRef(field.getMangledTypeName(), OS);
@@ -137,7 +173,28 @@ public:
     OS << std::endl;
   }
 
+  TypeRefPointer
+  getDependentMemberTypeRef(const std::string &MangledTypeName,
+                            const DependentMemberTypeRef *DependentMember) {
+
+    if (auto AssocTys = lookupAssociatedTypes(MangledTypeName, DependentMember)) {
+      for (auto &AssocTy : *AssocTys) {
+        if (DependentMember->getMember().compare(AssocTy.getName()) != 0)
+          continue;
+
+        auto SubstitutedTypeName = AssocTy.getMangledSubstitutedTypeName();
+        auto Demangled = Demangle::demangleTypeAsNode(SubstitutedTypeName);
+        return TypeRef::fromDemangleNode(Demangled);
+      }
+    }
+    return nullptr;
+  }
+
   SharedTargetMetadataRef<Runtime> readMetadata(StoredPointer Address) {
+    auto Cached = MetadataCache.find(Address);
+    if (Cached != MetadataCache.end())
+      return Cached->second;
+
     StoredPointer KindValue = 0;
     if (!Reader.readInteger(Address, &KindValue))
       return nullptr;
@@ -215,21 +272,62 @@ public:
     return targetAddress + signext;
   }
 
-  SharedTargetNominalTypeDescriptorRef<Runtime>
-  readNominalTypeDescriptor(StoredPointer Address) {
+  std::pair<SharedTargetNominalTypeDescriptorRef<Runtime>, StoredPointer>
+  readNominalTypeDescriptor(StoredPointer MetadataAddress) {
+    auto Cached = NominalTypeDescriptorCache.find(MetadataAddress);
+    if (Cached != NominalTypeDescriptorCache.end())
+      return Cached->second;
+
+    auto Meta = readMetadata(MetadataAddress);
+    StoredPointer DescriptorAddress;
+
+    switch (Meta->getKind()) {
+      case MetadataKind::Class: {
+        auto ClassMeta = cast<TargetClassMetadata<Runtime>>(Meta.get());
+        DescriptorAddress
+          = resolveRelativeOffset<StoredPointer>(MetadataAddress +
+                                         ClassMeta->offsetToDescriptorOffset());
+        break;
+      }
+      case MetadataKind::Struct: {
+        auto StructMeta = cast<TargetStructMetadata<Runtime>>(Meta.get());
+        DescriptorAddress
+          = resolveRelativeOffset<StoredPointer>(MetadataAddress +
+                                        StructMeta->offsetToDescriptorOffset());
+        break;
+      }
+      case MetadataKind::Optional:
+      case MetadataKind::Enum: {
+        auto EnumMeta = cast<TargetEnumMetadata<Runtime>>(Meta.get());
+        DescriptorAddress
+          = resolveRelativeOffset<StoredPointer>(MetadataAddress +
+                                          EnumMeta->offsetToDescriptorOffset());
+        break;
+      }
+      default:
+        return {nullptr, 0};
+    }
+
     auto Size = sizeof(TargetNominalTypeDescriptor<Runtime>);
     auto Buffer = (uint8_t *)malloc(Size);
-    if (!Reader.readBytes(Address, Buffer, Size)) {
+    if (!Reader.readBytes(DescriptorAddress, Buffer, Size)) {
       free(Buffer);
-      return nullptr;
+      return {nullptr, 0};
     }
 
     auto Casted
       = reinterpret_cast<TargetNominalTypeDescriptor<Runtime> *>(Buffer);
-    return SharedTargetNominalTypeDescriptorRef<Runtime>(Casted,
-                                            [](void *NTD){
-                                              free(NTD);
-                                            });
+
+    auto Descriptor
+      = SharedTargetNominalTypeDescriptorRef<Runtime>(Casted, free);
+
+    std::pair<SharedTargetNominalTypeDescriptorRef<Runtime>, StoredPointer>
+    Result = {
+      Descriptor,
+      DescriptorAddress
+    };
+    NominalTypeDescriptorCache.insert({MetadataAddress, Result});
+    return Result;
   }
 
   SharedProtocolDescriptorRef<Runtime>
@@ -242,16 +340,44 @@ public:
     }
     auto Casted
       = reinterpret_cast<TargetProtocolDescriptor<Runtime> *>(Buffer);
-    return SharedProtocolDescriptorRef<Runtime>(Casted,
-                                                      [](void *PD){
-                                                        free(PD);
-                                                      });
+    return SharedProtocolDescriptorRef<Runtime>(Casted, free);
   }
 
-  TypeRefVector
-  getGenericArguments(StoredPointer MetadataAddress,
-                      SharedTargetNominalTypeDescriptorRef<Runtime> Descriptor){
-    TypeRefVector GenericArgTypeRefs;
+  StoredPointer getParentAddress(StoredPointer MetadataAddress) {
+    auto Meta = readMetadata(MetadataAddress);
+    StoredPointer ParentAddress = 0;
+    if (auto ValueMeta = dyn_cast<TargetValueMetadata<Runtime>>(Meta.get())) {
+      auto AddressOfParentAddress
+        = resolveRelativeOffset<StoredPointer>(MetadataAddress +
+                                             ValueMeta->offsetToParentOffset());
+      if (!Reader.readInteger(AddressOfParentAddress, &ParentAddress))
+        return 0;
+    } else if (auto Class = dyn_cast<TargetClassMetadata<Runtime>>(Meta.get())){
+      StoredPointer DescriptorAddress;
+      SharedTargetNominalTypeDescriptorRef<Runtime> Descriptor;
+      std::tie(Descriptor, DescriptorAddress)
+        = readNominalTypeDescriptor(MetadataAddress);
+      TypeRefVector Substitutions;
+      auto OffsetToParent
+        = sizeof(StoredPointer) * (Descriptor->GenericParams.Offset - 1);
+      if (!Reader.readInteger(MetadataAddress + OffsetToParent, &ParentAddress))
+        return 0;
+    }
+    return ParentAddress;
+  }
+
+  unsigned getNominalTypeDepth(StoredPointer MetadataAddress) {
+    if (auto ParentAddress = getParentAddress(MetadataAddress))
+      return 1 + getNominalTypeDepth(ParentAddress);
+    return 0;
+  }
+
+  TypeRefVector getGenericSubst(StoredPointer MetadataAddress){
+    StoredPointer DescriptorAddress;
+    SharedTargetNominalTypeDescriptorRef<Runtime> Descriptor;
+    std::tie(Descriptor, DescriptorAddress)
+      = readNominalTypeDescriptor(MetadataAddress);
+    TypeRefVector Substitutions;
     auto NumGenericParams = Descriptor->GenericParams.NumPrimaryParams;
     auto OffsetToGenericArgs
       = sizeof(StoredPointer) * (Descriptor->GenericParams.Offset);
@@ -265,24 +391,21 @@ public:
                                 &GenericArgAddress))
           return {};
       if (auto GenericArg = getTypeRef(GenericArgAddress))
-        GenericArgTypeRefs.push_back(GenericArg);
+        Substitutions.push_back(GenericArg);
       else
         return {};
-      }
-    return GenericArgTypeRefs;
+    }
+    return Substitutions;
   }
 
   TypeRefPointer
-  resolveDependentMembers(TypeRefPointer Unresolved,
-                          StoredPointer MetadataAddress) {
-    // TODO: Resolve dependent members
-    return Unresolved;
-  }
+  getNominalTypeRef(StoredPointer MetadataAddress) {
+    auto Meta = readMetadata(MetadataAddress);
 
-  TypeRefPointer
-  getNominalTypeRef(StoredPointer MetadataAddress,
-                    StoredPointer DescriptorAddress) {
-    auto Descriptor = readNominalTypeDescriptor(DescriptorAddress);
+    StoredPointer DescriptorAddress;
+    SharedTargetNominalTypeDescriptorRef<Runtime> Descriptor;
+    std::tie(Descriptor, DescriptorAddress)
+      = readNominalTypeDescriptor(MetadataAddress);
     if (!Descriptor)
       return nullptr;
 
@@ -297,12 +420,21 @@ public:
     if (!DemangleNode)
       return nullptr;
 
+    TypeRefPointer Parent;
+    if (auto ParentAddress = getParentAddress(MetadataAddress))
+      Parent = getTypeRef(ParentAddress);
+
     TypeRefPointer Nominal;
     if (Descriptor->GenericParams.NumPrimaryParams) {
-      auto Args = getGenericArguments(MetadataAddress, Descriptor);
-      Nominal = BoundGenericTypeRef::create(MangledName, Args);
+      auto Args = getGenericSubst(MetadataAddress);
+      auto BG = BoundGenericTypeRef::create(MangledName, Args);
+      BG->setParent(Parent);
+      Nominal = BG;
     } else {
-      Nominal = TypeRef::fromDemangleNode(DemangleNode);
+      auto TR = TypeRef::fromDemangleNode(DemangleNode);
+      auto N = cast<NominalTypeRef>(TR.get());
+      N->setParent(Parent);
+      Nominal = TR;
     }
     TypeRefCache.insert({MetadataAddress, Nominal});
     return Nominal;
@@ -317,33 +449,13 @@ public:
     if (!Meta) return nullptr;
 
     switch (Meta->getKind()) {
-    case MetadataKind::Class: {
-      auto ClassMeta = llvm::cast<TargetClassMetadata<Runtime>>(Meta.get());
-      if (ClassMeta->isPureObjC())
-        return ObjCClassTypeRef::Unnamed;
-
-      auto DescriptorAddress
-        = resolveRelativeOffset<StoredPointer>(MetadataAddress +
-                                         ClassMeta->offsetToDescriptorOffset());
-
-      return getNominalTypeRef(MetadataAddress, DescriptorAddress);
-    }
-    case MetadataKind::Struct: {
-      auto StructMeta = cast<TargetStructMetadata<Runtime>>(Meta.get());
-
-      auto DescriptorAddress
-        = resolveRelativeOffset<StoredPointer>(MetadataAddress +
-                                        StructMeta->offsetToDescriptorOffset());
-      return getNominalTypeRef(MetadataAddress, DescriptorAddress);
-    }
+    case MetadataKind::Class:
+      return getNominalTypeRef(MetadataAddress);
+    case MetadataKind::Struct:
+      return getNominalTypeRef(MetadataAddress);
     case MetadataKind::Enum:
-    case MetadataKind::Optional: {
-      auto EnumMeta = cast<TargetEnumMetadata<Runtime>>(Meta.get());
-      auto DescriptorAddress
-        = resolveRelativeOffset<StoredPointer>(MetadataAddress +
-                                          EnumMeta->offsetToDescriptorOffset());
-      return getNominalTypeRef(MetadataAddress, DescriptorAddress);
-    }
+    case MetadataKind::Optional:
+      return getNominalTypeRef(MetadataAddress);
     case MetadataKind::Tuple: {
       auto TupleMeta = cast<TargetTupleTypeMetadata<Runtime>>(Meta.get());
       TypeRefVector Elements;
@@ -387,6 +499,8 @@ public:
       }
 
       auto Result = getTypeRef(Function->ResultType);
+      if (!Result)
+        return nullptr;
       return FunctionTypeRef::create(Arguments, Result);
     }
     case MetadataKind::Existential: {
@@ -434,8 +548,66 @@ public:
     }
   }
 
+  std::vector<std::pair<std::string, ConstTypeRefPointer>>
+  getFieldTypeRefs(TypeRefPointer TR) {
+    std::string MangledName;
+    if (auto N = dyn_cast<NominalTypeRef>(TR.get()))
+      MangledName = N->getMangledName();
+    else if (auto BG = dyn_cast<BoundGenericTypeRef>(TR.get()))
+      MangledName = BG->getMangledName();
+    else
+      return {};
+
+    auto Subs = TR->getSubstMap();
+
+    std::vector<std::pair<std::string, ConstTypeRefPointer>> Fields;
+    for (auto Info : ReflectionInfos) {
+      for (auto &FieldDescriptor : Info.fieldmd) {
+        auto CandidateMangledName = FieldDescriptor.MangledTypeName.get();
+        if (MangledName.compare(CandidateMangledName) != 0)
+          continue;
+        for (auto &Field : FieldDescriptor) {
+          auto Demangled
+          = Demangle::demangleTypeAsNode(Field.getMangledTypeName());
+          auto Unsubstituted = TypeRef::fromDemangleNode(Demangled);
+          if (!Unsubstituted)
+            return {};
+          auto Substituted = Unsubstituted->subst(*this, Subs);
+          Fields.push_back({Field.getFieldName(), Substituted});
+        }
+      }
+    }
+    return Fields;
+  }
+
+  std::vector<std::pair<std::string, ConstTypeRefPointer>>
+  getFieldTypeRefs(StoredPointer MetadataAddress) {
+    auto Meta = readMetadata(MetadataAddress);
+    if (!Meta)
+      return {};
+
+    StoredPointer DescriptorAddress;
+    SharedTargetNominalTypeDescriptorRef<Runtime> Descriptor;
+    std::tie(Descriptor, DescriptorAddress)
+      = readNominalTypeDescriptor(MetadataAddress);
+    if (!Descriptor)
+      return {};
+
+    auto NameAddress
+      = resolveRelativeOffset<int32_t>(DescriptorAddress +
+                                       Descriptor->offsetToNameOffset());
+    auto MangledName = Reader.readString(NameAddress);
+    if (MangledName.empty())
+      return {};
+
+    auto TR = getTypeRef(MetadataAddress);
+    return getFieldTypeRefs(TR);
+  }
+
   void clear() {
     TypeRefCache.clear();
+    MetadataCache.clear();
+    NominalTypeDescriptorCache.clear();
   }
 
   void addReflectionInfo(ReflectionInfo I) {

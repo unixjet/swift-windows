@@ -285,119 +285,6 @@ static bool isNSDictionaryMethod(const clang::ObjCMethodDecl *MD,
   return true;
 }
 
-/// Build the \c rawValue property trivial getter for an option set or
-/// unknown enum.
-///
-/// \code
-/// struct NSSomeOptionSet : OptionSetType {
-///   let rawValue: Raw
-/// }
-/// \endcode
-static FuncDecl *makeRawValueTrivialGetter(ClangImporter::Implementation &Impl,
-                                           StructDecl *optionSetDecl,
-                                           ValueDecl *rawDecl) {
-  ASTContext &C = Impl.SwiftContext;
-  auto rawType = rawDecl->getType();
-
-  auto *selfDecl = ParamDecl::createSelf(SourceLoc(), optionSetDecl);
-
-  ParameterList *params[] = {
-    ParameterList::createWithoutLoc(selfDecl),
-    ParameterList::createEmpty(C)
-  };
-
-  Type toRawType = ParameterList::getFullType(rawType, params);
-  FuncDecl *getterDecl = FuncDecl::create(
-      C, SourceLoc(), StaticSpellingKind::None, SourceLoc(),
-      DeclName(), SourceLoc(), SourceLoc(), SourceLoc(), nullptr, toRawType,
-                                          params,
-      TypeLoc::withoutLoc(rawType), optionSetDecl);
-  getterDecl->setImplicit();
-  
-  getterDecl->setBodyResultType(rawType);
-  getterDecl->setAccessibility(Accessibility::Public);
-
-  // Don't bother synthesizing the body if we've already finished type-checking.
-  if (Impl.hasFinishedTypeChecking())
-    return getterDecl;
-
-  auto selfRef = new (C) DeclRefExpr(selfDecl, DeclNameLoc(), /*implicit*/ true);
-  auto valueRef = new (C) MemberRefExpr(selfRef, SourceLoc(),
-                                        rawDecl, DeclNameLoc(),
-                                        /*implicit*/ true);
-  auto valueRet = new (C) ReturnStmt(SourceLoc(), valueRef);
-  
-  auto body = BraceStmt::create(C, SourceLoc(), ASTNode(valueRet),
-                                SourceLoc(),
-                                /*implicit*/ true);
-  getterDecl->setBody(body);
-  
-  C.addExternalDecl(getterDecl);
-
-  return getterDecl;
-}
-
-/// Build the \c rawValue property trivial setter for an unknown enum.
-///
-/// \code
-/// struct SomeRandomCEnum {
-///   var rawValue: Raw
-/// }
-/// \endcode
-static FuncDecl *makeRawValueTrivialSetter(ClangImporter::Implementation &Impl,
-                                           StructDecl *importedDecl,
-                                           ValueDecl *rawDecl) {
-  // FIXME: Largely duplicated from the type checker.
-  ASTContext &C = Impl.SwiftContext;
-  auto rawType = rawDecl->getType();
-
-  auto *selfDecl = ParamDecl::createSelf(SourceLoc(), importedDecl,
-                                         /*static*/false, /*inout*/true);
-  auto *newValueDecl = new (C) ParamDecl(/*IsLet*/true, SourceLoc(),SourceLoc(),
-                                         Identifier(), SourceLoc(),
-                                         C.Id_value, rawType, importedDecl);
-  newValueDecl->setImplicit();
-  
-  ParameterList *params[] = {
-    ParameterList::createWithoutLoc(selfDecl),
-    ParameterList::createWithoutLoc(newValueDecl)
-  };
-  
-  Type voidTy = TupleType::getEmpty(C);
-  FuncDecl *setterDecl = FuncDecl::create(
-      C, SourceLoc(), StaticSpellingKind::None, SourceLoc(),
-      DeclName(), SourceLoc(), SourceLoc(), SourceLoc(), nullptr, Type(), params,
-      TypeLoc::withoutLoc(voidTy), importedDecl);
-  setterDecl->setImplicit();
-  setterDecl->setMutating();
-  
-  setterDecl->setType(ParameterList::getFullType(voidTy, params));
-  setterDecl->setBodyResultType(voidTy);
-  setterDecl->setAccessibility(Accessibility::Public);
-
-  // Don't bother synthesizing the body if we've already finished type-checking.
-  if (Impl.hasFinishedTypeChecking())
-    return setterDecl;
-
-  auto selfRef = new (C) DeclRefExpr(selfDecl, DeclNameLoc(), /*implicit*/ true);
-  auto dest = new (C) MemberRefExpr(selfRef, SourceLoc(), rawDecl, DeclNameLoc(),
-                                    /*implicit*/ true);
-
-  auto paramRef = new (C) DeclRefExpr(newValueDecl, DeclNameLoc(),
-                                      /*implicit*/true);
-
-  auto assign = new (C) AssignExpr(dest, SourceLoc(), paramRef,
-                                   /*implicit*/true);
-
-  auto body = BraceStmt::create(C, SourceLoc(), { assign }, SourceLoc(),
-                                /*implicit*/ true);
-  setterDecl->setBody(body);
-
-  C.addExternalDecl(setterDecl);
-
-  return setterDecl;
-}
-
 // Build the init(rawValue:) initializer for an imported NS_ENUM.
 //   enum NSSomeEnum: RawType {
 //     init?(rawValue: RawType) {
@@ -630,6 +517,7 @@ makeUnionFieldAccessors(ClangImporter::Implementation &Impl,
     auto body = BraceStmt::create(C, SourceLoc(), ASTNode(ret), SourceLoc(),
                                   /*implicit*/ true);
     getterDecl->setBody(body);
+    getterDecl->getAttrs().add(new (C) TransparentAttr(/*implicit*/ true));
     C.addExternalDecl(getterDecl);
   }
 
@@ -664,6 +552,7 @@ makeUnionFieldAccessors(ClangImporter::Implementation &Impl,
     auto body = BraceStmt::create(C, SourceLoc(), { initialize }, SourceLoc(),
                                   /*implicit*/ true);
     setterDecl->setBody(body);
+    setterDecl->getAttrs().add(new (C) TransparentAttr(/*implicit*/ true));
     C.addExternalDecl(setterDecl);
   }
 
@@ -1200,7 +1089,7 @@ static bool addErrorDomain(NominalTypeDecl *swiftDecl,
   // Make the property decl
   auto errorDomainPropertyDecl = new (swiftCtx) VarDecl(
       isStatic,
-      /*isLet=*/false, noLoc, swiftCtx.Id_NSErrorDomain, stringTy, swiftDecl);
+      /*isLet=*/false, noLoc, swiftCtx.Id_nsErrorDomain, stringTy, swiftDecl);
   errorDomainPropertyDecl->setAccessibility(Accessibility::Public);
 
   swiftDecl->addMember(errorDomainPropertyDecl);
@@ -1456,22 +1345,18 @@ namespace {
                               Impl.importSourceLoc(Decl->getLocation()),
                               TypeLoc::withoutLoc(
                                 primary->getDeclaredInterfaceType()),
-                              DC);
+                              /*genericparams*/nullptr, DC);
             aliasRef->computeType();
 
             // Record this as the alternate declaration.
             Impl.AlternateDecls[primary] = aliasRef;
 
-            // The "Ref" variants are deprecated and will be
-            // removed. Stage their removal via
-            // -enable-omit-needless-words.
+            // The "Ref" variants have been removed.
             auto attr = AvailableAttr::createUnconditional(
                           Impl.SwiftContext,
                           "",
                           primary->getName().str(),
-                          Impl.OmitNeedlessWords
-                            ? UnconditionalAvailabilityKind::UnavailableInSwift
-                            : UnconditionalAvailabilityKind::Deprecated);
+                          UnconditionalAvailabilityKind::UnavailableInSwift);
             aliasRef->getAttrs().add(attr);
           };
 
@@ -1504,7 +1389,7 @@ namespace {
                             Impl.importSourceLoc(Decl->getLocation()),
                             TypeLoc::withoutLoc(
                               underlying->getDeclaredInterfaceType()),
-                            DC);
+                            /*genericparams*/nullptr, DC);
               typealias->computeType();
 
               Impl.SpecialTypedefNames[Decl->getCanonicalDecl()] =
@@ -1530,7 +1415,7 @@ namespace {
                             Impl.importSourceLoc(Decl->getLocation()),
                             TypeLoc::withoutLoc(
                               proto->getDeclaredInterfaceType()),
-                            DC);
+                            /*genericparams*/nullptr, DC);
               typealias->computeType();
 
               Impl.SpecialTypedefNames[Decl->getCanonicalDecl()] =
@@ -1591,7 +1476,7 @@ namespace {
                                       Name,
                                       Loc,
                                       TypeLoc::withoutLoc(SwiftType),
-                                      DC);
+                                      /*genericparams*/nullptr, DC);
       Result->computeType();
       return Result;
     }
@@ -1911,7 +1796,7 @@ namespace {
       // Note that this is a raw option set type.
       structDecl->getAttrs().add(
         new (Impl.SwiftContext) SynthesizedProtocolAttr(
-                                  KnownProtocolKind::OptionSetType));
+                                  KnownProtocolKind::OptionSet));
 
       
       // Create a field to store the underlying value.
@@ -1939,9 +1824,9 @@ namespace {
                                 /*wantCtorParamNames=*/true,
                                 /*wantBody=*/!Impl.hasFinishedTypeChecking());
 
-      // Build an OptionSetType conformance for the type.
+      // Build an OptionSet conformance for the type.
       ProtocolDecl *protocols[]
-        = {cxt.getProtocol(KnownProtocolKind::OptionSetType)};
+        = {cxt.getProtocol(KnownProtocolKind::OptionSet)};
       populateInheritedTypes(structDecl, protocols);
 
       structDecl->addMember(labeledValueConstructor);
@@ -2032,17 +1917,7 @@ namespace {
                                    /*wantCtorParamNames=*/true,
                                    /*wantBody=*/!Impl.hasFinishedTypeChecking());
 
-        // Add delayed implicit members to the type.
-        auto &Impl = this->Impl;
-        structDecl->setDelayedMemberDecls(
-            [=, &Impl](SmallVectorImpl<Decl *> &NewDecls) {
-              auto rawGetter = makeRawValueTrivialGetter(Impl, structDecl, var);
-              NewDecls.push_back(rawGetter);
-              auto rawSetter = makeRawValueTrivialSetter(Impl, structDecl, var);
-              NewDecls.push_back(rawSetter);
-              // FIXME: MaterializeForSet?
-              var->addTrivialAccessors(rawGetter, rawSetter, nullptr);
-            });
+        structDecl->setHasDelayedMembers();
 
         // Set the members of the struct.
         structDecl->addMember(valueConstructor);

@@ -744,7 +744,7 @@ static void findDynamicValueAndType(OpaqueValue *value, const Metadata *type,
     }
     
     case ExistentialTypeRepresentation::Opaque:
-    case ExistentialTypeRepresentation::ErrorType: {
+    case ExistentialTypeRepresentation::ErrorProtocol: {
       OpaqueValue *innerValue
         = existentialType->projectValue(value);
       const Metadata *innerType = existentialType->getDynamicType(value);
@@ -800,7 +800,7 @@ static void deallocateDynamicValue(OpaqueValue *value, const Metadata *type) {
       // Nothing to clean up.
       break;
       
-    case ExistentialTypeRepresentation::ErrorType:
+    case ExistentialTypeRepresentation::ErrorProtocol:
       // TODO: We could clean up from a reclaimed uniquely-referenced error box.
       break;
       
@@ -1051,10 +1051,10 @@ static bool _dynamicCastToExistential(OpaqueValue *dest,
     maybeDeallocateSourceAfterSuccess();
     return true;
   }
-  case ExistentialTypeRepresentation::ErrorType: {
+  case ExistentialTypeRepresentation::ErrorProtocol: {
     auto destBoxAddr =
       reinterpret_cast<SwiftError**>(dest);
-    // Check for the ErrorType protocol conformance, which should be the only
+    // Check for the ErrorProtocol protocol conformance, which should be the only
     // one we need.
     assert(targetType->Protocols.NumProtocols == 1);
     const WitnessTable *errorWitness;
@@ -1491,13 +1491,13 @@ static bool _dynamicCastUnknownClassIndirect(OpaqueValue *dest,
 }
 
 #if SWIFT_OBJC_INTEROP
-extern "C" const ProtocolDescriptor _TMps9ErrorType;
+extern "C" const ProtocolDescriptor _TMps13ErrorProtocol;
 
-static const WitnessTable *findErrorTypeWitness(const Metadata *srcType) {
-  return swift_conformsToProtocol(srcType, &_TMps9ErrorType);
+static const WitnessTable *findErrorProtocolWitness(const Metadata *srcType) {
+  return swift_conformsToProtocol(srcType, &_TMps13ErrorProtocol);
 }
 
-static const Metadata *getNSErrorTypeMetadata() {
+static const Metadata *getNSErrorProtocolMetadata() {
   return SWIFT_LAZY_CONSTANT(
     swift_getObjCClassMetadata((const ClassMetadata *)getNSErrorClass()));
 }
@@ -1518,7 +1518,7 @@ static bool _dynamicCastToUnknownClassFromExistential(OpaqueValue *dest,
 #if SWIFT_OBJC_INTEROP
     // If we're casting to NSError, we may need a representation change,
     // so fall into the general swift_dynamicCast path.
-    if (targetType == getNSErrorTypeMetadata()) {
+    if (targetType == getNSErrorProtocolMetadata()) {
       return swift_dynamicCast(dest, src, swift_getObjectType((HeapObject*)obj),
                                targetType, flags);
     }
@@ -1540,7 +1540,7 @@ static bool _dynamicCastToUnknownClassFromExistential(OpaqueValue *dest,
       _maybeDeallocateOpaqueExistential(src, result, flags);
     return result;
   }
-  case ExistentialTypeRepresentation::ErrorType: {
+  case ExistentialTypeRepresentation::ErrorProtocol: {
     const SwiftError *errorBox =
       *reinterpret_cast<const SwiftError * const *>(src);
     auto srcCapturedType = errorBox->getType();
@@ -1597,7 +1597,7 @@ static bool _dynamicCastFromExistential(OpaqueValue *dest,
     canTake = true;
     break;
   }
-  case ExistentialTypeRepresentation::ErrorType: {
+  case ExistentialTypeRepresentation::ErrorProtocol: {
     const SwiftError *errorBox
       = *reinterpret_cast<const SwiftError * const *>(src);
     
@@ -1726,7 +1726,7 @@ static bool _dynamicCastToMetatype(OpaqueValue *dest,
         _maybeDeallocateOpaqueExistential(src, result, flags);
       return result;
     }
-    case ExistentialTypeRepresentation::ErrorType: {
+    case ExistentialTypeRepresentation::ErrorProtocol: {
       const SwiftError *srcBox
         = *reinterpret_cast<const SwiftError * const *>(src);
       
@@ -1896,7 +1896,7 @@ static bool _dynamicCastToExistentialMetatype(OpaqueValue *dest,
         _maybeDeallocateOpaqueExistential(src, result, flags);
       return result;
     }
-    case ExistentialTypeRepresentation::ErrorType: {
+    case ExistentialTypeRepresentation::ErrorProtocol: {
       const SwiftError *srcBox
         = *reinterpret_cast<const SwiftError * const *>(src);
       
@@ -2011,11 +2011,11 @@ static bool _dynamicCastToFunction(OpaqueValue *dest,
 #if SWIFT_OBJC_INTEROP
 static id dynamicCastValueToNSError(OpaqueValue *src,
                                     const Metadata *srcType,
-                                    const WitnessTable *srcErrorTypeWitness,
+                                    const WitnessTable *srcErrorProtocolWitness,
                                     DynamicCastFlags flags) {
-  BoxPair errorBox = swift_allocError(srcType, srcErrorTypeWitness, src,
+  BoxPair errorBox = swift_allocError(srcType, srcErrorProtocolWitness, src,
                             /*isTake*/ flags & DynamicCastFlags::TakeOnSuccess);
-  return swift_bridgeErrorTypeToNSError((SwiftError*)errorBox.first);
+  return swift_bridgeErrorProtocolToNSError((SwiftError*)errorBox.first);
 }
 #endif
 
@@ -2061,12 +2061,12 @@ checkDynamicCastFromOptional(OpaqueValue *dest,
   int enumCase =
     swift_getEnumCaseSinglePayload(src, payloadType, 1 /*emptyCases=*/);
   if (enumCase != -1) {
-    // Allow Optional<T>.None -> Optional<U>.None
+    // Allow Optional<T>.none -> Optional<U>.none
     if (targetType->getKind() != MetadataKind::Optional) {
       _fail(src, srcType, targetType, flags);
       return {false, nullptr};
     }
-    // Inject the .None tag
+    // Inject the .none tag
     swift_storeEnumTagSinglePayload(dest, payloadType, enumCase,
                                     1 /*emptyCases=*/);
     _succeed(dest, src, srcType, flags);
@@ -2095,6 +2095,13 @@ bool swift::swift_dynamicCast(OpaqueValue *dest,
   switch (targetType->getKind()) {
   // Handle wrapping an Optional target.
   case MetadataKind::Optional: {
+    // If the source is an existential, attempt to cast it first without
+    // unwrapping the target. This handles an optional source wrapped within an
+    // existential that Optional conforms to (Any).
+    if (auto srcExistentialType = dyn_cast<ExistentialTypeMetadata>(srcType)) {
+      return _dynamicCastFromExistential(dest, src, srcExistentialType,
+                                         targetType, flags);
+    }
     // Recursively cast into the layout compatible payload area.
     const Metadata *payloadType =
       cast<EnumMetadata>(targetType)->getGenericArgs()[0];
@@ -2111,16 +2118,16 @@ bool swift::swift_dynamicCast(OpaqueValue *dest,
   case MetadataKind::ObjCClassWrapper:
 #if SWIFT_OBJC_INTEROP
     // If the destination type is an NSError, and the source type is an
-    // ErrorType, then the cast can succeed by NSError bridging.
-    if (targetType == getNSErrorTypeMetadata()) {
+    // ErrorProtocol, then the cast can succeed by NSError bridging.
+    if (targetType == getNSErrorProtocolMetadata()) {
       // Don't rebridge if the source is already some kind of NSError.
       if (srcType->isAnyClass()
           && swift_dynamicCastObjCClass(*reinterpret_cast<id*>(src),
                static_cast<const ObjCClassWrapperMetadata*>(targetType)->Class))
         return _succeed(dest, src, srcType, flags);
-      if (auto srcErrorTypeWitness = findErrorTypeWitness(srcType)) {
+      if (auto srcErrorProtocolWitness = findErrorProtocolWitness(srcType)) {
         auto error = dynamicCastValueToNSError(src, srcType,
-                                               srcErrorTypeWitness, flags);
+                                               srcErrorProtocolWitness, flags);
         *reinterpret_cast<id *>(dest) = error;
         return true;
       }
@@ -2210,8 +2217,8 @@ bool swift::swift_dynamicCast(OpaqueValue *dest,
                                                          flags);
       }
       
-      // If the source is an NSError, and the target is a bridgeable ErrorType,
-      // try to bridge.
+      // If the source is an NSError, and the target is a bridgeable
+      // ErrorProtocol, try to bridge.
       if (tryDynamicCastNSErrorToValue(dest, src, srcType, targetType, flags)) {
         return true;
       }
@@ -2288,31 +2295,38 @@ namespace {
 
 // protocol _ObjectiveCBridgeable {
 struct _ObjectiveCBridgeableWitnessTable {
-  // typealias _ObjectiveCType : class
-  const Metadata *ObjectiveCType;
+  // associatedtype _ObjectiveCType : class
+  const Metadata * (*ObjectiveCType)(
+                     const Metadata *parentMetadata,
+                     const _ObjectiveCBridgeableWitnessTable *witnessTable);
 
   // class func _isBridgedToObjectiveC() -> bool
-  bool (*isBridgedToObjectiveC)(const Metadata *value, const Metadata *T);
-
-  // class func _getObjectiveCType() -> Any.Type
-  const Metadata *(*getObjectiveCType)(const Metadata *self,
-                                       const Metadata *selfType);
+  bool (*isBridgedToObjectiveC)(
+         const Metadata *value, const Metadata *T,
+         const _ObjectiveCBridgeableWitnessTable *witnessTable);
 
   // func _bridgeToObjectiveC() -> _ObjectiveCType
-  HeapObject *(*bridgeToObjectiveC)(OpaqueValue *self, const Metadata *Self);
+  HeapObject *(*bridgeToObjectiveC)(
+                OpaqueValue *self, const Metadata *Self,
+                const _ObjectiveCBridgeableWitnessTable *witnessTable);
+
   // class func _forceBridgeFromObjectiveC(x: _ObjectiveCType,
   //                                       inout result: Self?)
-  void (*forceBridgeFromObjectiveC)(HeapObject *sourceValue,
-                                    OpaqueValue *result,
-                                    const Metadata *self,
-                                    const Metadata *selfType);
+  void (*forceBridgeFromObjectiveC)(
+         HeapObject *sourceValue,
+         OpaqueValue *result,
+         const Metadata *self,
+         const Metadata *selfType,
+         const _ObjectiveCBridgeableWitnessTable *witnessTable);
 
   // class func _conditionallyBridgeFromObjectiveC(x: _ObjectiveCType,
   //                                              inout result: Self?) -> Bool
-  bool (*conditionallyBridgeFromObjectiveC)(HeapObject *sourceValue,
-                                            OpaqueValue *result,
-                                            const Metadata *self,
-                                            const Metadata *selfType);
+  bool (*conditionallyBridgeFromObjectiveC)(
+         HeapObject *sourceValue,
+         OpaqueValue *result,
+         const Metadata *self,
+         const Metadata *selfType,
+         const _ObjectiveCBridgeableWitnessTable *witnessTable);
 };
 // }
 
@@ -2332,12 +2346,14 @@ static bool _dynamicCastValueToClassViaObjCBridgeable(
                const _ObjectiveCBridgeableWitnessTable *srcBridgeWitness,
                DynamicCastFlags flags) {
   // Check whether the source is bridged to Objective-C.
-  if (!srcBridgeWitness->isBridgedToObjectiveC(srcType, srcType)) {
+  if (!srcBridgeWitness->isBridgedToObjectiveC(srcType, srcType,
+                                               srcBridgeWitness)) {
     return _fail(src, srcType, targetType, flags);
   }
 
   // Bridge the source value to an object.
-  auto srcBridgedObject = srcBridgeWitness->bridgeToObjectiveC(src, srcType);
+  auto srcBridgedObject =
+    srcBridgeWitness->bridgeToObjectiveC(src, srcType, srcBridgeWitness);
 
   // Dynamic cast the object to the resulting class type.
   bool success;
@@ -2371,12 +2387,14 @@ static bool _dynamicCastValueToClassExistentialViaObjCBridgeable(
               const _ObjectiveCBridgeableWitnessTable *srcBridgeWitness,
               DynamicCastFlags flags) {
   // Check whether the source is bridged to Objective-C.
-  if (!srcBridgeWitness->isBridgedToObjectiveC(srcType, srcType)) {
+  if (!srcBridgeWitness->isBridgedToObjectiveC(srcType, srcType,
+                                               srcBridgeWitness)) {
     return _fail(src, srcType, targetType, flags);
   }
 
   // Bridge the source value to an object.
-  auto srcBridgedObject = srcBridgeWitness->bridgeToObjectiveC(src, srcType);
+  auto srcBridgedObject =
+    srcBridgeWitness->bridgeToObjectiveC(src, srcType, srcBridgeWitness);
 
   // Try to cast the object to the destination existential.
   DynamicCastFlags subFlags = DynamicCastFlags::TakeOnSuccess
@@ -2411,13 +2429,14 @@ static bool _dynamicCastClassToValueViaObjCBridgeable(
                const _ObjectiveCBridgeableWitnessTable *targetBridgeWitness,
                DynamicCastFlags flags) {
   // Check whether the target is bridged to Objective-C.
-  if (!targetBridgeWitness->isBridgedToObjectiveC(targetType, targetType)) {
+  if (!targetBridgeWitness->isBridgedToObjectiveC(targetType, targetType,
+                                                  targetBridgeWitness)) {
     return _fail(src, srcType, targetType, flags);
   }
 
   // Determine the class type to which the target value type is bridged.
-  auto targetBridgedClass = targetBridgeWitness->getObjectiveCType(targetType,
-                                                                   targetType);
+  auto targetBridgedClass =
+    targetBridgeWitness->ObjectiveCType(targetType, targetBridgeWitness);
 
   // Dynamic cast the source object to the class type to which the target value
   // type is bridged. If we succeed, we can bridge from there; if we fail,
@@ -2467,13 +2486,13 @@ static bool _dynamicCastClassToValueViaObjCBridgeable(
     // For an unconditional dynamic cast, use forceBridgeFromObjectiveC.
     targetBridgeWitness->forceBridgeFromObjectiveC(
       (HeapObject *)srcObject, (OpaqueValue *)optDestBuffer,
-      targetType, targetType);
+      targetType, targetType, targetBridgeWitness);
     success = true;
   } else {
     // For a conditional dynamic cast, use conditionallyBridgeFromObjectiveC.
     success = targetBridgeWitness->conditionallyBridgeFromObjectiveC(
                 (HeapObject *)srcObject, (OpaqueValue *)optDestBuffer,
-                targetType, targetType);
+                targetType, targetType, targetBridgeWitness);
   }
 
   // If we succeeded, take from the optional buffer into the
@@ -2549,12 +2568,12 @@ extern "C" HeapObject *swift_bridgeNonVerbatimToObjectiveC(
   assert(!swift_isClassOrObjCExistentialTypeImpl(T));
 
   if (const auto *bridgeWitness = findBridgeWitness(T)) {
-    if (!bridgeWitness->isBridgedToObjectiveC(T, T)) {
+    if (!bridgeWitness->isBridgedToObjectiveC(T, T, bridgeWitness)) {
       // Witnesses take 'self' at +0, so we still need to consume the +1 argument.
       T->vw_destroy(value);
       return nullptr;
     }
-    auto result = bridgeWitness->bridgeToObjectiveC(value, T);
+    auto result = bridgeWitness->bridgeToObjectiveC(value, T, bridgeWitness);
     // Witnesses take 'self' at +0, so we still need to consume the +1 argument.
     T->vw_destroy(value);
     return result;
@@ -2575,7 +2594,7 @@ extern "C" const Metadata *swift_getBridgedNonVerbatimObjectiveCType(
   // Check if the type conforms to _BridgedToObjectiveC, in which case
   // we'll extract its associated type.
   if (const auto *bridgeWitness = findBridgeWitness(T)) {
-    return bridgeWitness->getObjectiveCType(T, T);
+    return bridgeWitness->ObjectiveCType(T, bridgeWitness);
   }
   
   return nullptr;
@@ -2599,11 +2618,12 @@ swift_bridgeNonVerbatimFromObjectiveC(
   if (const auto *bridgeWitness = findBridgeWitness(nativeType)) {
     // if the type also conforms to _ConditionallyBridgedToObjectiveC,
     // make sure it bridges at runtime
-    if (bridgeWitness->isBridgedToObjectiveC(nativeType, nativeType)) {
+    if (bridgeWitness->isBridgedToObjectiveC(nativeType, nativeType,
+                                             bridgeWitness)) {
       // Check if sourceValue has the _ObjectiveCType type required by the
       // protocol.
       const Metadata *objectiveCType =
-          bridgeWitness->getObjectiveCType(nativeType, nativeType);
+          bridgeWitness->ObjectiveCType(nativeType, bridgeWitness);
         
       auto sourceValueAsObjectiveCType =
           const_cast<void*>(swift_dynamicCastUnknownClass(sourceValue,
@@ -2614,7 +2634,7 @@ swift_bridgeNonVerbatimFromObjectiveC(
         // we can just return it directly.
         bridgeWitness->forceBridgeFromObjectiveC(
           static_cast<HeapObject*>(sourceValueAsObjectiveCType),
-          destValue, nativeType, nativeType);
+          destValue, nativeType, nativeType, bridgeWitness);
         return;
       }
     }
@@ -2652,7 +2672,7 @@ swift_bridgeNonVerbatimFromObjectiveCConditional(
   // Dig out the Objective-C class type through which the native type
   // is bridged.
   const Metadata *objectiveCType =
-    bridgeWitness->getObjectiveCType(nativeType, nativeType);
+    bridgeWitness->ObjectiveCType(nativeType, bridgeWitness);
         
   // Check whether we can downcast the source value to the Objective-C
   // type.
@@ -2666,7 +2686,7 @@ swift_bridgeNonVerbatimFromObjectiveCConditional(
   // use conditional bridging.
   return bridgeWitness->conditionallyBridgeFromObjectiveC(
     static_cast<HeapObject*>(sourceValueAsObjectiveCType),
-    destValue, nativeType, nativeType);
+    destValue, nativeType, nativeType, bridgeWitness);
 }
 
 // func isBridgedNonVerbatimToObjectiveC<T>(x: T.Type) -> Bool
@@ -2677,7 +2697,8 @@ extern "C" bool swift_isBridgedNonVerbatimToObjectiveC(
   assert(!swift_isClassOrObjCExistentialTypeImpl(T));
 
   auto bridgeWitness = findBridgeWitness(T);
-  return bridgeWitness && bridgeWitness->isBridgedToObjectiveC(value, T);
+  return bridgeWitness && bridgeWitness->isBridgedToObjectiveC(value, T,
+                                                               bridgeWitness);
 }
 #endif
 

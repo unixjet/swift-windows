@@ -1770,37 +1770,6 @@ llvm::Value *irgen::emitClassHeapMetadataRef(IRGenFunction &IGF, CanType type,
   return result;
 }
 
-namespace {
-  /// A CRTP type visitor for deciding whether the metatype for a type
-  /// has trivial representation.
-  struct HasTrivialMetatype : CanTypeVisitor<HasTrivialMetatype, bool> {
-    /// Class metatypes have non-trivial representation due to the
-    /// possibility of subclassing.
-    bool visitClassType(CanClassType type) {
-      return false;
-    }
-    bool visitBoundGenericClassType(CanBoundGenericClassType type) {
-      return false;
-    }
-
-    /// Archetype metatypes have non-trivial representation in case
-    /// they instantiate to a class metatype.
-    bool visitArchetypeType(CanArchetypeType type) {
-      return false;
-    }
-    
-    /// All levels of class metatypes support subtyping.
-    bool visitMetatypeType(CanMetatypeType type) {
-      return visit(type.getInstanceType());
-    }
-
-    /// Everything else is trivial.
-    bool visitType(CanType type) {
-      return false;
-    }
-  };
-}
-
 /// Emit a metatype value for a known type.
 void irgen::emitMetatypeRef(IRGenFunction &IGF, CanMetatypeType type,
                             Explosion &explosion) {
@@ -3977,6 +3946,8 @@ static llvm::Value *emitLoadOfObjCHeapMetadataRef(IRGenFunction &IGF,
     metadata = IGF.Builder.CreateAnd(metadata, mask);
     metadata = IGF.Builder.CreateIntToPtr(metadata, IGF.IGM.TypeMetadataPtrTy);
     return metadata;
+  } else if (IGF.IGM.TargetInfo.hasOpaqueISAs()) {
+    return emitHeapMetadataRefForUnknownHeapObject(IGF, object);
   } else {
     object = IGF.Builder.CreateBitCast(object,
                                   IGF.IGM.TypeMetadataPtrTy->getPointerTo());
@@ -4852,13 +4823,13 @@ SpecialProtocol irgen::getSpecialProtocolID(ProtocolDecl *P) {
   switch (*known) {
   case KnownProtocolKind::AnyObject:
     return SpecialProtocol::AnyObject;
-  case KnownProtocolKind::ErrorType:
-    return SpecialProtocol::ErrorType;
+  case KnownProtocolKind::ErrorProtocol:
+    return SpecialProtocol::ErrorProtocol;
     
   // The other known protocols aren't special at runtime.
-  case KnownProtocolKind::SequenceType:
-  case KnownProtocolKind::GeneratorType:
-  case KnownProtocolKind::BooleanType:
+  case KnownProtocolKind::Sequence:
+  case KnownProtocolKind::IteratorProtocol:
+  case KnownProtocolKind::Boolean:
   case KnownProtocolKind::RawRepresentable:
   case KnownProtocolKind::Equatable:
   case KnownProtocolKind::Hashable:
@@ -4885,7 +4856,7 @@ SpecialProtocol irgen::getSpecialProtocolID(ProtocolDecl *P) {
   case KnownProtocolKind::BuiltinStringLiteralConvertible:
   case KnownProtocolKind::BuiltinUTF16StringLiteralConvertible:
   case KnownProtocolKind::BuiltinUnicodeScalarLiteralConvertible:
-  case KnownProtocolKind::OptionSetType:
+  case KnownProtocolKind::OptionSet:
   case KnownProtocolKind::BridgedNSError:
     return SpecialProtocol::None;
   }
@@ -5049,7 +5020,9 @@ void IRGenModule::emitProtocolDecl(ProtocolDecl *protocol) {
     return;
   }
 
-  auto *defaultWitnesses = SILMod->lookUpDefaultWitnessTable(protocol);
+  SILDefaultWitnessTable *defaultWitnesses = nullptr;
+  if (!protocol->hasFixedLayout())
+    defaultWitnesses = SILMod->lookUpDefaultWitnessTable(protocol);
   ProtocolDescriptorBuilder builder(*this, protocol, defaultWitnesses);
   builder.layout();
 

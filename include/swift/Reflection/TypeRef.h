@@ -19,6 +19,7 @@
 #define SWIFT_REFLECTION_TYPEREF_H
 
 #include "swift/Basic/Demangle.h"
+#include "llvm/ADT/DenseMap.h"
 #include "llvm/Support/Casting.h"
 
 #include <iostream>
@@ -27,6 +28,11 @@ class NodePointer;
 
 namespace swift {
 namespace reflection {
+
+template <typename Runtime>
+class ReflectionContext;
+
+struct ReflectionInfo;
 
 using llvm::cast;
 using llvm::dyn_cast;
@@ -42,6 +48,8 @@ using TypeRefPointer = std::shared_ptr<TypeRef>;
 using ConstTypeRefPointer = std::shared_ptr<const TypeRef>;
 using TypeRefVector = std::vector<TypeRefPointer>;
 using ConstTypeRefVector = const std::vector<TypeRefPointer>;
+using DepthAndIndex = std::pair<unsigned, unsigned>;
+using GenericArgumentMap = llvm::DenseMap<DepthAndIndex, TypeRefPointer>;
 
 class TypeRef : public std::enable_shared_from_this<TypeRef> {
   TypeRefKind Kind;
@@ -56,7 +64,14 @@ public:
   void dump() const;
   void dump(std::ostream &OS, unsigned Indent = 0) const;
 
-  TypeRefPointer substituteGenerics(ConstTypeRefVector &Substitutions);
+  bool isConcrete() const;
+
+  template <typename Runtime>
+  TypeRefPointer
+  subst(ReflectionContext<Runtime> &RC, GenericArgumentMap Subs);
+
+  GenericArgumentMap getSubstMap() const;
+
   static TypeRefPointer fromDemangleNode(Demangle::NodePointer Node);
 };
 
@@ -71,7 +86,7 @@ public:
     return std::make_shared<BuiltinTypeRef>(MangledName);
   }
 
-  std::string getMangledName() const {
+  const std::string &getMangledName() const {
     return MangledName;
   }
 
@@ -80,52 +95,88 @@ public:
   }
 };
 
-class NominalTypeRef final : public TypeRef {
+class NominalTypeTrait {
   std::string MangledName;
 
 public:
-  NominalTypeRef(std::string MangledName)
-    : TypeRef(TypeRefKind::Nominal), MangledName(MangledName) {}
+  NominalTypeTrait(std::string MangledName) : MangledName(MangledName) {}
 
-  static std::shared_ptr<NominalTypeRef> create(std::string MangledName) {
-    return std::make_shared<NominalTypeRef>(MangledName);
-  }
-
-  std::string getMangledName() const {
+  const std::string &getMangledName() const {
     return MangledName;
   }
+
+  bool isStruct() const;
+  bool isEnum() const;
+  bool isClass() const;
+};
+
+class NominalTypeRef final : public TypeRef, public NominalTypeTrait {
+  TypeRefPointer Parent;
+
+public:
+  NominalTypeRef(std::string MangledName, TypeRefPointer Parent = nullptr)
+    : TypeRef(TypeRefKind::Nominal), NominalTypeTrait(MangledName),
+      Parent(Parent) {}
+
+  static std::shared_ptr<NominalTypeRef>
+  create(std::string MangledName, TypeRefPointer Parent = nullptr) {
+    return std::make_shared<NominalTypeRef>(MangledName, Parent);
+  }
+
+  ConstTypeRefPointer getParent() const {
+    return Parent;
+  }
+
+  TypeRefPointer getParent() {
+    return Parent;
+  }
+
+  void setParent(TypeRefPointer P) {
+    Parent = P;
+  }
+
+  unsigned getDepth() const;
 
   static bool classof(const TypeRef *TR) {
     return TR->getKind() == TypeRefKind::Nominal;
   }
 };
 
-class BoundGenericTypeRef final : public TypeRef {
-  std::string MangledName;
+class BoundGenericTypeRef final : public TypeRef, public NominalTypeTrait {
   TypeRefVector GenericParams;
+  TypeRefPointer Parent;
 
 public:
-  BoundGenericTypeRef(std::string MangledName, TypeRefVector GenericParams)
+  BoundGenericTypeRef(std::string MangledName, TypeRefVector GenericParams,
+                      TypeRefPointer Parent = nullptr)
     : TypeRef(TypeRefKind::BoundGeneric),
-      MangledName(MangledName),
-      GenericParams(GenericParams) {}
+      NominalTypeTrait(MangledName),
+      GenericParams(GenericParams),
+      Parent(Parent) {}
 
   static std::shared_ptr<BoundGenericTypeRef>
-  create(std::string MangledName, TypeRefVector GenericParams) {
-    return std::make_shared<BoundGenericTypeRef>(MangledName, GenericParams);
+  create(std::string MangledName, TypeRefVector GenericParams,
+         TypeRefPointer Parent = nullptr) {
+    return std::make_shared<BoundGenericTypeRef>(MangledName, GenericParams,
+                                                 Parent);
   }
 
-  std::string getMangledName() const {
-    return MangledName;
-  }
-
-  TypeRefVector getGenericParams() {
+  const TypeRefVector &getGenericParams() const {
     return GenericParams;
   }
-
-  ConstTypeRefVector getGenericParams() const {
-    return GenericParams;
+  ConstTypeRefPointer getParent() const {
+    return Parent;
   }
+
+  TypeRefPointer getParent() {
+    return Parent;
+  }
+
+  void setParent(TypeRefPointer P) {
+    Parent = P;
+  }
+
+  unsigned getDepth() const;
 
   static bool classof(const TypeRef *TR) {
     return TR->getKind() == TypeRefKind::BoundGeneric;
@@ -203,16 +254,24 @@ public:
     return std::make_shared<ProtocolTypeRef>(ModuleName, Name);
   }
 
-  std::string getName() const {
+  const std::string &getName() const {
     return Name;
   }
 
-  std::string getModuleName() const {
+  const std::string &getModuleName() const {
     return ModuleName;
   }
 
   static bool classof(const TypeRef *TR) {
     return TR->getKind() == TypeRefKind::Protocol;
+  }
+
+  bool operator==(const ProtocolTypeRef &Other) {
+    return ModuleName.compare(Other.ModuleName) == 0 &&
+           Name.compare(Other.Name) == 0;
+  }
+  bool operator!=(const ProtocolTypeRef &Other) {
+    return !(*this == Other);
   }
 };
 
@@ -290,24 +349,24 @@ public:
 };
 
 class GenericTypeParameterTypeRef final : public TypeRef {
-  const uint32_t Index;
   const uint32_t Depth;
+  const uint32_t Index;
 
 public:
-  GenericTypeParameterTypeRef(uint32_t Index, uint32_t Depth)
-    : TypeRef(TypeRefKind::GenericTypeParameter), Index(Index), Depth(Depth) {}
+  GenericTypeParameterTypeRef(uint32_t Depth, uint32_t Index)
+    : TypeRef(TypeRefKind::GenericTypeParameter), Depth(Depth), Index(Index) {}
 
   static std::shared_ptr<GenericTypeParameterTypeRef>
-  create(uint32_t Index, uint32_t Depth) {
-    return std::make_shared<GenericTypeParameterTypeRef>(Index, Depth);
-  }
-
-  uint32_t getIndex() const {
-    return Index;
+  create(uint32_t Depth, uint32_t Index) {
+    return std::make_shared<GenericTypeParameterTypeRef>(Depth, Index);
   }
 
   uint32_t getDepth() const {
     return Depth;
+  }
+
+  uint32_t getIndex() const {
+    return Index;
   }
 
   static bool classof(const TypeRef *TR) {
@@ -316,22 +375,21 @@ public:
 };
 
 class DependentMemberTypeRef final : public TypeRef {
-  TypeRefPointer Member;
+  std::string Member;
   TypeRefPointer Base;
+  TypeRefPointer Protocol;
 
 public:
-  DependentMemberTypeRef(TypeRefPointer Member, TypeRefPointer Base)
-    : TypeRef(TypeRefKind::DependentMember), Member(Member), Base(Base) {}
+  DependentMemberTypeRef(std::string Member, TypeRefPointer Base,
+                         TypeRefPointer Protocol)
+    : TypeRef(TypeRefKind::DependentMember), Member(Member), Base(Base),
+      Protocol(Protocol) {}
   static std::shared_ptr<DependentMemberTypeRef>
-  create(TypeRefPointer Member, TypeRefPointer Base) {
-    return std::make_shared<DependentMemberTypeRef>(Member, Base);
+  create(std::string Member, TypeRefPointer Base, TypeRefPointer Protocol) {
+    return std::make_shared<DependentMemberTypeRef>(Member, Base, Protocol);
   }
 
-  TypeRefPointer getMember() {
-    return Member;
-  }
-
-  ConstTypeRefPointer getMember() const {
+  const std::string &getMember() const {
     return Member;
   }
 
@@ -343,28 +401,12 @@ public:
     return Base;
   }
 
+  const ProtocolTypeRef *getProtocol() const {
+    return cast<ProtocolTypeRef>(Protocol.get());
+  }
+
   static bool classof(const TypeRef *TR) {
     return TR->getKind() == TypeRefKind::DependentMember;
-  }
-};
-
-class AssociatedTypeRef final : public TypeRef {
-  std::string Name;
-
-public:
-  AssociatedTypeRef(std::string Name)
-    : TypeRef(TypeRefKind::Associated), Name(Name) {}
-
-  static std::shared_ptr<AssociatedTypeRef> create(std::string Name) {
-    return std::make_shared<AssociatedTypeRef>(Name);
-  }
-
-  std::string getName() const {
-    return Name;
-  }
-
-  static bool classof(const TypeRef *TR) {
-    return TR->getKind() == TypeRefKind::Associated;
   }
 };
 
@@ -375,7 +417,7 @@ public:
     : TypeRef(TypeRefKind::ForeignClass), Name(Name) {}
   static const std::shared_ptr<ForeignClassTypeRef> Unnamed;
 
-  std::string getName() const {
+  const std::string &getName() const {
     return Name;
   }
 
@@ -391,7 +433,7 @@ public:
     : TypeRef(TypeRefKind::ObjCClass), Name(Name) {}
   static const std::shared_ptr<ObjCClassTypeRef> Unnamed;
 
-  std::string getName() const {
+  const std::string &getName() const {
     return Name;
   }
 
@@ -425,156 +467,18 @@ public:
   }
 };
 
-class PrintTypeRef : public TypeRefVisitor<PrintTypeRef, void> {
-  std::ostream &OS;
-  unsigned Indent;
-
-  std::ostream &indent(unsigned Amount) {
-    for (unsigned i = 0; i < Amount; ++i)
-      OS << ' ';
-    return OS;
-  }
-
-  std::ostream &printHeader(std::string Name) {
-    indent(Indent) << '(' << Name;
-    return OS;
-  }
-
-  template<typename T>
-  std::ostream &printField(std::string name, const T &value) {
-    if (!name.empty())
-      OS << " " << name << "=" << value;
-    else
-      OS << " " << value;
-    return OS;
-  }
-
-  void printRec(const TypeRef *typeRef) {
-    OS << "\n";
-
-    if (typeRef == nullptr)
-      OS << "<<null>>";
-    else {
-      Indent += 2;
-      visit(typeRef);
-      Indent -=2;
-    }
-  }
-
-public:
-  PrintTypeRef(std::ostream &OS, unsigned Indent)
-    : OS(OS), Indent(Indent) {}
-
-  void visitBuiltinTypeRef(const BuiltinTypeRef *B) {
-    printHeader("builtin");
-    auto demangled = Demangle::demangleTypeAsString(B->getMangledName());
-    printField("", demangled);
-    OS << ')';
-  }
-
-  void visitNominalTypeRef(const NominalTypeRef *N) {
-    printHeader("nominal");
-    auto demangled = Demangle::demangleTypeAsString(N->getMangledName());
-    printField("", demangled);
-    OS << ')';
-  }
-
-  void visitBoundGenericTypeRef(const BoundGenericTypeRef *BG) {
-    printHeader("bound-generic");
-    auto demangled = Demangle::demangleTypeAsString(BG->getMangledName());
-    printField("", demangled);
-    for (auto param : BG->getGenericParams())
-      printRec(param.get());
-    OS << ')';
-  }
-
-  void visitTupleTypeRef(const TupleTypeRef *T) {
-    printHeader("tuple");
-    for (auto element : T->getElements())
-      printRec(element.get());
-    OS << ')';
-  }
-
-  void visitFunctionTypeRef(const FunctionTypeRef *F) {
-    printHeader("function");
-    for (auto Arg : F->getArguments())
-      printRec(Arg.get());
-    printRec(F->getResult().get());
-    OS << ')';
-  }
-
-  void visitProtocolTypeRef(const ProtocolTypeRef *P) {
-    printHeader("protocol");
-    printField("module", P->getModuleName());
-    printField("name", P->getName());
-    OS << ')';
-  }
-
-  void visitProtocolCompositionTypeRef(const ProtocolCompositionTypeRef *PC) {
-    printHeader("protocol-composition");
-    for (auto protocol : PC->getProtocols())
-      printRec(protocol.get());
-    OS << ')';
-  }
-
-  void visitMetatypeTypeRef(const MetatypeTypeRef *M) {
-    printHeader("metatype");
-    printRec(M->getInstanceType().get());
-    OS << ')';
-  }
-
-  void visitExistentialMetatypeTypeRef(const ExistentialMetatypeTypeRef *EM) {
-    printHeader("existential-metatype");
-    printRec(EM->getInstanceType().get());
-    OS << ')';
-  }
-
-  void visitGenericTypeParameterTypeRef(const GenericTypeParameterTypeRef *GTP){
-    printHeader("generic-type-parameter");
-    printField("index", GTP->getIndex());
-    printField("depth", GTP->getDepth());
-    OS << ')';
-  }
-
-  void visitDependentMemberTypeRef(const DependentMemberTypeRef *DM) {
-    printHeader("dependent-member");
-    printRec(DM->getBase().get());
-    printRec(DM->getMember().get());
-    OS << ')';
-  }
-
-  void visitAssociatedTypeRef(const AssociatedTypeRef *AT) {
-    printHeader("associated-type");
-    printField("name", AT->getName());
-    OS << ')';
-  }
-
-  void visitForeignClassTypeRef(const ForeignClassTypeRef *F) {
-    printHeader("foreign");
-    if (!F->getName().empty())
-      printField("name", F->getName());
-    OS << ')';
-  }
-
-  void visitObjCClassTypeRef(const ObjCClassTypeRef *OC) {
-    printHeader("objective-c-class");
-    if (!OC->getName().empty())
-      printField("name", OC->getName());
-    OS << ')';
-  }
-
-  void visitOpaqueTypeRef(const OpaqueTypeRef *O) {
-    printHeader("opaque");
-    OS << ')';
-  }
-};
-
+template <typename Runtime>
 class TypeRefSubstitution
-  : public TypeRefVisitor<TypeRefSubstitution, TypeRefPointer> {
-  ConstTypeRefVector &Substitutions;
+  : public TypeRefVisitor<TypeRefSubstitution<Runtime>, TypeRefPointer> {
+  using StoredPointer = typename Runtime::StoredPointer;
+  ReflectionContext<Runtime> &RC;
+  GenericArgumentMap Substitutions;
 public:
-  TypeRefSubstitution(ConstTypeRefVector &Substitutions)
-  : Substitutions(Substitutions) {}
+  using TypeRefVisitor<TypeRefSubstitution<Runtime>, TypeRefPointer>::visit;
+  TypeRefSubstitution(ReflectionContext<Runtime> &RC,
+                      GenericArgumentMap Substitutions)
+  : RC(RC),
+    Substitutions(Substitutions) {}
 
   TypeRefPointer visitBuiltinTypeRef(const BuiltinTypeRef *B) {
     return std::make_shared<BuiltinTypeRef>(*B);
@@ -647,18 +551,35 @@ public:
 
   TypeRefPointer
   visitGenericTypeParameterTypeRef(const GenericTypeParameterTypeRef *GTP){
-    if (GTP->getIndex() < Substitutions.size())
-      return Substitutions[GTP->getIndex()];
-    return nullptr;
+    return Substitutions[{GTP->getDepth(), GTP->getIndex()}];
   }
 
   TypeRefPointer
   visitDependentMemberTypeRef(const DependentMemberTypeRef *DM) {
-    return std::make_shared<DependentMemberTypeRef>(*DM);
-  }
+    auto SubstBase = visit(DM->getBase().get());
+    if (!SubstBase || !SubstBase->isConcrete())
+      return nullptr;
 
-  TypeRefPointer visitAssociatedTypeRef(const AssociatedTypeRef *AT) {
-    return std::make_shared<AssociatedTypeRef>(*AT);
+    TypeRefPointer TypeWitness;
+
+    switch (SubstBase->getKind()) {
+    case TypeRefKind::Nominal: {
+      auto Nominal = cast<NominalTypeRef>(SubstBase.get());
+      TypeWitness = RC.getDependentMemberTypeRef(Nominal->getMangledName(), DM);
+      break;
+    }
+    case TypeRefKind::BoundGeneric: {
+      auto BG = cast<BoundGenericTypeRef>(SubstBase.get());
+      TypeWitness = RC.getDependentMemberTypeRef(BG->getMangledName(), DM);
+      break;
+    }
+    default:
+      return nullptr;
+    }
+    if (!TypeWitness)
+      return nullptr;
+
+    return visit(TypeWitness.get());
   }
 
   TypeRefPointer visitForeignClassTypeRef(const ForeignClassTypeRef *F) {
@@ -668,11 +589,17 @@ public:
   TypeRefPointer visitObjCClassTypeRef(const ObjCClassTypeRef *OC) {
     return std::make_shared<ObjCClassTypeRef>(*OC);
   }
-
+  
   TypeRefPointer visitOpaqueTypeRef(const OpaqueTypeRef *Op) {
     return std::make_shared<OpaqueTypeRef>(*Op);
   }
 };
+
+template <typename Runtime>
+TypeRefPointer
+TypeRef::subst(ReflectionContext<Runtime> &RC, GenericArgumentMap Subs) {
+  return TypeRefSubstitution<Runtime>(RC, Subs).visit(this);
+}
 
 } // end namespace reflection
 } // end namespace swift

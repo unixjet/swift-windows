@@ -6,15 +6,15 @@
 // RUN: mkdir %t
 
 // FIXME: BEGIN -enable-source-import hackaround
-// RUN:  %target-swift-frontend(mock-sdk: -sdk %S/../Inputs/clang-importer-sdk -I %t) -emit-module -o %t -enable-omit-needless-words %S/../Inputs/clang-importer-sdk/swift-modules/ObjectiveC.swift
-// RUN:  %target-swift-frontend(mock-sdk: -sdk %S/../Inputs/clang-importer-sdk -I %t) -emit-module -o %t -enable-omit-needless-words  %S/../Inputs/clang-importer-sdk/swift-modules/CoreGraphics.swift
-// RUN:  %target-swift-frontend(mock-sdk: -sdk %S/../Inputs/clang-importer-sdk -I %t) -emit-module -o %t -enable-omit-needless-words  %S/../Inputs/clang-importer-sdk/swift-modules/Foundation.swift
-// RUN:  %target-swift-frontend(mock-sdk: -sdk %S/../Inputs/clang-importer-sdk -I %t) -emit-module -o %t -enable-omit-needless-words  %S/../Inputs/clang-importer-sdk/swift-modules/AppKit.swift
+// RUN:  %target-swift-frontend(mock-sdk: -sdk %S/../Inputs/clang-importer-sdk -I %t) -emit-module -o %t %S/../Inputs/clang-importer-sdk/swift-modules/ObjectiveC.swift
+// RUN:  %target-swift-frontend(mock-sdk: -sdk %S/../Inputs/clang-importer-sdk -I %t) -emit-module -o %t  %S/../Inputs/clang-importer-sdk/swift-modules/CoreGraphics.swift
+// RUN:  %target-swift-frontend(mock-sdk: -sdk %S/../Inputs/clang-importer-sdk -I %t) -emit-module -o %t  %S/../Inputs/clang-importer-sdk/swift-modules/Foundation.swift
+// RUN:  %target-swift-frontend(mock-sdk: -sdk %S/../Inputs/clang-importer-sdk -I %t) -emit-module -o %t  %S/../Inputs/clang-importer-sdk/swift-modules/AppKit.swift
 // FIXME: END -enable-source-import hackaround
 
 
-// RUN: %target-swift-frontend(mock-sdk: -sdk %S/../Inputs/clang-importer-sdk -I %t) -emit-module -o %t %s -enable-omit-needless-words -disable-objc-attr-requires-foundation-module
-// RUN: %target-swift-frontend(mock-sdk: -sdk %S/../Inputs/clang-importer-sdk -I %t) -parse-as-library -enable-omit-needless-words %t/classes.swiftmodule -parse -emit-objc-header-path %t/classes.h -import-objc-header %S/../Inputs/empty.h -disable-objc-attr-requires-foundation-module
+// RUN: %target-swift-frontend(mock-sdk: -sdk %S/../Inputs/clang-importer-sdk -I %t) -emit-module -o %t %s -disable-objc-attr-requires-foundation-module
+// RUN: %target-swift-frontend(mock-sdk: -sdk %S/../Inputs/clang-importer-sdk -I %t) -parse-as-library %t/classes.swiftmodule -parse -emit-objc-header-path %t/classes.h -import-objc-header %S/../Inputs/empty.h -disable-objc-attr-requires-foundation-module
 // RUN: FileCheck %s < %t/classes.h
 // RUN: FileCheck --check-prefix=NEGATIVE %s < %t/classes.h
 // RUN: %check-in-clang %t/classes.h
@@ -164,7 +164,7 @@ class NotObjC {}
   class func test2() {}
 
   func testPrimitives(b: Bool, i: Int, f: Float, d: Double, u: UInt)
-    -> COpaquePointer { return COpaquePointer() }
+    -> OpaquePointer { return nil }
   func testString(s: String) {}
   func testSelector(sel: Selector, boolean b: ObjCBool) {}
 
@@ -260,7 +260,7 @@ typealias AliasForNSRect = NSRect
 // CHECK-NEXT: init
 // CHECK-NEXT: @end
 @objc class MethodsWithPointers {
-  func test(a: UnsafeMutablePointer<Int>) -> UnsafeMutablePointer<AnyObject> { return UnsafeMutablePointer() }
+  func test(a: UnsafeMutablePointer<Int>) -> UnsafeMutablePointer<AnyObject> { return nil }
 
   func testNested(a: UnsafeMutablePointer<UnsafeMutablePointer<Int>>) {}
 

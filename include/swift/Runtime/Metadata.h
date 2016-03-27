@@ -66,12 +66,14 @@ template <>
 struct RuntimeTarget<4> {
   using StoredPointer = uint32_t;
   using StoredSize = uint32_t;
+  static constexpr size_t PointerSize = 4;
 };
 
 template <>
 struct RuntimeTarget<8> {
   using StoredPointer = uint64_t;
   using StoredSize = uint64_t;
+  static constexpr size_t PointerSize = 8;
 };
 
 /// In-process native runtime target.
@@ -108,6 +110,7 @@ template <typename Runtime>
 struct External {
   using StoredPointer = typename Runtime::StoredPointer;
   using StoredSize = typename Runtime::StoredSize;
+  static constexpr size_t PointerSize = Runtime::PointerSize;
   const StoredPointer PointerValue;
   
   template <typename T>
@@ -117,7 +120,7 @@ struct External {
   using FarRelativeDirectPointer = StoredPointer;
   
   template <typename T, bool Nullable = true>
-  using RelativeDirectPointer = std::make_signed<StoredPointer>;
+  using RelativeDirectPointer = int32_t;
 };
 
 /// Template for branching on native pointer types versus external ones
@@ -1492,9 +1495,7 @@ struct TargetNominalTypeDescriptor {
   }
 
   int32_t offsetToNameOffset() const {
-    auto NameAddress = (uint8_t *)&this->Name;
-    auto ThisAddress = (uint8_t *)this;
-    return NameAddress - ThisAddress;
+    return offsetof(TargetNominalTypeDescriptor<Runtime>, Name);
   }
 
   /// The generic parameter descriptor header. This describes how to find and
@@ -1729,10 +1730,8 @@ public:
     return metadataAsWords[theClass->GenericParams.Offset - 1];
   }
 
-  uint32_t offsetToDescriptorOffset() const {
-    auto DescriptionAddress = (uint8_t *)&this->Description;
-    auto ThisAddress = (uint8_t *)this;
-    return DescriptionAddress - ThisAddress;
+  StoredPointer offsetToDescriptorOffset() const {
+    return offsetof(TargetClassMetadata<Runtime>, Description);
   }
 
   static bool classof(const TargetMetadata<Runtime> *metadata) {
@@ -1951,10 +1950,13 @@ struct TargetValueMetadata : public TargetMetadata<Runtime> {
   }
 
   StoredPointer offsetToDescriptorOffset() const {
-    auto DescriptionAddress = (uint8_t *)&this->Description;
-    auto ThisAddress = (uint8_t *)this;
-    return DescriptionAddress - ThisAddress;
+    return offsetof(TargetValueMetadata<Runtime>, Description);
   }
+
+  StoredPointer offsetToParentOffset() const {
+    return offsetof(TargetValueMetadata<Runtime>, Parent);
+  }
+  
 };
 using ValueMetadata = TargetValueMetadata<InProcess>;
 
@@ -2206,11 +2208,11 @@ struct TargetProtocolDescriptor {
   
   /// Unused by the Swift runtime.
   TargetPointer<Runtime, const void>
-  _ObjC_InstanceMethods,
-  _ObjC_ClassMethods,
-  _ObjC_OptionalInstanceMethods,
-  _ObjC_OptionalClassMethods,
-  _ObjC_InstanceProperties;
+    _ObjC_InstanceMethods,
+    _ObjC_ClassMethods,
+    _ObjC_OptionalInstanceMethods,
+    _ObjC_OptionalClassMethods,
+    _ObjC_InstanceProperties;
   
   /// Size of the descriptor record.
   uint32_t DescriptorSize;
@@ -2312,8 +2314,8 @@ enum class ExistentialTypeRepresentation {
   Opaque,
   /// The type uses a class existential representation.
   Class,
-  /// The type uses the ErrorType boxed existential representation.
-  ErrorType,
+  /// The type uses the ErrorProtocol boxed existential representation.
+  ErrorProtocol,
 };
 
 /// The structure of existential type metadata.

@@ -1773,8 +1773,6 @@ namespace {
     }
     
     Type visitArrayExpr(ArrayExpr *expr) {
-      ASTContext &C = CS.getASTContext();
-      
       // An array expression can be of a type T that conforms to the
       // ArrayLiteralConvertible protocol.
       auto &tc = CS.getTypeChecker();
@@ -1785,10 +1783,14 @@ namespace {
         return Type();
       }
 
-      // FIXME: Protect against broken standard library.
-      auto elementAssocTy = cast<AssociatedTypeDecl>(
-                              arrayProto->lookupDirect(
-                                C.getIdentifier("Element")).front());
+      // Assume that ArrayLiteralConvertible contains a single associated type.
+      AssociatedTypeDecl *elementAssocTy = nullptr;
+      for (auto decl : arrayProto->getMembers()) {
+        if ((elementAssocTy = dyn_cast<AssociatedTypeDecl>(decl)))
+          break;
+      }
+      if (!elementAssocTy)
+        return Type();
 
       auto locator = CS.getConstraintLocator(expr);
       auto contextualType = CS.getContextualType(expr);
@@ -2498,7 +2500,7 @@ namespace {
       Expr *condExpr = expr->getCondExpr();
       auto booleanType
         = CS.getTypeChecker().getProtocol(expr->getQuestionLoc(),
-                                          KnownProtocolKind::BooleanType);
+                                          KnownProtocolKind::Boolean);
       if (!booleanType)
         return Type();
 
@@ -3208,9 +3210,9 @@ bool swift::isExtensionApplied(DeclContext &DC, Type BaseTy,
   return CS.solveSingle().hasValue();
 }
 
-bool canSatisfy(Type T1, Type T2, DeclContext &DC, ConstraintKind Kind,
-                bool AllowFreeVariables) {
-  ConstraintSystemOptions Options = ConstraintSystemFlags::AllowFixes;
+static bool canSatisfy(Type T1, Type T2, DeclContext &DC, ConstraintKind Kind,
+                       bool ReplaceArchetypeWithVariables,
+                       bool AllowFreeVariables) {
   std::unique_ptr<TypeChecker> CreatedTC;
   // If the current ast context has no type checker, create one for it.
   auto *TC = static_cast<TypeChecker*>(DC.getASTContext().getLazyResolver());
@@ -3218,16 +3220,18 @@ bool canSatisfy(Type T1, Type T2, DeclContext &DC, ConstraintKind Kind,
     CreatedTC.reset(new TypeChecker(DC.getASTContext()));
     TC = CreatedTC.get();
   }
-  ConstraintSystem CS(*TC, &DC, Options);
-  std::function<Type(Type)> Trans = [&](Type Base) {
-    if (Base->getKind() == TypeKind::Archetype) {
-      return Type(CS.createTypeVariable(CS.getConstraintLocator(nullptr),
-                                        TypeVariableOptions::TVO_CanBindToLValue));
-    }
-    return Base;
-  };
-  T1 = T1.transform(Trans);
-  T2 = T2.transform(Trans);
+  ConstraintSystem CS(*TC, &DC, None);
+  if (ReplaceArchetypeWithVariables) {
+    std::function<Type(Type)> Trans = [&](Type Base) {
+      if (Base->getKind() == TypeKind::Archetype) {
+        return Type(CS.createTypeVariable(CS.getConstraintLocator(nullptr),
+                                    TypeVariableOptions::TVO_CanBindToLValue));
+      }
+      return Base;
+    };
+    T1 = T1.transform(Trans);
+    T2 = T2.transform(Trans);
+  }
   CS.addConstraint(Constraint::create(CS, Kind, T1, T2, DeclName(),
                                       CS.getConstraintLocator(nullptr)));
   SmallVector<Solution, 4> Solutions;
@@ -3237,13 +3241,43 @@ bool canSatisfy(Type T1, Type T2, DeclContext &DC, ConstraintKind Kind,
 }
 
 bool swift::canPossiblyEqual(Type T1, Type T2, DeclContext &DC) {
-  return canSatisfy(T1, T2, DC, ConstraintKind::Equal, true);
+  return canSatisfy(T1, T2, DC, ConstraintKind::Equal, true, true);
 }
 
 bool swift::canPossiblyConvertTo(Type T1, Type T2, DeclContext &DC) {
-  return canSatisfy(T1, T2, DC, ConstraintKind::Conversion, true);
+  return canSatisfy(T1, T2, DC, ConstraintKind::Conversion, true, true);
 }
 
 bool swift::isEqual(Type T1, Type T2, DeclContext &DC) {
-  return canSatisfy(T1, T2, DC, ConstraintKind::Equal, false);
+  return canSatisfy(T1, T2, DC, ConstraintKind::Equal, false, false);
+}
+
+ResolveMemberResult
+swift::resolveValueMember(DeclContext &DC, Type BaseTy, DeclName Name) {
+  ResolveMemberResult Result;
+  std::unique_ptr<TypeChecker> CreatedTC;
+  // If the current ast context has no type checker, create one for it.
+  auto *TC = static_cast<TypeChecker*>(DC.getASTContext().getLazyResolver());
+  if (!TC) {
+    CreatedTC.reset(new TypeChecker(DC.getASTContext()));
+    TC = CreatedTC.get();
+  }
+  ConstraintSystem CS(*TC, &DC, None);
+  MemberLookupResult LookupResult = CS.performMemberLookup(
+    ConstraintKind::ValueMember, Name, BaseTy, nullptr, false);
+  if (LookupResult.ViableCandidates.empty())
+    return Result;
+  if (OverloadChoice *Choice = LookupResult.getFavoredChoice()) {
+    Result.Favored = Choice->getDecl();
+  }
+  for (OverloadChoice& Choice : LookupResult.ViableCandidates) {
+    ValueDecl *VD = Choice.getDecl();
+    if (VD != Result.Favored)
+      Result.OtherViables.push_back(VD);
+  }
+  if (!Result.Favored) {
+    Result.Favored = Result.OtherViables.front();
+    Result.OtherViables.erase(Result.OtherViables.begin());
+  }
+  return Result;
 }

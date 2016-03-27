@@ -259,6 +259,12 @@ private:
   ///        class extension, or protocol).
   void writeMembers(DeclRange members, bool isClass);
 
+  /// Write a default witness table for a protocol.
+  ///
+  /// \param proto The protocol.
+  void writeDefaultWitnessTable(const ProtocolDecl *proto,
+                                const std::array<unsigned, 256> &abbrCodes);
+
   /// Check if a decl is cross-referenced.
   bool isDeclXRef(const Decl *D) const;
 
@@ -339,7 +345,7 @@ public:
 
   /// Serialize module documentation to the given stream.
   static void writeDocToStream(raw_ostream &os, ModuleOrSourceFile DC,
-                               StringRef GroupInfoPath);
+                               StringRef GroupInfoPath, ASTContext &Ctx);
 
   /// Records the use of the given Type.
   ///

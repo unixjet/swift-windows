@@ -59,15 +59,18 @@ ERROR(expected_conditional_compilation_expression,none,
 ERROR(extra_tokens_conditional_compilation_directive,none,
       "extra tokens following conditional compilation directive", ())
 
+ERROR(sourceLocation_expected,none,
+      "expected '%0' in #sourceLocation directive", (StringRef))
+
 ERROR(unexpected_line_directive,none,
-      "parameterless closing #line directive "
-      "without prior opening #line directive", ())
+      "parameterless closing #sourceLocation() directive "
+      "without prior opening #sourceLocation(file:,line:) directive", ())
 ERROR(expected_line_directive_number,none,
-      "expected starting line number for #line directive", ())
+      "expected starting line number for #sourceLocation directive", ())
 ERROR(expected_line_directive_name,none,
-      "expected filename string literal for #line directive", ())
+      "expected filename string literal for #sourceLocation directive", ())
 ERROR(extra_tokens_line_directive,none,
-      "extra tokens at the end of #line directive", ())
+      "extra tokens at the end of #sourceLocation directive", ())
 ERROR(line_directive_line_zero,none,
       "the line number needs to be greater than zero", ())
 
@@ -149,7 +152,7 @@ WARNING(inout_as_attr_deprecated,none,
         "'inout' before a parameter name is deprecated, place it before the parameter type instead",
         ())
 WARNING(line_directive_style_deprecated,none,
-        "#line directive is deprecated, please use #setline instead",
+        "#line directive is deprecated, please use #sourceLocation instead",
         ())
 
 ERROR(declaration_same_line_without_semi,none,
@@ -280,6 +283,13 @@ ERROR(expected_equal_in_typealias,PointsToFirstBadToken,
       "expected '=' in typealias declaration", ())
 ERROR(expected_type_in_typealias,PointsToFirstBadToken,
       "expected type in typealias declaration", ())
+ERROR(expected_type_in_associatedtype,PointsToFirstBadToken,
+      "expected type in associatedtype declaration", ())
+ERROR(associated_type_generic_parameter_list,PointsToFirstBadToken,
+      "associated types may not have a generic parameter list", ())
+ERROR(typealias_generic_list_constraint,PointsToFirstBadToken,
+      "type parameters may not be constrained in typealias argument list", ())
+
 
 // Func
 ERROR(func_decl_nonglobal_operator,none,
@@ -490,7 +500,7 @@ ERROR(sil_member_decl_not_found,none,
 ERROR(sil_member_decl_type_mismatch,none,
       "member defined with mismatching type %0 (expected %1)", (Type, Type))
 ERROR(sil_substitution_mismatch,none,
-      "substitution conformances dont match archetype", ())
+      "substitution conformances don't match archetype", ())
 ERROR(sil_missing_substitutions,none,
       "missing substitutions", ())
 ERROR(sil_too_many_substitutions,none,
@@ -751,8 +761,8 @@ ERROR(expected_close_after_else_directive,none,
       "further conditions after #else are unreachable", ())
 
 /// Associatedtype Statement
-WARNING(typealias_inside_protocol,none,
-        "use of 'typealias' to declare associated types is deprecated; use 'associatedtype' instead", ())
+ERROR(typealias_inside_protocol_without_type,none,
+      "typealias is missing an assigned type; use 'associatedtype' to define an associated type requirement", ())
 ERROR(associatedtype_outside_protocol,none,
       "associated types can only be defined in a protocol; define a type or introduce a 'typealias' to satisfy an associated type requirement", ())
 
@@ -872,7 +882,7 @@ ERROR(expected_var_decl_for_stmt,PointsToFirstBadToken,
 ERROR(expected_foreach_in,none,
       "expected 'in' after for-each pattern", ())
 ERROR(expected_foreach_container,none,
-      "expected SequenceType expression for for-each loop", ())
+      "expected Sequence expression for for-each loop", ())
 ERROR(expected_foreach_lbrace,none,
       "expected '{' to start the body of for-each loop", ())
 ERROR(expected_foreach_where_expr,PointsToFirstBadToken,
@@ -977,6 +987,10 @@ ERROR(unexpected_tokens_before_closure_in,none,
 ERROR(expected_closure_rbrace,none,
       "expected '}' at end of closure", ())
 
+ERROR(trailing_closure_requires_parens,none,
+      "trailing closure requires parentheses for disambiguation in this"
+      " context", ())
+
 WARNING(trailing_closure_excess_newlines,none,
         "trailing closure is separated from call site by multiple newlines", ())
 NOTE(trailing_closure_call_here,none,
@@ -1066,6 +1080,9 @@ ERROR(expr_selector_expected_rparen,PointsToFirstBadToken,
 //------------------------------------------------------------------------------
 // Attribute-parsing diagnostics
 //------------------------------------------------------------------------------
+
+WARNING(replace_equal_with_colon_for_value,none,
+        "'=' is deprecated in favor of ':' before an attribute argument", ())
 ERROR(expected_attribute_name,none,
       "expected an attribute name", ())
 ERROR(unknown_attribute,none,
@@ -1109,8 +1126,8 @@ ERROR(attr_interpolated_string,none,
 ERROR(attr_only_at_non_local_scope, none,
       "attribute '%0' can only be used in a non-local scope", (StringRef))
 
-ERROR(attr_expected_equal_separator,none,
-      "expected '=' following '%0' argument of '%1'",
+ERROR(attr_expected_colon_separator,none,
+      "expected ':' following '%0' argument of '%1'",
       (StringRef, StringRef))
 
 ERROR(attr_expected_string_literal_arg,none,
@@ -1139,7 +1156,7 @@ ERROR(attr_availability_expected_option,none,
       "'obsoleted', 'message', or 'renamed'", (StringRef))
 
 ERROR(attr_availability_expected_equal,none,
-      "expected '=' after '%1' in '%0' attribute", (StringRef, StringRef))
+      "expected ':' after '%1' in '%0' attribute", (StringRef, StringRef))
 
 ERROR(attr_availability_expected_version,none,
       "expected version number in '%0' attribute", (StringRef))
@@ -1209,10 +1226,10 @@ WARNING(attr_warn_unused_result_expected_name,none,
         "expected parameter 'message' or 'mutable_variant'", ())
 WARNING(attr_warn_unused_result_duplicate_parameter,none,
       "duplicate '%0' parameter; previous value will be ignored", (StringRef))
-ERROR(attr_warn_unused_result_expected_eq,none,
-      "expected '=' following '%0' parameter", (StringRef))
+ERROR(attr_warn_unused_result_expected_colon,none,
+      "expected ':' following '%0' parameter", (StringRef))
 ERROR(attr_warn_unused_result_expected_string,none,
-      "expected a string following '=' for '%0' parameter", (StringRef))
+      "expected a string following ':' for '%0' parameter", (StringRef))
 WARNING(attr_warn_unused_result_unknown_parameter,none,
         "unknown parameter '%0' in 'warn_unused_result' attribute", (StringRef))
 ERROR(attr_warn_unused_result_expected_rparen,none,

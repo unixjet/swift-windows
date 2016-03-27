@@ -597,6 +597,7 @@ public:
     }
     result.Raw = RawComment(Comments);
     result.Group = endian::readNext<uint32_t, little, unaligned>(data);
+    result.SourceOrder = endian::readNext<uint32_t, little, unaligned>(data);
     return result;
   }
 };
@@ -1524,6 +1525,17 @@ Optional<CommentInfo> ModuleFile::getCommentForDecl(const Decl *D) const {
   if (D->isImplicit())
     return None;
 
+  if (auto *ED = dyn_cast<ExtensionDecl>(D)) {
+    // Compute the USR.
+    llvm::SmallString<128> USRBuffer;
+    {
+      llvm::raw_svector_ostream OS(USRBuffer);
+      if (ide::printExtensionUSR(ED, OS))
+        return None;
+    }
+     return getCommentForDeclByUSR(USRBuffer.str());
+  }
+
   auto *VD = dyn_cast<ValueDecl>(D);
   if (!VD)
     return None;
@@ -1539,13 +1551,9 @@ Optional<CommentInfo> ModuleFile::getCommentForDecl(const Decl *D) const {
   return getCommentForDeclByUSR(USRBuffer.str());
 }
 
-Optional<StringRef> ModuleFile::getGroupNameById(unsigned Id) const {
-  if(!GroupNamesMap || GroupNamesMap->count(Id) == 0)
-    return None;
-  return (*GroupNamesMap)[Id];
-}
+const static StringRef Separator = "/";
 
-Optional<StringRef> ModuleFile::getGroupNameForDecl(const Decl *D) const {
+static const Decl* getGroupDecl(const Decl *D) {
   auto GroupD = D;
 
   // Extensions always exist in the same group with the nominal.
@@ -1553,6 +1561,35 @@ Optional<StringRef> ModuleFile::getGroupNameForDecl(const Decl *D) const {
                                                 getInnermostTypeContext())) {
     GroupD = ED->getExtendedType()->getAnyNominal();
   }
+  return GroupD;
+}
+
+Optional<StringRef> ModuleFile::getGroupNameById(unsigned Id) const {
+  if(!GroupNamesMap || GroupNamesMap->count(Id) == 0)
+    return None;
+  auto Original = (*GroupNamesMap)[Id];
+  if (Original.empty())
+    return None;
+  auto SepPos = Original.find_last_of(Separator);
+  assert(SepPos != StringRef::npos && "Cannot find Separator.");
+  return StringRef(Original.data(), SepPos);
+}
+
+Optional<StringRef> ModuleFile::getSourceFileNameById(unsigned Id) const {
+  if(!GroupNamesMap || GroupNamesMap->count(Id) == 0)
+    return None;
+  auto Original = (*GroupNamesMap)[Id];
+  if (Original.empty())
+    return None;
+  auto SepPos = Original.find_last_of(Separator);
+  assert(SepPos != StringRef::npos && "Cannot find Separator.");
+  auto Start = Original.data() + SepPos + 1;
+  auto Len = Original.size() - SepPos - 1;
+  return StringRef(Start, Len);
+}
+
+Optional<StringRef> ModuleFile::getGroupNameForDecl(const Decl *D) const {
+  auto GroupD = getGroupDecl(D);
   auto Triple = getCommentForDecl(GroupD);
   if (!Triple.hasValue()) {
     return None;
@@ -1560,11 +1597,40 @@ Optional<StringRef> ModuleFile::getGroupNameForDecl(const Decl *D) const {
   return getGroupNameById(Triple.getValue().Group);
 }
 
+
+Optional<StringRef>
+ModuleFile::getSourceFileNameForDecl(const Decl *D) const {
+  auto GroupD = getGroupDecl(D);
+  auto Triple = getCommentForDecl(GroupD);
+  if (!Triple.hasValue()) {
+    return None;
+  }
+  return getSourceFileNameById(Triple.getValue().Group);
+}
+
+Optional<unsigned>
+ModuleFile::getSourceOrderForDecl(const Decl *D) const {
+  auto Triple = getCommentForDecl(D);
+  if (!Triple.hasValue()) {
+    return None;
+  }
+  return Triple.getValue().SourceOrder;
+}
+
 void ModuleFile::collectAllGroups(std::vector<StringRef> &Names) const {
   if (!GroupNamesMap)
     return;
   for (auto It = GroupNamesMap->begin(); It != GroupNamesMap->end(); ++ It) {
-    Names.push_back(It->getSecond());
+    StringRef FullGroupName = It->getSecond();
+    if (FullGroupName.empty())
+      continue;
+    auto Sep = FullGroupName.find_last_of(Separator);
+    assert(Sep != StringRef::npos);
+    auto Group = FullGroupName.substr(0, Sep);
+    auto Found = std::find(Names.begin(), Names.end(), Group);
+    if (Found != Names.end())
+      continue;
+    Names.push_back(Group);
   }
 }
 
@@ -1578,6 +1644,14 @@ ModuleFile::getCommentForDeclByUSR(StringRef USR) const {
     return None;
 
   return *I;
+}
+
+Optional<StringRef>
+ModuleFile::getGroupNameByUSR(StringRef USR) const {
+  if (auto Comment = getCommentForDeclByUSR(USR)) {
+    return getGroupNameById(Comment.getValue().Group);
+  }
+  return None;
 }
 
 Identifier ModuleFile::getDiscriminatorForPrivateValue(const ValueDecl *D) {

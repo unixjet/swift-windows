@@ -17,10 +17,12 @@
 #include "swift/Basic/UUID.h"
 #include "swift/AST/Identifier.h"
 #include "llvm/ADT/StringRef.h"
+#include "swift/AST/PrintOptions.h"
 
 namespace swift {
   class Decl;
   class DeclContext;
+  class DynamicSelfType;
   class ModuleEntity;
   class TypeDecl;
   class Type;
@@ -28,7 +30,7 @@ namespace swift {
   class Pattern;
   class ExtensionDecl;
   class NominalTypeDecl;
-  struct PrintOptions;
+  class ValueDecl;
 
 /// Describes the context in which a name is being printed, which
 /// affects the keywords that need to be escaped.
@@ -39,10 +41,14 @@ enum class PrintNameContext {
   Keyword,
   /// Generic parameter context, where 'Self' is not escaped.
   GenericParameter,
+  /// Class method return type, where 'Self' is not escaped.
+  ClassDynamicSelf,
   /// Function parameter context, where keywords other than let/var/inout are
   /// not escaped.
   FunctionParameterExternal,
   FunctionParameterLocal,
+  /// Tuple element context, similar to \c FunctionParameterExternal.
+  TupleElement,
   /// Attributes, which are escaped as 'Normal', but differentiated for
   /// the purposes of printName* callbacks.
   Attribute,
@@ -60,7 +66,13 @@ enum class PrintStructureKind {
   GenericParameter,
   GenericRequirement,
   FunctionParameter,
+  FunctionType,
+  FunctionReturnType,
   BuiltinAttribute,
+  TupleType,
+  TupleElement,
+  NumberLiteral,
+  StringLiteral,
 };
 
 /// An abstract class used to print an AST.
@@ -85,7 +97,7 @@ public:
   /// Called before printing of a declaration.
   ///
   /// Callers should use callPrintDeclPre().
-  virtual void printDeclPre(const Decl *D) {}
+  virtual void printDeclPre(const Decl *D, Optional<BracketOptions> Bracket) {}
   /// Called before printing at the point which would be considered the location
   /// of the declaration (normally the name of the declaration).
   ///
@@ -99,7 +111,7 @@ public:
   /// Called after finishing printing of a declaration.
   ///
   /// Callers should use callPrintDeclPost().
-  virtual void printDeclPost(const Decl *D) {}
+  virtual void printDeclPost(const Decl *D, Optional<BracketOptions> Bracket) {}
 
   /// Called before printing a type.
   virtual void printTypePre(const TypeLoc &TL) {}
@@ -108,18 +120,24 @@ public:
 
   /// Called when printing the referenced name of a type declaration, possibly
   /// from deep inside another type.
-  virtual void printTypeRef(const TypeDecl *TD, Identifier Name);
+  ///
+  /// \param T the original \c Type being referenced. May be null.
+  /// \param RefTo the \c TypeDecl this is considered a reference to.
+  /// \param Name the name to be printed.
+  virtual void printTypeRef(Type T, const TypeDecl *RefTo, Identifier Name);
 
   /// Called when printing the referenced name of a module.
   virtual void printModuleRef(ModuleEntity Mod, Identifier Name);
 
   /// Called before printing a synthesized extension.
   virtual void printSynthesizedExtensionPre(const ExtensionDecl *ED,
-                                            const NominalTypeDecl *NTD) {}
+                                            const NominalTypeDecl *NTD,
+                                            Optional<BracketOptions> Bracket) {}
 
   /// Called after printing a synthesized extension.
   virtual void printSynthesizedExtensionPost(const ExtensionDecl *ED,
-                                             const NominalTypeDecl *NTD) {}
+                                             const NominalTypeDecl *NTD,
+                                             Optional<BracketOptions> Bracket) {}
 
   /// Called before printing a structured entity.
   ///
@@ -136,6 +154,8 @@ public:
   virtual void printNamePost(PrintNameContext Context) {}
 
   // Helper functions.
+
+  void printTypeRef(DynamicSelfType *T, Identifier Name);
 
   void printSeparator(bool &first, StringRef separator) {
     if (first) {
@@ -203,11 +223,11 @@ public:
   // MARK: Callback interface wrappers that perform ASTPrinter bookkeeping.
 
    /// Make a callback to printDeclPre(), performing any necessary bookeeping.
-  void callPrintDeclPre(const Decl *D);
+  void callPrintDeclPre(const Decl *D, Optional<BracketOptions> Bracket);
 
   /// Make a callback to printDeclPost(), performing any necessary bookeeping.
-  void callPrintDeclPost(const Decl *D) {
-    printDeclPost(D);
+  void callPrintDeclPost(const Decl *D, Optional<BracketOptions> Bracket) {
+    printDeclPost(D, Bracket);
   }
 
   /// Make a callback to avoidPrintDeclPost(), performing any necessary
@@ -237,6 +257,7 @@ public:
 
   /// To sanitize a malformed utf8 string to a well-formed one.
   static std::string sanitizeUtf8(StringRef Text);
+  static ValueDecl* findConformancesWithDocComment(ValueDecl *VD);
   static bool printTypeInterface(Type Ty, DeclContext *DC, std::string &Result);
   static bool printTypeInterface(Type Ty, DeclContext *DC, llvm::raw_ostream &Out);
 

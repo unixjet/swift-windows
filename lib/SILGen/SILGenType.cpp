@@ -47,6 +47,7 @@ SILFunction *SILGenModule::getDynamicThunk(SILDeclRef constant,
     // an ObjC method. This would change if we introduced a native
     // runtime-hookable mechanism.
     SILGenFunction SGF(*this, *F);
+    F->setThunk(IsThunk);
     SGF.emitForeignToNativeThunk(constant);
   }
 
@@ -58,18 +59,6 @@ SILGenModule::emitVTableMethod(SILDeclRef derived, SILDeclRef base) {
   // As a fast path, if there is no override, definitely no thunk is necessary.
   if (derived == base)
     return getFunction(derived, NotForDefinition);
-
-  // Generate the thunk name.
-  // TODO: If we allocated a new vtable slot for the derived method, then
-  // further derived methods would potentially need multiple thunks, and we
-  // would need to mangle the base method into the symbol as well.
-  auto name = derived.mangle("_TTV");
-
-  // If we already emitted this thunk, reuse it.
-  // TODO: Allocating new vtable slots for derived methods with different ABIs
-  // would invalidate the assumption that the same thunk is correct, as above.
-  if (auto existingThunk = M.lookUpFunction(name))
-    return existingThunk;
 
   // Determine the derived thunk type by lowering the derived type against the
   // abstraction pattern of the base.
@@ -84,6 +73,18 @@ SILGenModule::emitVTableMethod(SILDeclRef derived, SILDeclRef base) {
   // a thunk.
   if (overrideInfo == derivedInfo)
     return getFunction(derived, NotForDefinition);
+
+  // Generate the thunk name.
+  // TODO: If we allocated a new vtable slot for the derived method, then
+  // further derived methods would potentially need multiple thunks, and we
+  // would need to mangle the base method into the symbol as well.
+  auto name = derived.mangle("_TTV");
+
+  // If we already emitted this thunk, reuse it.
+  // TODO: Allocating new vtable slots for derived methods with different ABIs
+  // would invalidate the assumption that the same thunk is correct, as above.
+  if (auto existingThunk = M.lookUpFunction(name))
+    return existingThunk;
 
   auto *derivedDecl = cast<AbstractFunctionDecl>(derived.getDecl());
   SILLocation loc(derivedDecl);
@@ -332,9 +333,8 @@ public:
     }
 
     if (auto protocol = dyn_cast<ProtocolDecl>(theType)) {
-      if (!protocol->hasFixedLayout())
+      if (!protocol->isObjC())
         SGM.emitDefaultWitnessTable(protocol);
-
       return;
     }
 

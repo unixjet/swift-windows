@@ -458,7 +458,7 @@ func testSingleQuoteStringLiterals() {
 
 // <rdar://problem/17128913>
 var s = ""
-s.appendContentsOf(["x"])
+s.append(contentsOf: ["x"])
 
 //===----------------------------------------------------------------------===//
 // InOut arguments
@@ -477,7 +477,7 @@ func testInOut(arg: inout Int) {
   var z = &arg // expected-error{{'&' can only appear immediately in a call argument list}} \
              // expected-error {{type 'inout Int' of variable is not materializable}}
 
-  takesExplicitInt(5) // expected-error {{cannot convert value of type 'Int' to expected argument type 'inout Int'}}
+  takesExplicitInt(5) // expected-error {{cannot pass immutable value as inout argument: literals are not mutable}}
 }
 
 //===----------------------------------------------------------------------===//
@@ -674,8 +674,8 @@ func invalidDictionaryLiteral() {
 
     
 // FIXME: The issue here is a type compatibility problem, there is no ambiguity.
-[4].joinWithSeparator([1]) // expected-error {{type of expression is ambiguous without more context}}
-[4].joinWithSeparator([[[1]]]) // expected-error {{type of expression is ambiguous without more context}}
+[4].joined(separator: [1]) // expected-error {{type of expression is ambiguous without more context}}
+[4].joined(separator: [[[1]]]) // expected-error {{type of expression is ambiguous without more context}}
 
 //===----------------------------------------------------------------------===//
 // nil/metatype comparisons
@@ -691,10 +691,10 @@ nil != Int.self // expected-error {{binary operator '!=' cannot be applied to op
 // <rdar://problem/19032294> Disallow postfix ? when not chaining
 func testOptionalChaining(a : Int?, b : Int!, c : Int??) {
   a?    // expected-error {{optional chain has no effect, expression already produces 'Int?'}} {{4-5=}}
-  a?.customMirror()
+  a?.customMirror
 
   b?   // expected-error {{'?' must be followed by a call, member lookup, or subscript}}
-  b?.customMirror()
+  b?.customMirror
 
   var _: Int? = c?   // expected-error {{'?' must be followed by a call, member lookup, or subscript}}
 }
@@ -732,7 +732,7 @@ func testParenExprInTheWay() {
   if !(x & 4.0) {}  // expected-error {{cannot convert value of type 'Double' to expected argument type 'Int'}}
 
   
-  if x & x {} // expected-error {{type 'Int' does not conform to protocol 'BooleanType'}}
+  if x & x {} // expected-error {{type 'Int' does not conform to protocol 'Boolean'}}
 }
 
 // <rdar://problem/21352576> Mixed method/property overload groups can cause a crash during constraint optimization
@@ -824,14 +824,20 @@ func swift22_deprecation_increment_decrement() {
 
   ++f     // expected-warning {{'++' is deprecated: it will be removed in Swift 3}} {{3-5=}} {{6-6= += 1}}
   f--     // expected-warning {{'--' is deprecated: it will be removed in Swift 3}} {{4-6= -= 1}}
-  _ = f-- // expected-warning {{'--' is deprecated: it will be removed in Swift 3}}
+  _ = f-- // expected-warning {{'--' is deprecated: it will be removed in Swift 3}} {{none}}
 
 
   ++si      // expected-warning {{'++' is deprecated: it will be removed in Swift 3}} {{3-5=}} {{7-7= = si.successor()}}
   --si      // expected-warning {{'--' is deprecated: it will be removed in Swift 3}} {{3-5=}} {{7-7= = si.predecessor()}}
   si++      // expected-warning {{'++' is deprecated: it will be removed in Swift 3}} {{5-7= = si.successor()}}
   si--      // expected-warning {{'--' is deprecated: it will be removed in Swift 3}} {{5-7= = si.predecessor()}}
-  _ = --si  // expected-warning {{'--' is deprecated: it will be removed in Swift 3}}
+  _ = --si  // expected-warning {{'--' is deprecated: it will be removed in Swift 3}} {{none}}
+
+
+  // <rdar://problem/24530312> Swift ++fix-it produces bad code in nested expressions
+  // This should not get a fixit hint.
+  var j = 2
+  i = ++j   // expected-warning {{'++' is deprecated: it will be removed in Swift 3}} {{none}}
 }
 
 // SR-628 mixing lvalues and rvalues in tuple expression
@@ -840,7 +846,7 @@ var y = 1
 let _ = (x, x.successor()).0
 let _ = (x, 3).1
 (x,y) = (2,3)
-(x,4) = (1,2) // expected-error {{cannot assign to value: function call returns immutable value}}
+(x,4) = (1,2) // expected-error {{cannot assign to value: literals are not mutable}}
 (x,y).1 = 7 // expected-error {{cannot assign to immutable expression of type 'Int'}}
 x = (x,(3,y)).1.1
 

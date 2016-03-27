@@ -48,11 +48,11 @@ public:
     :XMLEscapingPrinter(OS) { }
 
 private:
-  void printTypeRef(const TypeDecl *TD, Identifier Name) override {
+  void printTypeRef(Type T, const TypeDecl *TD, Identifier Name) override {
     printXML("<Type usr=\"");
     SwiftLangSupport::printUSR(TD, OS);
     printXML("\">");
-    StreamPrinter::printTypeRef(TD, Name);
+    StreamPrinter::printTypeRef(T, TD, Name);
     printXML("</Type>");
   }
 };
@@ -74,12 +74,24 @@ static StringRef getTagForParameter(PrintStructureKind context) {
   switch (context) {
   case PrintStructureKind::FunctionParameter:
     return "decl.var.parameter";
+  case PrintStructureKind::FunctionReturnType:
+    return "decl.function.returntype";
+  case PrintStructureKind::FunctionType:
+    return "";
+  case PrintStructureKind::TupleType:
+    return "tuple";
+  case PrintStructureKind::TupleElement:
+    return "tuple.element";
   case PrintStructureKind::GenericParameter:
     return "decl.generic_type_param";
   case PrintStructureKind::GenericRequirement:
     return "decl.generic_type_requirement";
   case PrintStructureKind::BuiltinAttribute:
     return "syntaxtype.attribute.builtin";
+  case PrintStructureKind::NumberLiteral:
+    return "syntaxtype.number";
+  case PrintStructureKind::StringLiteral:
+    return "syntaxtype.string";
   }
   llvm_unreachable("unexpected parameter kind");
 }
@@ -111,15 +123,20 @@ class PrintContext {
   const uintptr_t value;
   static constexpr unsigned declTag = 0;
   static constexpr unsigned PrintStructureKindTag = 1;
-  static constexpr unsigned tagMask = 1;
+  static constexpr unsigned typeTag = 2;
+  static constexpr unsigned tagMask = 3;
+  static constexpr unsigned tagShift = 2;
   bool hasTag(unsigned tag) const { return (value & tagMask) == tag; }
 
 public:
   PrintContext(const Decl *D) : value(uintptr_t(D)) {
-    static_assert(llvm::PointerLikeTypeTraits<Decl *>::NumLowBitsAvailable > 0,
+    static_assert(llvm::PointerLikeTypeTraits<Decl *>::NumLowBitsAvailable >=
+                      tagShift,
                   "missing spare bit in Decl *");
   }
-  PrintContext(PrintStructureKind K) : value((uintptr_t(K) << 1) | 1) {}
+  PrintContext(PrintStructureKind K)
+      : value((uintptr_t(K) << tagShift) | PrintStructureKindTag) {}
+  PrintContext(TypeLoc unused) : value(typeTag) {}
 
   /// Get the context as a Decl, or nullptr.
   const Decl *getDecl() const {
@@ -129,13 +146,14 @@ public:
   Optional<PrintStructureKind> getPrintStructureKind() const {
     if (!hasTag(PrintStructureKindTag))
       return None;
-    return PrintStructureKind(value >> 1);
+    return PrintStructureKind(value >> tagShift);
   }
   /// Whether this is a PrintStructureKind context of the given \p kind.
   bool is(PrintStructureKind kind) const {
     auto storedKind = getPrintStructureKind();
     return storedKind && *storedKind == kind;
   }
+  bool isType() const { return hasTag(typeTag); }
 };
 
 /// An ASTPrinter for annotating declarations with XML tags that describe the
@@ -165,11 +183,11 @@ private:
 
   // MARK: The ASTPrinter callback interface.
 
-  void printDeclPre(const Decl *D) override {
+  void printDeclPre(const Decl *D, Optional<BracketOptions> Bracket) override {
     contextStack.emplace_back(PrintContext(D));
     openTag(getTagForDecl(D, /*isRef=*/false));
   }
-  void printDeclPost(const Decl *D) override {
+  void printDeclPost(const Decl *D, Optional<BracketOptions> Bracket) override {
     assert(contextStack.back().getDecl() == D && "unmatched printDeclPre");
     contextStack.pop_back();
     closeTag(getTagForDecl(D, /*isRef=*/false));
@@ -188,18 +206,27 @@ private:
 
   void printTypePre(const TypeLoc &TL) override {
     auto tag = getTypeTagForCurrentContext();
+    contextStack.emplace_back(PrintContext(TL));
     if (!tag.empty())
       openTag(tag);
   }
   void printTypePost(const TypeLoc &TL) override {
+    assert(contextStack.back().isType());
+    contextStack.pop_back();
     auto tag = getTypeTagForCurrentContext();
     if (!tag.empty())
       closeTag(tag);
   }
 
   void printStructurePre(PrintStructureKind kind, const Decl *D) override {
+    if (kind == PrintStructureKind::TupleElement ||
+        kind == PrintStructureKind::TupleType)
+      fixupTuple(kind);
+
     contextStack.emplace_back(PrintContext(kind));
     auto tag = getTagForParameter(kind);
+    if (tag.empty())
+      return;
 
     if (D && kind == PrintStructureKind::GenericParameter) {
       assert(isa<ValueDecl>(D) && "unexpected non-value decl for param");
@@ -209,9 +236,20 @@ private:
     }
   }
   void printStructurePost(PrintStructureKind kind, const Decl *D) override {
-    assert(contextStack.back().is(kind) && "unmatched printStructurePre");
-    contextStack.pop_back();
-    closeTag(getTagForParameter(kind));
+    if (kind == PrintStructureKind::TupleElement ||
+        kind == PrintStructureKind::TupleType) {
+      auto prev = contextStack.pop_back_val();
+      (void)prev;
+      fixupTuple(kind);
+      assert(prev.is(kind) && "unmatched printStructurePre");
+    } else {
+      assert(contextStack.back().is(kind) && "unmatched printStructurePre");
+      contextStack.pop_back();
+    }
+
+    auto tag = getTagForParameter(kind);
+    if (!tag.empty())
+      closeTag(tag);
   }
 
   void printNamePre(PrintNameContext context) override {
@@ -225,11 +263,11 @@ private:
       closeTag(tag);
   }
 
-  void printTypeRef(const TypeDecl *TD, Identifier name) override {
+  void printTypeRef(Type T, const TypeDecl *TD, Identifier name) override {
     auto tag = getTagForDecl(TD, /*isRef=*/true);
     openTagWithUSRForDecl(tag, TD);
     insideRef = true;
-    XMLEscapingPrinter::printTypeRef(TD, name);
+    XMLEscapingPrinter::printTypeRef(T, TD, name);
     insideRef = false;
     closeTag(tag);
   }
@@ -259,8 +297,9 @@ private:
       return parameterTypeTag;
     if (context.is(PrintStructureKind::GenericParameter))
       return genericParamTypeTag;
-    if (context.is(PrintStructureKind::GenericRequirement) ||
-        context.is(PrintStructureKind::BuiltinAttribute))
+    if (context.is(PrintStructureKind::TupleElement))
+      return "tuple.element.type";
+    if (context.getPrintStructureKind().hasValue() || context.isType())
       return "";
 
     assert(context.getDecl() && "unexpected context kind");
@@ -273,7 +312,6 @@ private:
       return "decl.var.type";
     case DeclKind::Subscript:
     case DeclKind::Func:
-      return "decl.function.returntype";
     default:
       return "";
     }
@@ -283,11 +321,19 @@ private:
     if (insideRef)
       return "";
 
+    bool insideParam =
+        !contextStack.empty() &&
+        contextStack.back().is(PrintStructureKind::FunctionParameter);
+
     switch (context) {
     case PrintNameContext::FunctionParameterExternal:
       return ExternalParamNameTag;
     case PrintNameContext::FunctionParameterLocal:
       return LocalParamNameTag;
+    case PrintNameContext::TupleElement:
+      if (insideParam)
+        return ExternalParamNameTag;
+      return "tuple.element.argument_label";
     case PrintNameContext::Keyword:
       return SyntaxKeywordTag;
     case PrintNameContext::GenericParameter:
@@ -296,6 +342,27 @@ private:
       return "syntaxtype.attribute.name";
     default:
       return "";
+    }
+  }
+
+  /// 'Fix' a tuple or tuple element structure kind to be a function parameter
+  /// or function type if we are currently inside a function type. This
+  /// simplifies functions that need to differentiate a tuple from the input
+  /// part of a function type.
+  void fixupTuple(PrintStructureKind &kind) {
+    assert(kind == PrintStructureKind::TupleElement ||
+           kind == PrintStructureKind::TupleType);
+    // Skip over 'type's in the context stack.
+    for (auto I = contextStack.rbegin(), E = contextStack.rend(); I != E; ++I) {
+      if (I->is(PrintStructureKind::FunctionType)) {
+        if (kind == PrintStructureKind::TupleElement)
+          kind = PrintStructureKind::FunctionParameter;
+        else
+          kind = PrintStructureKind::FunctionType;
+        break;
+      } else if (!I->isType()) {
+        break;
+      }
     }
   }
 
@@ -514,6 +581,11 @@ static bool passCursorInfoForModule(ModuleEntity Mod,
   if (auto IFaceGenRef = IFaceGenContexts.find(Info.ModuleName, Invok))
     Info.ModuleInterfaceName = IFaceGenRef->getDocumentName();
   Info.IsSystem = Mod.isSystemModule();
+  std::vector<StringRef> Groups;
+  if (auto MD = Mod.getAsSwiftModule()) {
+    Info.ModuleGroupArray = ide::collectModuleGroups(const_cast<ModuleDecl*>(MD),
+                                                     Groups);
+  }
   Receiver(Info);
   return false;
 }
@@ -536,7 +608,8 @@ static bool passCursorInfoForDecl(const ValueDecl *VD,
   bool InSynthesizedExtension = false;
   if (BaseType) {
     if(auto Target = BaseType->getAnyNominal()) {
-      SynthesizedExtensionAnalyzer Analyzer(Target);
+      SynthesizedExtensionAnalyzer Analyzer(Target,
+                                            PrintOptions::printInterface());
       InSynthesizedExtension = Analyzer.isInSynthesizedExtension(VD);
     }
   }
@@ -572,6 +645,15 @@ static bool passCursorInfoForDecl(const ValueDecl *VD,
     ide::getDocumentationCommentAsXML(VD, OS);
   }
   unsigned DocCommentEnd = SS.size();
+
+  if (DocCommentEnd == DocCommentBegin) {
+    if (auto *Req = ASTPrinter::findConformancesWithDocComment(
+        const_cast<ValueDecl*>(VD))) {
+      llvm::raw_svector_ostream OS(SS);
+      ide::getDocumentationCommentAsXML(Req, OS);
+    }
+    DocCommentEnd = SS.size();
+  }
 
   unsigned DeclBegin = SS.size();
   {
@@ -933,6 +1015,144 @@ void SwiftLangSupport::getCursorInfo(
 
   resolveCursor(*this, InputFile, Offset, Invok, /*TryExistingAST=*/true,
                 Receiver);
+}
+
+static void
+resolveCursorFromUSR(SwiftLangSupport &Lang, StringRef InputFile, StringRef USR,
+                     SwiftInvocationRef Invok, bool TryExistingAST,
+                     std::function<void(const CursorInfo &)> Receiver) {
+  assert(Invok);
+
+  class CursorInfoConsumer : public SwiftASTConsumer {
+    std::string InputFile;
+    StringRef USR;
+    SwiftLangSupport &Lang;
+    SwiftInvocationRef ASTInvok;
+    const bool TryExistingAST;
+    std::function<void(const CursorInfo &)> Receiver;
+    SmallVector<ImmutableTextSnapshotRef, 4> PreviousASTSnaps;
+
+  public:
+    CursorInfoConsumer(StringRef InputFile, StringRef USR,
+                       SwiftLangSupport &Lang, SwiftInvocationRef ASTInvok,
+                       bool TryExistingAST,
+                       std::function<void(const CursorInfo &)> Receiver)
+        : InputFile(InputFile), USR(USR), Lang(Lang),
+          ASTInvok(std::move(ASTInvok)), TryExistingAST(TryExistingAST),
+          Receiver(std::move(Receiver)) {}
+
+    bool canUseASTWithSnapshots(
+        ArrayRef<ImmutableTextSnapshotRef> Snapshots) override {
+      if (!TryExistingAST) {
+        LOG_INFO_FUNC(High, "will resolve using up-to-date AST");
+        return false;
+      }
+
+      if (!Snapshots.empty()) {
+        PreviousASTSnaps.append(Snapshots.begin(), Snapshots.end());
+        LOG_INFO_FUNC(High, "will try existing AST");
+        return true;
+      }
+
+      LOG_INFO_FUNC(High, "will resolve using up-to-date AST");
+      return false;
+    }
+
+    void handlePrimaryAST(ASTUnitRef AstUnit) override {
+      auto &CompIns = AstUnit->getCompilerInstance();
+      Module *MainModule = CompIns.getMainModule();
+
+      unsigned BufferID =
+          AstUnit->getPrimarySourceFile().getBufferID().getValue();
+
+      trace::TracedOperation TracedOp;
+      if (trace::enabled()) {
+        trace::SwiftInvocation SwiftArgs;
+        ASTInvok->raw(SwiftArgs.Args.Args, SwiftArgs.Args.PrimaryFile);
+        trace::initTraceFiles(SwiftArgs, CompIns);
+        TracedOp.start(trace::OperationKind::CursorInfoForSource, SwiftArgs,
+                       {std::make_pair("USR", USR)});
+      }
+
+      if (USR.startswith("c:")) {
+        LOG_WARN_FUNC("lookup for C/C++/ObjC USRs not implemented");
+        Receiver({});
+        return;
+      }
+
+      auto &context = CompIns.getASTContext();
+      std::string error;
+      Decl *D = ide::getDeclFromUSR(context, USR, error);
+
+      if (!D) {
+        Receiver({});
+        return;
+      }
+
+      CompilerInvocation CompInvok;
+      ASTInvok->applyTo(CompInvok);
+
+      if (auto *M = dyn_cast<ModuleDecl>(D)) {
+        passCursorInfoForModule(M, Lang.getIFaceGenContexts(), CompInvok,
+                                Receiver);
+      } else if (auto *VD = dyn_cast<ValueDecl>(D)) {
+        bool Failed =
+            passCursorInfoForDecl(VD, MainModule, VD->getType(),
+                                  /*isRef=*/false, BufferID, Lang, CompInvok,
+                                  PreviousASTSnaps, Receiver);
+        if (Failed) {
+          if (!PreviousASTSnaps.empty()) {
+            // Attempt again using the up-to-date AST.
+            resolveCursorFromUSR(Lang, InputFile, USR, ASTInvok,
+                                 /*TryExistingAST=*/false, Receiver);
+          } else {
+            Receiver({});
+          }
+        }
+      }
+    }
+
+    void cancelled() override {
+      CursorInfo Info;
+      Info.IsCancelled = true;
+      Receiver(Info);
+    }
+
+    void failed(StringRef Error) override {
+      LOG_WARN_FUNC("cursor info failed: " << Error);
+      Receiver({});
+    }
+  };
+
+  auto Consumer = std::make_shared<CursorInfoConsumer>(
+      InputFile, USR, Lang, Invok, TryExistingAST, Receiver);
+  /// FIXME: When request cancellation is implemented and Xcode adopts it,
+  /// don't use 'OncePerASTToken'.
+  static const char OncePerASTToken = 0;
+  Lang.getASTManager().processASTAsync(Invok, std::move(Consumer),
+                                       &OncePerASTToken);
+}
+
+void SwiftLangSupport::getCursorInfoFromUSR(
+    StringRef filename, StringRef USR, ArrayRef<const char *> args,
+    std::function<void(const CursorInfo &)> receiver) {
+  if (auto IFaceGenRef = IFaceGenContexts.get(filename)) {
+    LOG_WARN_FUNC("info from usr for generated interface not implemented yet");
+    receiver({});
+    return;
+  }
+
+  std::string error;
+  SwiftInvocationRef invok = ASTMgr->getInvocation(args, filename, error);
+  if (!invok) {
+    // FIXME: Report it as failed request.
+    LOG_WARN_FUNC("failed to create an ASTInvocation: " << error);
+    receiver({});
+    return;
+  }
+
+  resolveCursorFromUSR(*this, filename, USR, invok, /*TryExistingAST=*/true,
+                       receiver);
 }
 
 //===----------------------------------------------------------------------===//

@@ -162,7 +162,7 @@ private:
   };
   SILValue SelfValue;
   ArrayRef<Substitution> Substitutions;
-  CanType OrigFormalInterfaceType;
+  CanAnyFunctionType OrigFormalInterfaceType;
   CanAnyFunctionType SubstFormalType;
   Optional<SILLocation> SpecializeLoc;
   bool HasSubstitutions = false;
@@ -174,7 +174,7 @@ private:
 private:
 
   Callee(ManagedValue indirectValue,
-         CanType origFormalType,
+         CanAnyFunctionType origFormalType,
          CanAnyFunctionType substFormalType,
          SILLocation L)
     : kind(Kind::IndirectValue),
@@ -267,13 +267,13 @@ private:
 
     // Add the 'self' parameter back.  We want it to look like a
     // substitution of the appropriate clause from the original type.
-    auto origFormalType = cast<AnyFunctionType>(OrigFormalInterfaceType);
+    auto selfType = OrigFormalInterfaceType.getInput();
     auto substSelfType =
-      buildSubstSelfType(origFormalType.getInput(), protocolSelfType, ctx);
+      buildSubstSelfType(selfType, protocolSelfType, ctx);
 
     auto extInfo = FunctionType::ExtInfo(FunctionType::Representation::Thin,
                                          /*noreturn*/ false,
-                                         /*throws*/ origFormalType->throws());
+                                         /*throws*/ OrigFormalInterfaceType->throws());
 
     SubstFormalType = CanFunctionType::get(substSelfType, SubstFormalType,
                                            extInfo);
@@ -285,8 +285,7 @@ private:
     assert(kind == Kind::DynamicMethod);
 
     // Drop the original self clause.
-    CanType methodType = OrigFormalInterfaceType;
-    methodType = cast<AnyFunctionType>(methodType).getResult();
+    CanType methodType = OrigFormalInterfaceType.getResult();
 
     // Replace it with the dynamic self type.
     OrigFormalInterfaceType
@@ -296,17 +295,16 @@ private:
     assert(!OrigFormalInterfaceType->hasTypeParameter());
 
     // Add a self clause to the substituted type.
-    auto origFormalType = cast<AnyFunctionType>(OrigFormalInterfaceType);
-    auto selfType = origFormalType.getInput();
+    auto selfType = OrigFormalInterfaceType.getInput();
     SubstFormalType
       = CanFunctionType::get(selfType, SubstFormalType,
-                             origFormalType->getExtInfo());
+                             OrigFormalInterfaceType->getExtInfo());
   }
 
 public:
 
   static Callee forIndirect(ManagedValue indirectValue,
-                            CanType origFormalType,
+                            CanAnyFunctionType origFormalType,
                             CanAnyFunctionType substFormalType,
                             SILLocation l) {
     return Callee(indirectValue,
@@ -394,7 +392,7 @@ public:
     return Captures.hasValue();
   }
 
-  CanType getOrigFormalType() const {
+  CanAnyFunctionType getOrigFormalType() const {
     return OrigFormalInterfaceType;
   }
 
@@ -4380,7 +4378,7 @@ SILGenFunction::getMaterializeForSetDeclRef(AbstractStorageDecl *storage,
                     /*foreign*/ false);
 }
 
-std::pair<SILValue, SILValue> SILGenFunction::
+MaterializedLValue SILGenFunction::
 emitMaterializeForSetAccessor(SILLocation loc, SILDeclRef materializeForSet,
                               ArrayRef<Substitution> substitutions,
                               ArgumentSource &&selfValue,
@@ -4390,11 +4388,6 @@ emitMaterializeForSetAccessor(SILLocation loc, SILDeclRef materializeForSet,
   // Scope any further writeback just within this operation.
   WritebackScope writebackScope(*this);
 
-  assert(!materializeForSet.getDecl()
-           ->getDeclContext()->getAsProtocolExtensionContext() &&
-         "direct use of materializeForSet from a protocol extension is"
-         " probably a miscompile");
-
   Callee callee = emitSpecializedAccessorFunctionRef(*this, loc,
                                                      materializeForSet,
                                                      substitutions, selfValue,
@@ -4402,6 +4395,7 @@ emitMaterializeForSetAccessor(SILLocation loc, SILDeclRef materializeForSet,
   bool hasCaptures = callee.hasCaptures();
   bool hasSelf = (bool)selfValue;
   CanAnyFunctionType accessType = callee.getSubstFormalType();
+  CanAnyFunctionType origAccessType = callee.getOrigFormalType();
 
   CallEmission emission(*this, std::move(callee), std::move(writebackScope));
   // Self ->
@@ -4442,7 +4436,16 @@ emitMaterializeForSetAccessor(SILLocation loc, SILDeclRef materializeForSet,
   // Project out the optional callback.
   SILValue optionalCallback = results[1].getUnmanagedValue();
 
-  return { address, optionalCallback };
+  CanType origSelfType = origAccessType->getInput()
+      ->getInOutObjectType()
+      ->getCanonicalType();
+  CanGenericSignature genericSig;
+  if (auto genericFnType = dyn_cast<GenericFunctionType>(origAccessType))
+    genericSig = genericFnType.getGenericSignature();
+
+  return MaterializedLValue(ManagedValue::forUnmanaged(address),
+                            origSelfType, genericSig,
+                            optionalCallback, callbackStorage);
 }
 
 SILDeclRef SILGenFunction::getAddressorDeclRef(AbstractStorageDecl *storage,
@@ -4574,34 +4577,10 @@ static SILValue emitDynamicPartialApply(SILGenFunction &gen,
                                         SILValue method,
                                         SILValue self,
                                         CanFunctionType methodTy) {
-  // Pop the self type off of the function type.
-  // Just to be weird, partially applying an objc method produces a native
-  // function (?!)
-  auto fnTy = method->getType().castTo<SILFunctionType>();
-
-  // If the original method has an @unowned_inner_pointer return, the partial
-  // application thunk will lifetime-extend 'self' for us, converting the
-  // return value to @unowned.
-  //
-  // If the original method has an @autoreleased return, the partial application
-  // thunk will retain it for us, converting the return value to @owned.
-  SmallVector<SILResultInfo, 4> results;
-  results.append(fnTy->getAllResults().begin(), fnTy->getAllResults().end());
-  for (auto &result : results) {
-    if (result.getConvention() == ResultConvention::UnownedInnerPointer)
-      result = SILResultInfo(result.getType(), ResultConvention::Unowned);
-    else if (result.getConvention() == ResultConvention::Autoreleased)
-      result = SILResultInfo(result.getType(), ResultConvention::Owned);
-  }
-
-  auto partialApplyTy = SILFunctionType::get(fnTy->getGenericSignature(),
-                     fnTy->getExtInfo()
-                       .withRepresentation(SILFunctionType::Representation::Thick),
-                     ParameterConvention::Direct_Owned,
-                     fnTy->getParameters()
-                       .slice(0, fnTy->getParameters().size() - 1),
-                     results, fnTy->getOptionalErrorResult(),
-                     gen.getASTContext());
+  auto partialApplyTy = SILBuilder::getPartialApplyResultType(method->getType(),
+                                                              /*argCount*/1,
+                                                              gen.SGM.M,
+                                                              /*subs*/{});
 
   // Retain 'self' because the partial apply will take ownership.
   // We can't simply forward 'self' because the partial apply is conditional.
@@ -4615,11 +4594,11 @@ static SILValue emitDynamicPartialApply(SILGenFunction &gen,
 #endif
 
   SILValue result = gen.B.createPartialApply(loc, method, method->getType(), {},
-                        self, SILType::getPrimitiveObjectType(partialApplyTy));
+                                             self, partialApplyTy);
   // If necessary, thunk to the native ownership conventions and bridged types.
   auto nativeTy = gen.getLoweredLoadableType(methodTy).castTo<SILFunctionType>();
 
-  if (nativeTy != partialApplyTy) {
+  if (nativeTy != partialApplyTy.getSwiftRValueType()) {
     result = gen.emitBlockToFunc(loc, ManagedValue::forUnmanaged(result),
                                  nativeTy).forward(gen);
   }

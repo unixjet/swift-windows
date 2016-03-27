@@ -94,10 +94,6 @@ struct TestBridgedKeyTy : Hashable, _ObjectiveCBridgeable {
 
   var hashValue: Int { return value }
 
-  static func _getObjectiveCType() -> Any.Type {
-    return TestObjCKeyTy.self
-  }
-
   func _bridgeToObjectiveC() -> TestObjCKeyTy {
     return TestObjCKeyTy(value)
   }
@@ -136,7 +132,7 @@ SetTraps.test("BridgedKeyIsNotNSCopyable1") {
 }
 
 SetTraps.test("Downcast1")
-  .skip(.Custom(
+  .skip(.custom(
     { _isFastAssertConfiguration() },
     reason: "this trap is not guaranteed to happen in -Ounchecked"))
   .code {
@@ -151,7 +147,7 @@ SetTraps.test("Downcast1")
 }
 
 SetTraps.test("Downcast2")
-  .skip(.Custom(
+  .skip(.custom(
     { _isFastAssertConfiguration() },
     reason: "this trap is not guaranteed to happen in -Ounchecked"))
   .code {

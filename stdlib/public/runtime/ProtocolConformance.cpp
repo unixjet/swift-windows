@@ -230,8 +230,18 @@ namespace {
 }
 
 // Conformance Cache.
-
+#if defined(__APPLE__) && defined(__MACH__)
 static void _initializeCallbacksToInspectDylib();
+#else
+namespace swift {
+  void _swift_initializeCallbacksToInspectDylib(
+    void (*fnAddImageBlock)(const uint8_t *, size_t),
+    const char *sectionName);
+}
+
+static void _addImageProtocolConformancesBlock(const uint8_t *conformances,
+                                               size_t conformancesSize);
+#endif
 
 struct ConformanceState {
   ConcurrentMap<ConformanceCacheEntry> Cache;
@@ -247,7 +257,13 @@ struct ConformanceState {
 #if !defined(_MSC_VER)
     pthread_mutex_init(&SectionsToScanLock, nullptr);
 #endif
+#if defined(__APPLE__) && defined(__MACH__)
     _initializeCallbacksToInspectDylib();
+#else
+    _swift_initializeCallbacksToInspectDylib(
+      _addImageProtocolConformancesBlock,
+      SWIFT_PROTOCOL_CONFORMANCES_SECTION);
+#endif
   }
 
   void cacheSuccess(const void *type, const ProtocolDescriptor *proto,
@@ -313,6 +329,14 @@ static void _addImageProtocolConformancesBlock(const uint8_t *conformances,
                                 recordsBegin, recordsEnd);
 }
 
+#if !defined(__APPLE__) || !defined(__MACH__)
+// Common Structure
+struct InspectArgs {
+  void (*fnAddImageBlock)(const uint8_t *, size_t);
+  const char *sectionName;
+};
+#endif
+
 #if defined(__APPLE__) && defined(__MACH__)
 static void _addImageProtocolConformances(const mach_header *mh,
                                           intptr_t vmaddr_slide) {
@@ -335,16 +359,27 @@ static void _addImageProtocolConformances(const mach_header *mh,
   
   _addImageProtocolConformancesBlock(conformances, conformancesSize);
 }
+
+static void _initializeCallbacksToInspectDylib() {
+  // Install our dyld callback.
+  // Dyld will invoke this on our behalf for all images that have already
+  // been loaded.
+  _dyld_register_func_for_add_image(_addImageProtocolConformances);
+}
+
 #elif defined(__ELF__)
 static int _addImageProtocolConformances(struct dl_phdr_info *info,
-                                          size_t size, void * /*data*/) {
+                                          size_t size, void *data) {
+  // inspectArgs contains addImage*Block function and the section name
+  InspectArgs *inspectArgs = reinterpret_cast<InspectArgs *>(data);
+
   void *handle;
   if (!info->dlpi_name || info->dlpi_name[0] == '\0') {
     handle = dlopen(nullptr, RTLD_LAZY);
   } else
     handle = dlopen(info->dlpi_name, RTLD_LAZY | RTLD_NOLOAD);
   auto conformances = reinterpret_cast<const uint8_t*>(
-      dlsym(handle, SWIFT_PROTOCOL_CONFORMANCES_SECTION));
+      dlsym(handle, inspectArgs->sectionName));
 
   if (!conformances) {
     // if there are no conformances, don't hold this handle open.
@@ -356,14 +391,28 @@ static int _addImageProtocolConformances(struct dl_phdr_info *info,
   auto conformancesSize = *reinterpret_cast<const uint64_t*>(conformances);
   conformances += sizeof(conformancesSize);
 
-  _addImageProtocolConformancesBlock(conformances, conformancesSize);
+  inspectArgs->fnAddImageBlock(conformances, conformancesSize);
 
   dlclose(handle);
   return 0;
 }
+
+void swift::_swift_initializeCallbacksToInspectDylib(
+    void (*fnAddImageBlock)(const uint8_t *, size_t),
+    const char *sectionName) {
+  InspectArgs inspectArgs = {fnAddImageBlock, sectionName};
+
+  // Search the loaded dls. Unlike the above, this only searches the already
+  // loaded ones.
+  // FIXME: Find a way to have this continue to happen after.
+  // rdar://problem/19045112
+  dl_iterate_phdr(_addImageProtocolConformances, &inspectArgs);
+}
 #elif defined(__CYGWIN__) || defined(_MSC_VER)
 static int _addImageProtocolConformances(struct dl_phdr_info *info,
-                                          size_t size, void * /*data*/) {
+                                          size_t size, void *data) {
+  InspectArgs *inspectArgs = (InspectArgs *)data;
+  // inspectArgs contains addImage*Block function and the section name
 #if defined(_MSC_VER)
   HMODULE handle;
 
@@ -373,7 +422,6 @@ static int _addImageProtocolConformances(struct dl_phdr_info *info,
     handle = GetModuleHandle(info->dlpi_name);
 #else
   void *handle;
-
   if (!info->dlpi_name || info->dlpi_name[0] == '\0') {
     handle = dlopen(nullptr, RTLD_LAZY);
   } else
@@ -382,11 +430,11 @@ static int _addImageProtocolConformances(struct dl_phdr_info *info,
 
   unsigned long conformancesSize;
   const uint8_t *conformances =
-    _swift_getSectionDataPE(handle, SWIFT_PROTOCOL_CONFORMANCES_SECTION,
+    _swift_getSectionDataPE(handle, inspectArgs->sectionName,
                            &conformancesSize);
 
   if (conformances)
-    _addImageProtocolConformancesBlock(conformances, conformancesSize);
+    inspectArgs->fnAddImageBlock(conformances, conformancesSize);
 
 #if defined(_MSC_VER)
   FreeLibrary(handle);
@@ -395,26 +443,17 @@ static int _addImageProtocolConformances(struct dl_phdr_info *info,
 #endif
   return 0;
 }
-#endif
 
-static void _initializeCallbacksToInspectDylib() {
-#if defined(__APPLE__) && defined(__MACH__)
-  // Install our dyld callback.
-  // Dyld will invoke this on our behalf for all images that have already
-  // been loaded.
-  _dyld_register_func_for_add_image(_addImageProtocolConformances);
-#elif defined(__ELF__)
-  // Search the loaded dls. Unlike the above, this only searches the already
-  // loaded ones.
-  // FIXME: Find a way to have this continue to happen after.
-  // rdar://problem/19045112
-  dl_iterate_phdr(_addImageProtocolConformances, nullptr);
-#elif defined(__CYGWIN__) || defined(_MSC_VER)
-  _swift_dl_iterate_phdr(_addImageProtocolConformances, nullptr);
+void swift::_swift_initializeCallbacksToInspectDylib(
+    void (*fnAddImageBlock)(const uint8_t *, size_t),
+    const char *sectionName) {
+  InspectArgs inspectArgs = {fnAddImageBlock, sectionName};
+
+  _swift_dl_iterate_phdr(_addImageProtocolConformances, &inspectArgs);
+}
 #else
 # error No known mechanism to inspect dynamic libraries on this platform.
 #endif
-}
 
 // This variable is used to signal when a cache was generated and
 // it is correct to avoid a new scan.

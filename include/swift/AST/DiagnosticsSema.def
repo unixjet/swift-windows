@@ -264,9 +264,9 @@ ERROR(cannot_convert_to_return_type_nil,none,
       "nil is incompatible with return type %0", (Type))
 
 ERROR(cannot_convert_thrown_type,none,
-      "thrown expression type %0 does not conform to 'ErrorType'", (Type))
+      "thrown expression type %0 does not conform to 'ErrorProtocol'", (Type))
 ERROR(cannot_throw_nil,none,
-      "cannot infer concrete ErrorType for thrown 'nil' value", ())
+      "cannot infer concrete ErrorProtocol for thrown 'nil' value", ())
 
 
 ERROR(cannot_convert_raw_initializer_value,none,
@@ -367,8 +367,8 @@ ERROR(expr_selector_module_missing,none,
       "import the 'ObjectiveC' module to use '#selector'", ())
 ERROR(expr_selector_no_declaration,none,
       "argument of '#selector' does not refer to an initializer or method", ())
-ERROR(expr_selector_property,none,
-      "argument of '#selector' cannot refer to a property", ())
+ERROR(expr_selector_var,none,
+      "argument of '#selector' cannot refer to a %select{property|parameter|variable}0", (int))
 ERROR(expr_selector_not_method_or_init,none,
       "argument of '#selector' does not refer to a method or initializer", ())
 ERROR(expr_selector_not_objc,none,
@@ -392,6 +392,8 @@ WARNING(selector_literal_deprecated_suggest,none,
         "use '#selector' instead", ())
 WARNING(selector_construction_suggest,none,
         "use '#selector' instead of explicitly constructing a 'Selector'", ())
+NOTE(selector_construction_suppress_warning,none,
+     "wrap the selector name in parentheses to suppress this warning", ())
 
 ERROR(cannot_return_value_from_void_func,none,
       "unexpected non-void return value in void function", ())
@@ -468,6 +470,9 @@ ERROR(invalid_member_type,none,
 ERROR(invalid_member_type_suggest,none,
       "%0 does not have a member type named %1; did you mean %2?",
       (Type, Identifier, Identifier))
+ERROR(invalid_member_type_alias,none,
+      "typealias %0 is too complex to be used as a generic constraint; "
+      "use an associatedtype instead", (Identifier))
 ERROR(ambiguous_member_type,none,
       "ambiguous type name %0 in %1", (Identifier, Type))
 ERROR(no_module_type,none,
@@ -728,7 +733,7 @@ ERROR(string_index_not_integer,none,
       (Type))
 NOTE(string_index_not_integer_note,none,
      "consider using an existing high level algorithm, "
-     "str.startIndex.advancedBy(n), or a projection like str.utf8", ())
+     "str.startIndex.advanced(by: n), or a projection like str.utf8", ())
 
 ERROR(invalid_c_function_pointer_conversion_expr,none,
       "a C function pointer can only be formed from a reference to a 'func' or "
@@ -836,6 +841,14 @@ ERROR(no_objc_tagged_pointer_not_class_protocol,none,
 ERROR(swift_native_objc_runtime_base_not_on_root_class,none,
       "@_swift_native_objc_runtime_base_not_on_root_class can only be applied "
       "to root classes", ())
+
+ERROR(cdecl_not_at_top_level,none,
+      "@_cdecl can only be applied to global functions", ())
+ERROR(cdecl_empty_name,none,
+      "@_cdecl symbol name cannot be empty", ())
+ERROR(cdecl_throws,none,
+      "raising errors from @_cdecl functions is not supported", ())
+
 ERROR(attr_methods_only,none,
       "only methods can be declared %0", (DeclAttribute))
 ERROR(access_control_in_protocol,none,
@@ -1504,7 +1517,7 @@ ERROR(broken_equatable_requirement,none,
 ERROR(broken_hashable_requirement,none,
       "Hashable protocol is broken: unexpected requirement", ())
 ERROR(broken_errortype_requirement,none,
-      "ErrorType protocol is broken: unexpected requirement", ())
+      "ErrorProtocol protocol is broken: unexpected requirement", ())
 ERROR(broken_int_hashable_conformance,none,
       "Int type is broken: does not conform to Hashable", ())
 ERROR(broken_int_integer_literal_convertible_conformance,none,
@@ -1839,7 +1852,7 @@ ERROR(try_assign_rhs_noncovering,none,
 NOTE(subscript_decl_here,none,
      "subscript operator declared here", ())
 ERROR(condition_broken_proto,none,
-      "protocol 'BooleanType' is broken", ())
+      "protocol 'Boolean' is broken", ())
 
 ERROR(broken_bool,none, "type 'Bool' is broken", ())
 
@@ -1965,6 +1978,8 @@ ERROR(generic_type_requires_arguments,none,
       "reference to generic type %0 requires arguments in <...>", (Type))
 NOTE(generic_type_declared_here,none,
      "generic type %0 declared here", (Identifier))
+ERROR(cannot_partially_specialize_generic_function,none,
+     "cannot partially specialize a generic function", ())
 
 // Ambiguities
 ERROR(ambiguous_decl_ref,none,
@@ -2132,8 +2147,8 @@ NOTE(cant_fix_c_style_for_stmt,none,
 // ForEach Stmt
 ERROR(sequence_protocol_broken,none,
       "SequenceType protocol definition is broken", ())
-ERROR(generator_protocol_broken,none,
-      "GeneratorType protocol definition is broken", ())
+ERROR(iterator_protocol_broken,none,
+      "IteratorProtocol protocol definition is broken", ())
 
 ERROR(label_shadowed, none,
       "label %0 cannot be reused on an inner statement", (Identifier))
@@ -2164,6 +2179,15 @@ ERROR(unnecessary_cast_over_optionset,none,
 
 ERROR(type_mismatch_multiple_pattern_list,none,
       "pattern variable bound to type %0, expected type %1", (Type, Type))
+
+WARNING(where_on_one_item, none,
+        "'where' only applies to the second pattern match in this case", ())
+
+NOTE(add_where_newline, none,
+     "disambiguate by adding a line break between them if this is desired", ())
+
+NOTE(duplicate_where, none,
+     "duplicate the 'where' on both patterns to check both patterns",())
 
 //------------------------------------------------------------------------------
 // Type Check Patterns
@@ -2320,7 +2344,7 @@ ERROR(recursive_enum_not_indirect,none,
 ERROR(sugar_type_not_found,none,
       "broken standard library: cannot find "
       "%select{Array|Optional|ImplicitlyUnwrappedOptional|Dictionary|"
-      "ErrorType}0 type", (unsigned))
+      "ErrorProtocol}0 type", (unsigned))
 ERROR(optional_intrinsics_not_found,none,
       "broken standard library: cannot find intrinsic operations on "
       "Optional<T>", ())
@@ -2487,7 +2511,7 @@ ERROR(objc_enum_case_multi,none,
       "'@objc' enum case declaration defines multiple enum cases with the same Objective-C name", ())
 
 // If you change this, also change enum ObjCReason
-#define OBJC_ATTR_SELECT "select{marked dynamic|marked @objc|marked @IBOutlet|marked @NSManaged|a member of an @objc protocol|implicitly @objc|an @objc override}"
+#define OBJC_ATTR_SELECT "select{marked @_cdecl|marked dynamic|marked @objc|marked @IBOutlet|marked @NSManaged|a member of an @objc protocol|implicitly @objc|an @objc override}"
 
 ERROR(objc_invalid_on_var,none,
       "property cannot be %" OBJC_ATTR_SELECT "0 "
@@ -2575,6 +2599,10 @@ ERROR(objc_override_method_selector_mismatch,none,
 ERROR(objc_override_property_name_mismatch,none,
       "Objective-C property has a different name from the "
       "property it overrides (%0 vs. %1)", (Identifier, Identifier))
+
+ERROR(nonlocal_bridged_to_objc,none,
+      "conformance of %0 to %1 can only be written in module %2",
+      (Identifier, Identifier, Identifier))
 
 ERROR(broken_bridged_to_objc_protocol,none,
       "_BridgedToObjectiveC protocol is broken", ())

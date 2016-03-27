@@ -597,7 +597,7 @@ public:
       Table.push_back(llvm::ConstantPointerNull::get(IGM.WitnessTablePtrTy));
     }
 
-    void addMethodFromSILWitnessTable(AbstractFunctionDecl *iface) {
+    void addMethodFromSILWitnessTable(AbstractFunctionDecl *requirement) {
       auto &entry = SILEntries.front();
       SILEntries = SILEntries.slice(1);
 
@@ -610,9 +610,9 @@ public:
 #ifndef NDEBUG
       assert(entry.getKind() == SILWitnessTable::Method
              && "sil witness table does not match protocol");
-      assert(entry.getMethodWitness().Requirement.getDecl() == iface
+      assert(entry.getMethodWitness().Requirement.getDecl() == requirement
              && "sil witness table does not match protocol");
-      auto piEntry = PI.getWitnessEntry(iface);
+      auto piEntry = PI.getWitnessEntry(requirement);
       assert(piEntry.getFunctionIndex().getValue() == Table.size()
              && "offset doesn't match ProtocolInfo layout");
 #endif
@@ -630,12 +630,12 @@ public:
       return;
     }
 
-    void addMethod(FuncDecl *iface) {
-      return addMethodFromSILWitnessTable(iface);
+    void addMethod(FuncDecl *requirement) {
+      return addMethodFromSILWitnessTable(requirement);
     }
 
-    void addConstructor(ConstructorDecl *iface) {
-      return addMethodFromSILWitnessTable(iface);
+    void addConstructor(ConstructorDecl *requirement) {
+      return addMethodFromSILWitnessTable(requirement);
     }
 
     void addAssociatedType(AssociatedTypeDecl *requirement,
@@ -2612,19 +2612,19 @@ void irgen::bindGenericRequirement(IRGenFunction &IGF,
                                    GenericRequirement requirement,
                                    llvm::Value *value,
                                    GetTypeParameterInContextFn getInContext) {
-  // Get the corresponding context archetype.
-  auto archetype = cast<ArchetypeType>(getInContext(requirement.TypeParameter));
+  // Get the corresponding context type.
+  auto type = getInContext(requirement.TypeParameter);
 
   if (auto proto = requirement.Protocol) {
+    assert(isa<ArchetypeType>(type));
     assert(value->getType() == IGF.IGM.WitnessTablePtrTy);
-    setProtocolWitnessTableName(IGF.IGM, value, archetype, proto);
+    setProtocolWitnessTableName(IGF.IGM, value, type, proto);
     auto kind = LocalTypeDataKind::forAbstractProtocolWitnessTable(proto);
-    IGF.setUnscopedLocalTypeData(archetype, kind, value);
+    IGF.setUnscopedLocalTypeData(type, kind, value);
   } else {
     assert(value->getType() == IGF.IGM.TypeMetadataPtrTy);
-    setTypeMetadataName(IGF.IGM, value, archetype);
-    auto kind = LocalTypeDataKind::forTypeMetadata();
-    IGF.setUnscopedLocalTypeData(archetype, kind, value);
+    setTypeMetadataName(IGF.IGM, value, type);
+    IGF.bindLocalTypeDataFromTypeMetadata(type, IsExact, value);
   }
 }
 

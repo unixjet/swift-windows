@@ -248,8 +248,11 @@ void Mangler::mangleContext(const DeclContext *ctx, BindGenerics shouldBind) {
     }
   }
 
-  case DeclContextKind::NominalTypeDecl:
-    mangleNominalType(cast<NominalTypeDecl>(ctx), shouldBind);
+  case DeclContextKind::GenericTypeDecl:
+    if (auto nomctx = dyn_cast<NominalTypeDecl>(ctx))
+      mangleNominalType(nomctx, shouldBind);
+    else
+      mangleContext(ctx->getParent(), shouldBind);
     return;
 
   case DeclContextKind::ExtensionDecl: {
@@ -844,7 +847,6 @@ void Mangler::mangleAssociatedTypeName(DependentMemberType *dmt,
   if (tryMangleSubstitution(assocTy))
     return;
 
-
   // If the base type is known to have a single protocol conformance
   // in the current generic context, then we don't need to disambiguate the
   // associated type name by protocol.
@@ -963,18 +965,17 @@ void Mangler::mangleType(Type type, unsigned uncurryLevel) {
     assert(DWARFMangling && "sugared types are only legal for the debugger");
     auto NameAliasTy = cast<NameAliasType>(tybase);
     TypeAliasDecl *decl = NameAliasTy->getDecl();
-    if (decl->getModuleContext() == decl->getASTContext().TheBuiltinModule)
+    if (decl->getModuleContext() == decl->getASTContext().TheBuiltinModule) {
       // It's not possible to mangle the context of the builtin module.
       return mangleType(decl->getUnderlyingType(), uncurryLevel);
+    }
     
     Buffer << "a";
     // For the DWARF output we want to mangle the type alias + context,
     // unless the type alias references a builtin type.
     ContextStack context(*this);
-    while (DeclCtx && !DeclCtx->isInnermostContextGeneric())
-      DeclCtx = DeclCtx->getParent();
     mangleContextOf(decl, BindGenerics::None);
-    mangleIdentifier(decl->getName());
+    mangleDeclName(decl);
     return;
   }
 
@@ -1069,8 +1070,8 @@ void Mangler::mangleType(Type type, unsigned uncurryLevel) {
     // are several occasions in which we'd like to mangle them in the
     // abstract.
     ContextStack context(*this);
-    mangleNominalType(cast<UnboundGenericType>(tybase)->getDecl(),
-                      BindGenerics::None);
+    auto decl = cast<UnboundGenericType>(tybase)->getDecl();
+    mangleNominalType(cast<NominalTypeDecl>(decl), BindGenerics::None);
     return;
   }
 
@@ -1354,7 +1355,7 @@ void Mangler::mangleType(Type type, unsigned uncurryLevel) {
     if (auto gpBase = dyn_cast<GenericTypeParamType>(base)) {
       Buffer << 'w';
       mangleGenericParamIndex(gpBase);
-      mangleAssociatedTypeName(memTy, /*canAbbreviate*/ true);
+      mangleAssociatedTypeName(memTy, OptimizeProtocolNames);
       return;
     }
 
@@ -1370,7 +1371,7 @@ void Mangler::mangleType(Type type, unsigned uncurryLevel) {
       Buffer << 'W';
       mangleGenericParamIndex(gpRoot);
       for (auto *member : reversed(path)) {
-        mangleAssociatedTypeName(member, /*canAbbreviate*/ true);
+        mangleAssociatedTypeName(member, OptimizeProtocolNames);
       }
       Buffer << '_';
       return;
@@ -1381,7 +1382,7 @@ void Mangler::mangleType(Type type, unsigned uncurryLevel) {
     // we may still want to mangle them for debugging or indexing purposes.
     Buffer << 'q';
     mangleType(memTy->getBase(), 0);
-    mangleAssociatedTypeName(memTy, /*canAbbreviate*/false);
+    mangleAssociatedTypeName(memTy, OptimizeProtocolNames);
     return;
   }
 

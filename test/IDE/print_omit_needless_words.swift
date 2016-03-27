@@ -3,30 +3,30 @@
 
 // REQUIRES: objc_interop
 
-// RUN: %target-swift-frontend(mock-sdk: %clang-importer-sdk-nosource -I %t) -emit-module -o %t -enable-omit-needless-words -enable-strip-ns-prefix %S/../Inputs/clang-importer-sdk/swift-modules-without-ns/ObjectiveC.swift
-// RUN: %target-swift-frontend(mock-sdk: %clang-importer-sdk-nosource -I %t) -emit-module -o %t -enable-omit-needless-words -enable-strip-ns-prefix %S/../Inputs/clang-importer-sdk/swift-modules-without-ns/CoreGraphics.swift
-// RUN: %target-swift-frontend(mock-sdk: %clang-importer-sdk-nosource -I %t) -emit-module -o %t -enable-omit-needless-words  -enable-strip-ns-prefix %S/../Inputs/clang-importer-sdk/swift-modules-without-ns/Foundation.swift
+// RUN: %target-swift-frontend(mock-sdk: %clang-importer-sdk-nosource -I %t) -emit-module -o %t -enable-strip-ns-prefix %S/../Inputs/clang-importer-sdk/swift-modules-without-ns/ObjectiveC.swift
+// RUN: %target-swift-frontend(mock-sdk: %clang-importer-sdk-nosource -I %t) -emit-module -o %t -enable-strip-ns-prefix %S/../Inputs/clang-importer-sdk/swift-modules-without-ns/CoreGraphics.swift
+// RUN: %target-swift-frontend(mock-sdk: %clang-importer-sdk-nosource -I %t) -emit-module -o %t  -enable-strip-ns-prefix %S/../Inputs/clang-importer-sdk/swift-modules-without-ns/Foundation.swift
 
-// RUN: %target-swift-frontend(mock-sdk: %clang-importer-sdk-nosource -I %t) -emit-module -o %t -enable-omit-needless-words  -enable-strip-ns-prefix %S/../Inputs/clang-importer-sdk/swift-modules-without-ns/AppKit.swift
+// RUN: %target-swift-frontend(mock-sdk: %clang-importer-sdk-nosource -I %t) -emit-module -o %t  -enable-strip-ns-prefix %S/../Inputs/clang-importer-sdk/swift-modules-without-ns/AppKit.swift
 
-// RUN: %target-swift-ide-test(mock-sdk: -sdk %S/../Inputs/clang-importer-sdk -I %t) -print-module -source-filename %s -module-to-print=ObjectiveC -function-definitions=false -prefer-type-repr=true -enable-omit-needless-words  -enable-strip-ns-prefix -enable-infer-default-arguments > %t.ObjectiveC.txt
+// RUN: %target-swift-ide-test(mock-sdk: -sdk %S/../Inputs/clang-importer-sdk -I %t) -print-module -source-filename %s -module-to-print=ObjectiveC -function-definitions=false -prefer-type-repr=true  -enable-strip-ns-prefix > %t.ObjectiveC.txt
 // RUN: FileCheck %s -check-prefix=CHECK-OBJECTIVEC -strict-whitespace < %t.ObjectiveC.txt
 
-// RUN: %target-swift-ide-test(mock-sdk: -sdk %S/../Inputs/clang-importer-sdk -I %t) -print-module -source-filename %s -module-to-print=Foundation -function-definitions=false -prefer-type-repr=true -enable-omit-needless-words  -enable-strip-ns-prefix -skip-parameter-names -enable-infer-default-arguments > %t.Foundation.txt
+// RUN: %target-swift-ide-test(mock-sdk: -sdk %S/../Inputs/clang-importer-sdk -I %t) -print-module -source-filename %s -module-to-print=Foundation -function-definitions=false -prefer-type-repr=true  -enable-strip-ns-prefix -skip-parameter-names > %t.Foundation.txt
 // RUN: FileCheck %s -check-prefix=CHECK-FOUNDATION -strict-whitespace < %t.Foundation.txt
 
-// RUN: %target-swift-ide-test(mock-sdk: -sdk %S/../Inputs/clang-importer-sdk -I %t) -print-module -source-filename %s -module-to-print=AppKit -function-definitions=false -prefer-type-repr=true -enable-omit-needless-words  -enable-strip-ns-prefix -skip-parameter-names -enable-infer-default-arguments > %t.AppKit.txt
+// RUN: %target-swift-ide-test(mock-sdk: -sdk %S/../Inputs/clang-importer-sdk -I %t) -print-module -source-filename %s -module-to-print=AppKit -function-definitions=false -prefer-type-repr=true  -enable-strip-ns-prefix -skip-parameter-names > %t.AppKit.txt
 // RUN: FileCheck %s -check-prefix=CHECK-APPKIT -strict-whitespace < %t.AppKit.txt
 
-// RUN: %target-swift-ide-test(mock-sdk: -sdk %S/../Inputs/clang-importer-sdk -I %t -I %S/../ClangModules/Inputs/custom-modules) -print-module -source-filename %s -module-to-print=CoreCooling -function-definitions=false -prefer-type-repr=true -enable-omit-needless-words  -enable-strip-ns-prefix -skip-parameter-names -enable-infer-default-arguments > %t.CoreCooling.txt
+// RUN: %target-swift-ide-test(mock-sdk: -sdk %S/../Inputs/clang-importer-sdk -I %t -I %S/../ClangModules/Inputs/custom-modules) -print-module -source-filename %s -module-to-print=CoreCooling -function-definitions=false -prefer-type-repr=true  -enable-strip-ns-prefix -skip-parameter-names > %t.CoreCooling.txt
 // RUN: FileCheck %s -check-prefix=CHECK-CORECOOLING -strict-whitespace < %t.CoreCooling.txt
 
-// RUN: %target-swift-ide-test(mock-sdk: -sdk %S/../Inputs/clang-importer-sdk -I %t -I %S/Inputs/custom-modules) -print-module -source-filename %s -module-to-print=OmitNeedlessWords -function-definitions=false -prefer-type-repr=true -enable-omit-needless-words  -enable-strip-ns-prefix -skip-parameter-names -enable-infer-default-arguments > %t.OmitNeedlessWords.txt 2> %t.OmitNeedlessWords.diagnostics.txt
+// RUN: %target-swift-ide-test(mock-sdk: -sdk %S/../Inputs/clang-importer-sdk -I %t -I %S/Inputs/custom-modules) -print-module -source-filename %s -module-to-print=OmitNeedlessWords -function-definitions=false -prefer-type-repr=true  -enable-strip-ns-prefix -skip-parameter-names > %t.OmitNeedlessWords.txt 2> %t.OmitNeedlessWords.diagnostics.txt
 // RUN: FileCheck %s -check-prefix=CHECK-OMIT-NEEDLESS-WORDS -strict-whitespace < %t.OmitNeedlessWords.txt
 // RUN: FileCheck %s -check-prefix=CHECK-OMIT-NEEDLESS-WORDS-DIAGS -strict-whitespace < %t.OmitNeedlessWords.diagnostics.txt
 
 
-// RUN: %target-swift-ide-test(mock-sdk: -sdk %S/../Inputs/clang-importer-sdk -I %t) -print-module -source-filename %s -module-to-print=errors -function-definitions=false -prefer-type-repr=true -enable-omit-needless-words  -enable-strip-ns-prefix -skip-parameter-names -enable-infer-default-arguments > %t.errors.txt
+// RUN: %target-swift-ide-test(mock-sdk: -sdk %S/../Inputs/clang-importer-sdk -I %t) -print-module -source-filename %s -module-to-print=errors -function-definitions=false -prefer-type-repr=true  -enable-strip-ns-prefix -skip-parameter-names > %t.errors.txt
 // RUN: FileCheck %s -check-prefix=CHECK-ERRORS -strict-whitespace < %t.errors.txt
 
 // Note: SEL -> "Selector"
@@ -35,6 +35,9 @@
 // Note: "with" parameters.
 // CHECK-FOUNDATION: func makeObjectsPerform(_: Selector, with: AnyObject?)
 // CHECK-FOUNDATION: func makeObjectsPerform(_: Selector, with: AnyObject?, with: AnyObject?)
+
+// Note: don't prefix-strip swift_bridged classes or their subclasses.
+// CHECK-FOUNDATION: func mutableCopy() -> NSMutableArray
 
 // Note: id -> "Object".
 // CHECK-FOUNDATION: func index(of _: AnyObject) -> Int
@@ -172,31 +175,24 @@
 // "UTF8" initialisms.
 // CHECK-FOUNDATION: init?(utf8String: UnsafePointer<Int8>)
 
-// Lowercasing after prefix stripping.
-// CHECK-FOUNDATION: let globalConstant: String
-// CHECK-FOUNDATION: func globalFunction()
+// Don't strip prefixes from globals.
+// CHECK-FOUNDATION: let NSGlobalConstant: String
+// CHECK-FOUNDATION: func NSGlobalFunction()
 
 // Cannot strip because we end up with something that isn't an identifier
 // CHECK-FOUNDATION: func NS123()
 
-// Strip prefix, but don't lowercase ALL_CAPS.
-// CHECK-FOUNDATION: func YELLING()
-
-// Strip prefix along with '_', but don't lowercase ALL_CAPS.
-// CHECK-FOUNDATION: func SCREAMING()
-
-// Don't leave just a '_'.
+// CHECK-FOUNDATION: func NSYELLING()
+// CHECK-FOUNDATION: func NS_SCREAMING()
 // CHECK-FOUNDATION: func NS_()
-
-// Lowercasing initialisms.
-// CHECK-FOUNDATION: let httpRequestKey: String
+// CHECK-FOUNDATION: let NSHTTPRequestKey: String
 
 // Lowercasing initialisms with plurals.
 // CHECK-FOUNDATION: var urlsInText: [URL] { get }
 
-// Prefix stripping for macro names.
-// CHECK-FOUNDATION: var timeIntervalSince1970: Double { get }
-// CHECK-FOUNDATION: var DO_SOMETHING: Int
+// Don't strip prefixes from macro names.
+// CHECK-FOUNDATION: var NSTimeIntervalSince1970: Double { get }
+// CHECK-FOUNDATION: var NS_DO_SOMETHING: Int
 
 // Note: class method name stripping context type.
 // CHECK-APPKIT: class func red() -> NSColor
@@ -227,7 +223,7 @@
 // CHECK-CORECOOLING: func CFBottom() ->
 
 // Note: "Ref" variants are unavailable.
-// CHECK-CORECOOLING: @available(*, unavailable, renamed="CCPowerSupply", message="Not available in Swift")
+// CHECK-CORECOOLING: @available(*, unavailable, renamed: "CCPowerSupply", message: "Not available in Swift")
 // CHECK-CORECOOLING-NEXT: typealias CCPowerSupplyRef = CCPowerSupply
 
 // Note: Skipping over "Ref"
