@@ -282,7 +282,7 @@ public func scalbn(x: ${T}, _ n: Int) -> ${T} {
 
 % # This is AllFloatTypes not OverlayFloatTypes because of the tuple return.
 % for T, CT, f in AllFloatTypes():
-#if os(Linux) || os(FreeBSD)
+#if os(Linux) || os(FreeBSD) || os(Windows)
 @_transparent
 @warn_unused_result
 public func lgamma(x: ${T}) -> (${T}, Int) {
