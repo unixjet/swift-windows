@@ -1371,18 +1371,6 @@ toolchains::Windows::constructInvocation(const LinkJobAction &job,
     break;
   }
 
-  addPrimaryInputsOfType(Arguments, context.Inputs, types::TY_Object);
-  addInputsOfType(Arguments, context.InputActions, types::TY_Object);
-
-  context.Args.AddAllArgs(Arguments, options::OPT_Xlinker);
-  context.Args.AddAllArgs(Arguments, options::OPT_linker_option_Group);
-  context.Args.AddAllArgs(Arguments, options::OPT_F);
-
-  if (!context.OI.SDKPath.empty()) {
-    Arguments.push_back("--sysroot");
-    Arguments.push_back(context.Args.MakeArgString(context.OI.SDKPath));
-  }
-
   // Add the runtime library link path, which is platform-specific and found
   // relative to the compiler.
   // FIXME: Duplicated from CompilerInvocation, but in theory the runtime
@@ -1400,17 +1388,34 @@ toolchains::Windows::constructInvocation(const LinkJobAction &job,
   }
   llvm::sys::path::append(RuntimeLibPath,
                           getPlatformNameForTriple(getTriple()));
+
+  addPrimaryInputsOfType(Arguments, context.Inputs, types::TY_Object);
+  addInputsOfType(Arguments, context.InputActions, types::TY_Object);
+
+  context.Args.AddAllArgs(Arguments, options::OPT_Xlinker);
+  context.Args.AddAllArgs(Arguments, options::OPT_linker_option_Group);
+  context.Args.AddAllArgs(Arguments, options::OPT_F);
+
+  if (!context.OI.SDKPath.empty()) {
+    Arguments.push_back("--sysroot");
+    Arguments.push_back(context.Args.MakeArgString(context.OI.SDKPath));
+  }
+
   Arguments.push_back("-L");
   Arguments.push_back(context.Args.MakeArgString(RuntimeLibPath));
+
+  // Explicitly pass the target to the linker
+  Arguments.push_back(context.Args.MakeArgString("--target=" + getTriple().str()));
 
   if (context.Args.hasArg(options::OPT_profile_generate)) {
     SmallString<128> LibProfile(RuntimeLibPath);
     llvm::sys::path::remove_filename(LibProfile); // remove platform name
-    llvm::sys::path::append(LibProfile, "clang", CLANG_VERSION_STRING);
+    llvm::sys::path::append(LibProfile, "clang", "lib");
 
-    llvm::sys::path::append(LibProfile, "lib", getTriple().getOSName(),
+    llvm::sys::path::append(LibProfile, getTriple().getOSName(),
                             Twine("libclang_rt.profile-") +
-                                getTriple().getArchName() + ".a");
+                              getTriple().getArchName() +
+                              ".a");
     Arguments.push_back(context.Args.MakeArgString(LibProfile));
   }
 
@@ -1423,7 +1428,6 @@ toolchains::Windows::constructInvocation(const LinkJobAction &job,
 
   // Always add the stdlib
   Arguments.push_back("-lswiftCore");
-  Arguments.push_back("-lswiftSwiftOnoneSupport");
 
   // Add any autolinking scripts to the arguments
   for (const Job *Cmd : context.Inputs) {

@@ -23,10 +23,9 @@
 #if defined(_MSC_VER)
 #include <string>
 #include <iostream>
+// Avoid defining macro max(), min() which conflict with std::max(), std::min()
+#define NOMINMAX
 #include <windows.h>
-// Macro max(), min() conflicts with std::max(), std::min()
-#undef max
-#undef min
 #else
 #include <sys/resource.h>
 #include <sys/errno.h>
@@ -248,7 +247,7 @@ extern "C" ssize_t swift_stdlib_readLine_stdin(char **LinePtr) {
   }
   std::string Line;
   std::getline(std::cin, Line);
-  *LinePtr = reinterpret_cast<char *>(std::malloc(Line.size() + 1));
+  *LinePtr = static_cast<char *>(std::malloc(Line.size() + 1));
   return Line.size();
 #else
   size_t Capacity = 0;

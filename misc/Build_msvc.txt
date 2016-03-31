@@ -1,5 +1,7 @@
 
-******************************************************
+//////////////////////////////////////////////////////////////////////////////////////////////////////////
+/// INSTALL PACKAGES
+/// 
 Install cmake-3.4.3-win32-x86.exe
 
 Install Python 2.7.11.msi
@@ -15,18 +17,13 @@ Install pkg-config_0.26-1_win32.zip
 
   //??  set PKG_CONFIG_PATH=c:\pkg-config\conf
 
-Install UUID
-  ???
-  
 Install ICU
   http://site.icu-project.org/download/56#TOC-ICU4C-Download
   icu4c-56_1-Win64-msvc10.zip
-
  
-Replace include dir
-  C:\Program Files (x86)\Microsoft Visual Studio 14.0\VC\Clang 3.7\include
- 
-
+//////////////////////////////////////////////////////////////////////////////////////////////////////////
+/// BUILD LIBRARIES AND CLANG FOR SWIFT
+///   
 set PATH=C:\Program Files (x86)\CMake\bin;%PATH%
 set WORKDIR=c:\work\swift_msvc
 
@@ -43,8 +40,26 @@ mkdir %WORKDIR%\build\firsttime\llvm
 cd %WORKDIR%\build\firsttime\llvm
 cmake -G "Visual Studio 14 2015 Win64" -D CMAKE_BUILD_TYPE=RELEASE ..\..\..\llvm
 
-// Build Swift
+//////////////////////////////////////////////////////////////////////////////////////////////////////////
+/// INSTALL CLANG
+/// 
+  Copy %WORKDIR%\build\firsttime\llvm\Release\bin\clang.exe to
+    cl.exe, clang.exe in
+    C:\Program Files (x86)\Microsoft Visual Studio 14.0\VC\Clang 3.9\bin\x86
+  
+  Copy directory %WORKDIR%\build\firsttime\llvm\Release\lib\clang\3.9.0\include to
+    C:\Program Files (x86)\Microsoft Visual Studio 14.0\VC\Clang 3.9\include
+    
+  Copy %WORKDIR%\build\firsttime\llvm\Release\bin\libclang.lib to
+    C:\Program Files (x86)\Microsoft Visual Studio 14.0\VC\Clang 3.9\lib\amd64
 
+  Copy %WORKDIR%/swift/misc/v140_clang_3_9_swift to 
+    C:\Program Files (x86)\MSBuild\Microsoft.Cpp\v4.0\V140\Platforms\x64\PlatformToolsets\v140_clang_3_9_swift
+  
+
+//////////////////////////////////////////////////////////////////////////////////////////////////////////
+/// BUILD SWIFT
+/// 
 mkdir %WORKDIR%\build\firsttime\swift
 set PATH=%WORKDIR%\build\firsttime\llvm\release\bin;%PATH%
 cd %WORKDIR%\build\firsttime\swift
@@ -55,7 +70,26 @@ Cygwin64 Terminal (In Administrator Mode)
 cd c:/Work/swift_msvc/build/firsttime/swift
 sh ../../../swift/misc/patch_all.sh
 
+Following DLL's must be copied to %WORKDIR%/build/firsttime/swift/Release
+  cmark.dll icudt56.dll icuin56.dll icuuc56.dll
+
 "c:\Program Files (x86)\MSBuild\14.0\Bin\MSBuild.exe" /p:Configuration=Release ALL_BUILD.vcxproj 
+
+//////////////////////////////////////////////////////////////////////////////////////////////////////////
+/// COMPILE & LINK Hello (in static)
+/// 
+cd c:/Work/swift_msvc/build/firsttime/swift/Release/bin
+
+lib /out:libswiftCore.lib  ..\lib\swift\windows\x86_64\swiftRuntime.lib  ..\lib\swift\windows\x86_64\swiftStdlibStubs.lib C:\Work\swift_msvc\build\firsttime\swift\stdlib\public\core\windows\x86_64\Swift.obj
+
+swiftc -c Hello.swift -o Hello.obj -O
+
+link /out:hello.exe hello.obj libswiftCore.lib C:\icu\lib64\icuuc.lib C:\icu\lib64\icui18n.lib /MERGE:.rdata=.rodata /FORCE:MULTIPLE
+
+//////////////////////////////////////////////////////////////////////////////////////////////////////////
+//////////////////////////////////////////////////////////////////////////////////////////////////////////
+//////////////////////////////////////////////////////////////////////////////////////////////////////////
+
  
 ******************************************************
 * vsproj processing
@@ -185,17 +219,12 @@ copy  swiftCore.dll  ..\lib\swift\windows\libswiftCore.dll
 copy  swiftSwiftOnoneSupport.dll  ..\lib\swift\windows\libswiftSwiftOnoneSupport.dll
 =======================
 
+
 //////////////////////////////////////////////////////////////////////////////////////////////////////////
-/// COMPILING Hello IN STATIC -- WORKING
+/// COMPILING Swift.obj -- WORKING with Cygwin swiftc.exe
 /// 
-cd c:/Work/swift_msvc/build/firsttime/swift/Release/bin
+swiftc -c -sdk / -target x86_64-pc-windows-msvc -O -I C:/Work/swift_msvc/build/firsttime/swift/Release/lib/swift/windows/x86_64 -module-cache-path C:/Work/swift_msvc/build/firsttime/swift/Release/clang-module-cache -no-link-objc-runtime -nostdimport -parse-stdlib -module-name Swift -Xfrontend -group-info-path -Xfrontend C:/Work/swift_msvc/swift/stdlib/public/core/GroupInfo.json -Xfrontend -sil-serialize-all -module-link-name swiftCore -force-single-frontend-invocation -parse-as-library -emit-module -emit-module-path C:/Work/swift_msvc/build/firsttime/swift/Release/lib/swift/windows/x86_64/Swift.swiftmodule -o C:/Work/swift_msvc/build/firsttime/swift/stdlib/public/core/windows/x86_64/Swift.obj C:/Work/swift_msvc/swift/stdlib/public/core/Algorithm.swift C:/Work/swift_msvc/swift/stdlib/public/core/ArrayBody.swift C:/Work/swift_msvc/swift/stdlib/public/core/ArrayBuffer.swift C:/Work/swift_msvc/swift/stdlib/public/core/ArrayBufferProtocol.swift C:/Work/swift_msvc/swift/stdlib/public/core/ArrayCast.swift C:/Work/swift_msvc/build/firsttime/swift/stdlib/public/core/8/Arrays.swift C:/Work/swift_msvc/swift/stdlib/public/core/ArrayType.swift C:/Work/swift_msvc/swift/stdlib/public/core/Assert.swift C:/Work/swift_msvc/swift/stdlib/public/core/AssertCommon.swift C:/Work/swift_msvc/swift/stdlib/public/core/Bool.swift C:/Work/swift_msvc/swift/stdlib/public/core/Boolean.swift C:/Work/swift_msvc/swift/stdlib/public/core/BridgeObjectiveC.swift C:/Work/swift_msvc/swift/stdlib/public/core/BridgeStorage.swift C:/Work/swift_msvc/swift/stdlib/public/core/Builtin.swift C:/Work/swift_msvc/build/firsttime/swift/stdlib/public/core/8/BuiltinMath.swift C:/Work/swift_msvc/swift/stdlib/public/core/Character.swift C:/Work/swift_msvc/swift/stdlib/public/core/CocoaArray.swift C:/Work/swift_msvc/swift/stdlib/public/core/Collection.swift C:/Work/swift_msvc/build/firsttime/swift/stdlib/public/core/8/CollectionAlgorithms.swift C:/Work/swift_msvc/swift/stdlib/public/core/CompilerProtocols.swift C:/Work/swift_msvc/swift/stdlib/public/core/ContiguousArrayBuffer.swift C:/Work/swift_msvc/swift/stdlib/public/core/CString.swift C:/Work/swift_msvc/swift/stdlib/public/core/CTypes.swift C:/Work/swift_msvc/swift/stdlib/public/core/EmptyCollection.swift C:/Work/swift_msvc/swift/stdlib/public/core/ErrorType.swift C:/Work/swift_msvc/swift/stdlib/public/core/Existential.swift C:/Work/swift_msvc/swift/stdlib/public/core/Filter.swift C:/Work/swift_msvc/build/firsttime/swift/stdlib/public/core/8/FixedPoint.swift C:/Work/swift_msvc/swift/stdlib/public/core/FlatMap.swift C:/Work/swift_msvc/build/firsttime/swift/stdlib/public/core/8/Flatten.swift C:/Work/swift_msvc/build/firsttime/swift/stdlib/public/core/8/FloatingPoint.swift C:/Work/swift_msvc/build/firsttime/swift/stdlib/public/core/8/FloatingPointOperations.swift C:/Work/swift_msvc/build/firsttime/swift/stdlib/public/core/8/FloatingPointParsing.swift C:/Work/swift_msvc/build/firsttime/swift/stdlib/public/core/8/HashedCollections.swift C:/Work/swift_msvc/swift/stdlib/public/core/Hashing.swift C:/Work/swift_msvc/swift/stdlib/public/core/HeapBuffer.swift C:/Work/swift_msvc/swift/stdlib/public/core/ImplicitlyUnwrappedOptional.swift C:/Work/swift_msvc/swift/stdlib/public/core/Index.swift C:/Work/swift_msvc/swift/stdlib/public/core/InputStream.swift C:/Work/swift_msvc/build/firsttime/swift/stdlib/public/core/8/IntegerArithmetic.swift C:/Work/swift_msvc/build/firsttime/swift/stdlib/public/core/8/IntegerParsing.swift C:/Work/swift_msvc/build/firsttime/swift/stdlib/public/core/8/Interval.swift C:/Work/swift_msvc/swift/stdlib/public/core/Join.swift C:/Work/swift_msvc/swift/stdlib/public/core/LazyCollection.swift C:/Work/swift_msvc/swift/stdlib/public/core/LazySequence.swift C:/Work/swift_msvc/swift/stdlib/public/core/LifetimeManager.swift C:/Work/swift_msvc/swift/stdlib/public/core/ManagedBuffer.swift C:/Work/swift_msvc/swift/stdlib/public/core/Map.swift C:/Work/swift_msvc/build/firsttime/swift/stdlib/public/core/8/Mirrors.swift C:/Work/swift_msvc/swift/stdlib/public/core/Misc.swift C:/Work/swift_msvc/swift/stdlib/public/core/ObjCMirrors.swift C:/Work/swift_msvc/swift/stdlib/public/core/Optional.swift C:/Work/swift_msvc/swift/stdlib/public/core/OptionSet.swift C:/Work/swift_msvc/swift/stdlib/public/core/OutputStream.swift C:/Work/swift_msvc/swift/stdlib/public/core/Pointer.swift C:/Work/swift_msvc/swift/stdlib/public/core/Policy.swift C:/Work/swift_msvc/swift/stdlib/public/core/Print.swift C:/Work/swift_msvc/swift/stdlib/public/core/Range.swift C:/Work/swift_msvc/swift/stdlib/public/core/RangeReplaceableCollection.swift C:/Work/swift_msvc/swift/stdlib/public/core/Reflection.swift C:/Work/swift_msvc/swift/stdlib/public/core/Repeat.swift C:/Work/swift_msvc/swift/stdlib/public/core/REPL.swift C:/Work/swift_msvc/swift/stdlib/public/core/Reverse.swift C:/Work/swift_msvc/build/firsttime/swift/stdlib/public/core/8/Runtime.swift C:/Work/swift_msvc/swift/stdlib/public/core/Sequence.swift C:/Work/swift_msvc/build/firsttime/swift/stdlib/public/core/8/SequenceAlgorithms.swift C:/Work/swift_msvc/swift/stdlib/public/core/SequenceWrapper.swift C:/Work/swift_msvc/swift/stdlib/public/core/SetAlgebra.swift C:/Work/swift_msvc/swift/stdlib/public/core/ShadowProtocols.swift C:/Work/swift_msvc/swift/stdlib/public/core/Shims.swift C:/Work/swift_msvc/build/firsttime/swift/stdlib/public/core/8/Slice.swift C:/Work/swift_msvc/build/firsttime/swift/stdlib/public/core/8/Sort.swift C:/Work/swift_msvc/swift/stdlib/public/core/StaticString.swift C:/Work/swift_msvc/swift/stdlib/public/core/Stride.swift C:/Work/swift_msvc/swift/stdlib/public/core/StringCharacterView.swift C:/Work/swift_msvc/swift/stdlib/public/core/String.swift C:/Work/swift_msvc/swift/stdlib/public/core/StringBridge.swift C:/Work/swift_msvc/swift/stdlib/public/core/StringBuffer.swift C:/Work/swift_msvc/swift/stdlib/public/core/StringCore.swift C:/Work/swift_msvc/build/firsttime/swift/stdlib/public/core/8/StringInterpolation.swift C:/Work/swift_msvc/swift/stdlib/public/core/StringLegacy.swift C:/Work/swift_msvc/swift/stdlib/public/core/StringUnicodeScalarView.swift C:/Work/swift_msvc/swift/stdlib/public/core/StringUTF16.swift C:/Work/swift_msvc/swift/stdlib/public/core/StringUTF8.swift C:/Work/swift_msvc/swift/stdlib/public/core/SwiftNativeNSArray.swift C:/Work/swift_msvc/build/firsttime/swift/stdlib/public/core/8/UnavailableStringAPIs.swift C:/Work/swift_msvc/swift/stdlib/public/core/Unicode.swift C:/Work/swift_msvc/swift/stdlib/public/core/UnicodeScalar.swift C:/Work/swift_msvc/build/firsttime/swift/stdlib/public/core/8/UnicodeTrie.swift C:/Work/swift_msvc/swift/stdlib/public/core/Unmanaged.swift C:/Work/swift_msvc/build/firsttime/swift/stdlib/public/core/8/UnsafeBufferPointer.swift C:/Work/swift_msvc/build/firsttime/swift/stdlib/public/core/8/UnsafePointer.swift C:/Work/swift_msvc/swift/stdlib/public/core/Availability.swift C:/Work/swift_msvc/swift/stdlib/public/core/CollectionOfOne.swift C:/Work/swift_msvc/build/firsttime/swift/stdlib/public/core/8/ExistentialCollection.swift C:/Work/swift_msvc/swift/stdlib/public/core/Mirror.swift C:/Work/swift_msvc/swift/stdlib/public/core/Process.swift C:/Work/swift_msvc/swift/stdlib/public/core/SliceBuffer.swift C:/Work/swift_msvc/build/firsttime/swift/stdlib/public/core/8/Tuple.swift C:/Work/swift_msvc/swift/stdlib/public/core/VarArgs.swift C:/Work/swift_msvc/swift/stdlib/public/core/Zip.swift
 
-lib /out:libswiftCore.lib  ..\lib\swift\windows\x86_64\swiftRuntime.lib  ..\lib\swift\windows\x86_64\swiftStdlibStubs.lib C:\Work\swift_msvc\build\firsttime\swift\stdlib\public\core\windows\x86_64\Swift.obj
-
-swiftc -c Hello.swift -o Hello.obj -O
-link /out:hello.exe hello.obj libswiftCore.lib C:\icu\lib64\icuuc.lib C:\icu\lib64\icui18n.lib /MERGE:.rdata=.rodata /FORCE:MULTIPLE
-
-//////////////////////////////////////////////////////////////////////////////////////////////////////////
 
 ////////////////////////////////////////////////////////
 /// Manually import -- NOT WORK

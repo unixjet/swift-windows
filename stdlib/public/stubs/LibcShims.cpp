@@ -10,10 +10,10 @@
 //
 //===----------------------------------------------------------------------===//
 
+#include <random>
 #include <type_traits>
 #if defined(_MSC_VER)
 #include <io.h>
-#include <random>
 #else
 #include <unistd.h>
 #endif
@@ -71,14 +71,15 @@ int _swift_stdlib_close(int fd) { return close(fd); }
 #if defined(__APPLE__)
 #include <malloc/malloc.h>
 size_t _swift_stdlib_malloc_size(const void *ptr) { return malloc_size(ptr); }
-#elif defined(__GNU_LIBRARY__) || defined(__CYGWIN__) || defined(_MSC_VER)
+#elif defined(__GNU_LIBRARY__) || defined(__CYGWIN__)
 #include <malloc.h>
 size_t _swift_stdlib_malloc_size(const void *ptr) {
-#if defined(_MSC_VER)
-  return _msize(const_cast<void *>(ptr));
-#else
   return malloc_usable_size(const_cast<void *>(ptr));
-#endif
+}
+#elif defined(_MSC_VER)
+#include <malloc.h>
+size_t _swift_stdlib_malloc_size(const void *ptr) {
+  return _msize(const_cast<void *>(ptr));
 }
 #elif defined(__FreeBSD__)
 #include <malloc_np.h>
@@ -89,27 +90,19 @@ size_t _swift_stdlib_malloc_size(const void *ptr) {
 #error No malloc_size analog known for this platform/libc.
 #endif
 
-#if defined(_MSC_VER)
 static std::random_device RandomeDevice;
 static std::mt19937 MersenneRandom(RandomeDevice());
-#endif
 
-__swift_uint32_t _swift_stdlib_arc4random(void) {
-#if defined(_MSC_VER)
+__swift_uint32_t _swift_stdlib_cxx11_mt19937(void) {
   return MersenneRandom();
-#else
-  return arc4random();
-#endif
 }
 
 __swift_uint32_t
-_swift_stdlib_arc4random_uniform(__swift_uint32_t upper_bound) {
-#if defined(_MSC_VER)
-  std::uniform_int_distribution<int> RandomUniform(1, upper_bound);
+_swift_stdlib_cxx11_mt19937_uniform(__swift_uint32_t upper_bound) {
+  if (upper_bound > 0)
+    upper_bound--;
+  std::uniform_int_distribution<__swift_uint32_t> RandomUniform(0, upper_bound);
   return RandomUniform(MersenneRandom);
-#else
-  return arc4random_uniform(upper_bound);
-#endif
 }
 
 } // namespace swift

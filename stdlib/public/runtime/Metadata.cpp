@@ -62,11 +62,27 @@
 using namespace swift;
 using namespace metadataimpl;
 
+// allocate memory up to a nearby page boundary
+static void *swift_allocPage(size_t size) {
+#if defined(_MSC_VER)
+  auto mem =
+    VirtualAlloc(nullptr, size,
+                 MEM_TOP_DOWN | MEM_RESERVE | MEM_COMMIT, PAGE_READWRITE);
+#else
+  auto mem = mmap(nullptr, size,
+                  PROT_READ|PROT_WRITE, MAP_ANON|MAP_PRIVATE,
+                  VM_TAG_FOR_SWIFT_METADATA, 0);
+  if (mem == MAP_FAILED)
+    mem = nullptr;
+#endif
+  return mem;
+}
+
 void *MetadataAllocator::alloc(size_t size) {
 #if defined(__APPLE__)
   const uintptr_t pagesizeMask = vm_page_mask;
 #elif defined(_MSC_VER)
-  SYSTEM_INFO  SystemInfo;
+  SYSTEM_INFO SystemInfo;
   GetSystemInfo(&SystemInfo);
   const uintptr_t pagesizeMask = SystemInfo.dwPageSize - 1;
 #else
@@ -75,44 +91,23 @@ void *MetadataAllocator::alloc(size_t size) {
   // If the requested size is a page or larger, map page(s) for it
   // specifically.
   if (LLVM_UNLIKELY(size > pagesizeMask)) {
-#if defined(_MSC_VER)
-    auto mem =
-        VirtualAlloc(nullptr, (size + pagesizeMask) & ~pagesizeMask,
-                     MEM_TOP_DOWN | MEM_RESERVE | MEM_COMMIT, PAGE_READWRITE);
+    void *mem = swift_allocPage((size + pagesizeMask) & ~pagesizeMask);
     if (!mem)
       crash("unable to allocate memory for metadata cache");
-#else
-    auto mem = mmap(nullptr, (size + pagesizeMask) & ~pagesizeMask,
-                    PROT_READ|PROT_WRITE, MAP_ANON|MAP_PRIVATE,
-                    VM_TAG_FOR_SWIFT_METADATA, 0);
-    if (mem == MAP_FAILED)
-      crash("unable to allocate memory for metadata cache");
-#endif
     return mem;
   }
-  
+
   char *end = next + size;
-  
+
   // Allocate a new page if we need one.
   if (LLVM_UNLIKELY(((uintptr_t)next & ~pagesizeMask)
                       != (((uintptr_t)end & ~pagesizeMask)))){
-#if defined(_MSC_VER)
-    next = (char *)
-      VirtualAlloc(nullptr, pagesizeMask+1,
-                   MEM_TOP_DOWN | MEM_RESERVE | MEM_COMMIT, PAGE_READWRITE);
+    next = (char *)swift_allocPage(pagesizeMask+1);
     if (!next)
       crash("unable to allocate memory for metadata cache");
-#else
-    next = (char*)
-      mmap(nullptr, pagesizeMask+1, PROT_READ|PROT_WRITE,
-           MAP_ANON|MAP_PRIVATE, VM_TAG_FOR_SWIFT_METADATA, 0);
-
-    if (next == MAP_FAILED)
-      crash("unable to allocate memory for metadata cache");
-#endif
     end = next + size;
   }
-  
+
   char *addr = next;
   next = end;
   return addr;

@@ -17,10 +17,40 @@
 #include "swift/Runtime/Config.h"
 #include "swift/Runtime/Debug.h"
 #include <cstdint>
+#include <cstdarg>
 #include <stdio.h>
 #include <stdlib.h>
 
 using namespace swift;
+
+static int swift_asprintf(char **strp, const char *fmt, ...)
+{
+  va_list args;
+  va_start(args, fmt);
+#if defined(_MSC_VER)
+  int len = _vscprintf(fmt, args);
+  if (len < 0) {
+    va_end(args);
+    return -1;
+  }
+  char *buffer = static_cast<char *>(malloc(len + 1));
+  if (!buffer) {
+    va_end(args);
+    return -1;
+  }
+  int result = vsprintf(buffer, fmt, args);
+  if (result < 0) {
+    va_end(args);
+    free(buffer);
+    return -1;
+  }
+  *strp = buffer;
+#else
+  int result = vasprintf(strp, fmt, args);
+#endif
+  va_end(args);
+  return result;
+}
 
 // Report a fatal error to system console, stderr, and crash logs.
 // <prefix>: <message>: file <file>, line <line>\n
@@ -33,20 +63,10 @@ _swift_stdlib_reportFatalErrorInFile(const char *prefix, intptr_t prefixLength,
                                    uintptr_t line,
                                      uint32_t flags) {
   char *log;
-#if defined(_MSC_VER)
-  int len =
-      _scprintf("%.*s: %.*s%sfile %.*s, line %zu\n", (int)prefixLength, prefix,
-                (int)messageLength, message, (messageLength ? ": " : ""),
-                (int)fileLength, file, (size_t)line);
-  log = reinterpret_cast<char *>(malloc(len + 1));
-  sprintf(log, "%.*s: %.*s%sfile %.*s, line %zu\n", (int)prefixLength, prefix,
-          (int)messageLength, message, (messageLength ? ": " : ""),
-          (int)fileLength, file, (size_t)line);
-#else
-  asprintf(&log, "%.*s: %.*s%sfile %.*s, line %zu\n", (int)prefixLength, prefix,
+  swift_asprintf(&log, "%.*s: %.*s%sfile %.*s, line %zu\n",
+           (int)prefixLength, prefix,
            (int)messageLength, message, (messageLength ? ": " : ""),
            (int)fileLength, file, (size_t)line);
-#endif
   
   swift_reportError(flags, log);
   free(log);
@@ -63,16 +83,8 @@ _swift_stdlib_reportFatalError(const char *prefix,
                                intptr_t messageLength,
                                uint32_t flags) {
   char *log;
-#if defined(_MSC_VER)
-  int len = _scprintf("%.*s: %.*s\n", (int)prefixLength, prefix,
-                      (int)messageLength, message);
-  log = reinterpret_cast<char *>(malloc(len + 1));
-  sprintf(log, "%.*s: %.*s\n", (int)prefixLength, prefix, (int)messageLength,
-          message);
-#else
-  asprintf(&log, "%.*s: %.*s\n", (int)prefixLength, prefix,
+  swift_asprintf(&log, "%.*s: %.*s\n", (int)prefixLength, prefix,
            (int)messageLength, message);
-#endif
   
   swift_reportError(flags, log);
   free(log);
@@ -88,23 +100,10 @@ _swift_stdlib_reportUnimplementedInitializerInFile(
          intptr_t initNameLength, const char *file, intptr_t fileLength,
          uintptr_t line, uintptr_t column, uint32_t flags) {
   char *log;
-#if defined(_MSC_VER)
-  int len =
-      _scprintf("%.*s: %zu: %zu: fatal error: use of unimplemented "
-                "initializer '%.*s' for class '%.*s'\n",
-                (int)fileLength, file, (size_t)line, (size_t)column,
-                (int)initNameLength, initName, (int)classNameLength, className);
-  log = reinterpret_cast<char *>(malloc(len + 1));
-  sprintf(log, "%.*s: %zu: %zu: fatal error: use of unimplemented "
-               "initializer '%.*s' for class '%.*s'\n",
-          (int)fileLength, file, (size_t)line, (size_t)column,
-          (int)initNameLength, initName, (int)classNameLength, className);
-#else
-  asprintf(&log, "%.*s: %zu: %zu: fatal error: use of unimplemented "
+  swift_asprintf(&log, "%.*s: %zu: %zu: fatal error: use of unimplemented "
            "initializer '%.*s' for class '%.*s'\n",
            (int)fileLength, file, (size_t)line, (size_t)column,
            (int)initNameLength, initName, (int)classNameLength, className);
-#endif
 
   swift_reportError(flags, log);
   free(log);
@@ -121,20 +120,9 @@ _swift_stdlib_reportUnimplementedInitializer(const char *className,
                                              intptr_t initNameLength,
                                              uint32_t flags) {
   char *log;
-#if defined(_MSC_VER)
-  int len =
-      _scprintf("fatal error: use of unimplemented "
-                "initializer '%.*s' for class '%.*s'\n",
-                (int)initNameLength, initName, (int)classNameLength, className);
-  log = reinterpret_cast<char *>(malloc(len + 1));
-  sprintf(log, "fatal error: use of unimplemented "
-               "initializer '%.*s' for class '%.*s'\n",
-          (int)initNameLength, initName, (int)classNameLength, className);
-#else
-  asprintf(&log, "fatal error: use of unimplemented "
+  swift_asprintf(&log, "fatal error: use of unimplemented "
            "initializer '%.*s' for class '%.*s'\n",
            (int)initNameLength, initName, (int)classNameLength, className);
-#endif
 
   swift_reportError(flags, log);
   free(log);

@@ -79,12 +79,12 @@ do
   #
   # Insert LARGEADDRESSAWARE for LINK option
   #
-  grep 'machine:x64' $f > /dev/null
-  if [ $? -eq 0 ]
-  then
-    sed -e 's;machine:x64 ;machine:x64 /LARGEADDRESSAWARE:NO ;' $f > tmp.out
-    mv tmp.out $f
-  fi
+#  grep 'machine:x64' $f > /dev/null
+#  if [ $? -eq 0 ]
+#  then
+#    sed -e 's;machine:x64 ;machine:x64 /LARGEADDRESSAWARE:NO ;' $f > tmp.out
+#    mv tmp.out $f
+#  fi
 done
 
 
