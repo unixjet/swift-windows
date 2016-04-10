@@ -1,7 +1,6 @@
 #!/bin/sh
 
-echo  "sed  \\" > tmp.sh
-sed -e 's;\(.*\);-e "s/@\1/@__imp_\1/g" \\;' $1 >> tmp.sh
-echo  " $2 " >> tmp.sh
+sed -e 's;external global;external dllimport global;' \
+	-e 's;@_TWVBo = external dllimport;@_TWVBo = external;' \
+	-e 's;@_TWVBo;@__imp__TWVBo;' $1 > $2
 
-sh tmp.sh > $3
