@@ -79,7 +79,7 @@ Following DLL's must be copied to %WORKDIR%/build/firsttime/swift/Release
 /// COMPILING Swift.obj
 ///   
 **********************************************************************************
-*** CAUSTION: To build Swift.obj, should use swiftc.exe built on Cygwin
+*** CAUTION: To build Swift.obj, should use swiftc.exe built on Cygwin
 ***           To use with static link, remove .pdata or rename .pdata to .qdata
 **********************************************************************************
 
@@ -87,24 +87,22 @@ swiftc -c -sdk / -target x86_64-pc-windows-msvc -O -I C:/Work/swift_msvc/build/f
 
 //////////////////////////////////////////////////////////////////////////////////////////////////////////
 //////////////////////////////////////////////////////////////////////////////////////////////////////////
-/// LINKING swiftCore.dll   
-/// (containing swiftRuntime.lib, swiftStdlibStubs.lib, Swift.obj)
+/// LINKING libswiftCore.dll   
+/// (libswiftCore.dll = swiftRuntime.lib + swiftStdlibStubs.lib + Swift.obj)
 
 **********************************************************************************
-*** CAUSTION: To build Swift.obj, should use swiftc.exe built on Cygwin
+*** CAUTION: To build Swift.obj, should use swiftc.exe built on Cygwin
 **********************************************************************************
 
 cd c:/Work/swift_msvc/build/firsttime/swift/stdlib/public/core
 
-dlltool -z allexp.def --export-all-symbols ./windows/x86_64/Swift.obj ../../../Release/lib/swift/windows/x86_64/swiftRuntime.lib  ../../../Release/lib/swift/windows/x86_64/swiftStdlibStubs.lib
+dlltool -z allexp.orig.def --export-all-symbols ./windows/x86_64/Swift.obj ../../../Release/lib/swift/windows/x86_64/swiftRuntime.lib  ../../../Release/lib/swift/windows/x86_64/swiftStdlibStubs.lib
 
-(BASH)
-sed -e 's/"//g' allexp.def > ttt.def; mv ttt.def allexp.def
+python c:/Work/swift_msvc/swift/misc/trim_exp.py allexp.orig.def allexp.def
 
 (In VS2015 x64 Native Tool Command Prompt)
-link /ERRORREPORT:PROMPT /OUT:"C:\Work\swift_msvc\build\firsttime\swift\Release\bin\swiftCore.dll" /INCREMENTAL:NO /NOLOGO /LIBPATH:C:/Work/swift_msvc/build/firsttime/llvm/Release/lib /LIBPATH:C:/Work/swift_msvc/build/firsttime/llvm/Release/lib/Release /LIBPATH:C:/Work/swift_msvc/build/firsttime/llvm/Release/lib /LIBPATH:C:/Work/swift_msvc/build/firsttime/llvm/Release/lib/Release kernel32.lib user32.lib gdi32.lib winspool.lib shell32.lib ole32.lib oleaut32.lib uuid.lib comdlg32.lib advapi32.lib ..\..\..\Release\lib\swift\windows\x86_64\swiftRuntime.lib ..\..\..\Release\lib\swift\windows\x86_64\swiftStdlibStubs.lib C:\icu\lib64\icuuc.lib C:\icu\lib64\icui18n.lib /MANIFEST /MANIFESTUAC:"level='asInvoker' uiAccess='false'" /manifest:embed /PDB:"C:/Work/swift_msvc/build/firsttime/swift/Release/bin/swiftCore.pdb" /SUBSYSTEM:CONSOLE /TLBID:1 /DYNAMICBASE /NXCOMPAT /IMPLIB:"C:\Work\swift_msvc\build\firsttime\swift\Release\lib\swift\windows\x86_64\swiftCore.lib" /MACHINE:X64  /machine:x64 /DLL C:\Work\swift_msvc\build\firsttime\swift\stdlib\public\core\windows\x86_64\Swift.obj /DEF:allexp.def /MERGE:.rdata=.rodata /IGNORE:4102,4197
+link /ERRORREPORT:PROMPT /OUT:"C:\Work\swift_msvc\build\firsttime\swift\Release\lib\swift\windows\libswiftCore.dll" /INCREMENTAL:NO /NOLOGO /LIBPATH:C:/Work/swift_msvc/build/firsttime/llvm/Release/lib /LIBPATH:C:/Work/swift_msvc/build/firsttime/llvm/Release/lib/Release /LIBPATH:C:/Work/swift_msvc/build/firsttime/llvm/Release/lib /LIBPATH:C:/Work/swift_msvc/build/firsttime/llvm/Release/lib/Release kernel32.lib user32.lib gdi32.lib winspool.lib shell32.lib ole32.lib oleaut32.lib uuid.lib comdlg32.lib advapi32.lib ..\..\..\Release\lib\swift\windows\x86_64\swiftRuntime.lib ..\..\..\Release\lib\swift\windows\x86_64\swiftStdlibStubs.lib C:\icu\lib64\icuuc.lib C:\icu\lib64\icui18n.lib /MANIFEST /MANIFESTUAC:"level='asInvoker' uiAccess='false'" /manifest:embed /PDB:"C:/Work/swift_msvc/build/firsttime/swift/Release/bin/swiftCore.pdb" /SUBSYSTEM:CONSOLE /TLBID:1 /DYNAMICBASE /NXCOMPAT /IMPLIB:"C:\Work\swift_msvc\build\firsttime\swift\Release\lib\swift\windows\libswiftCore.lib" /MACHINE:X64  /machine:x64 /DLL C:\Work\swift_msvc\build\firsttime\swift\stdlib\public\core\windows\x86_64\Swift.obj /DEF:allexp.def /MERGE:.rdata=.rodata /IGNORE:4102,4197
 
-copy /y "C:\Work\swift_msvc\build\firsttime\swift\Release\bin\swiftCore.dll" "C:\Work\swift_msvc\build\firsttime\swift\Release\lib\swift\windows\libswiftCore.dll"
 
 //////////////////////////////////////////////////////////////////////////////////////////////////////////
 /// LINKING SwiftOnoneSupport.dll
@@ -112,31 +110,24 @@ copy /y "C:\Work\swift_msvc\build\firsttime\swift\Release\bin\swiftCore.dll" "C:
 cd c:/Work/swift_msvc/build/firsttime/swift/Release/bin
 
 **********************************************************************************
-*** CAUSTION: To build SwiftOnoneSupport.obj, should use swiftc.exe built on MSVC
+*** CAUTION: To build SwiftOnoneSupport.obj, should use swiftc.exe built on MSVC
 ***           To use with static link, remove .pdata or rename .pdata to .qdata
 **********************************************************************************
 swiftc -emit-ir -sdk / -target x86_64-pc-windows-msvc -O -I C:/Work/swift_msvc/build/firsttime/swift/Release/lib/swift/windows/x86_64 -module-cache-path C:/Work/swift_msvc/build/firsttime/swift/Release/clang-module-cache -no-link-objc-runtime -Xfrontend -sil-serialize-all -parse-stdlib -module-link-name swiftSwiftOnoneSupport -force-single-frontend-invocation -parse-as-library -emit-module -emit-module-path C:/Work/swift_msvc/build/firsttime/swift/Release/lib/swift/windows/x86_64/SwiftOnoneSupport.swiftmodule -o SwiftOnoneSupport.ll C:/Work/swift_msvc/swift/stdlib/public/SwiftOnoneSupport/SwiftOnoneSupport.swift
 
-move SwiftOnoneSupport.ll  SwiftOnoneSupport.ll.orig
+python c:/Work/swift_msvc/swift/misc/inject_dllimport.py SwiftOnoneSupport.ll SwiftOnoneSupport.new.ll
 
-(BASH)
-sh ../../../../../swift/misc/append_imp.sh SwiftOnoneSupport.ll.orig SwiftOnoneSupport.ll
-
-clang -c SwiftOnoneSupport.ll -o SwiftOnoneSupport.obj -mcmodel=large -target x86_64-pc-windows-msvc19.0.0
-
-copy /y SwiftOnoneSupport.obj  C:\Work\swift_msvc\build\firsttime\swift\stdlib\public\SwiftOnoneSupport\windows\x86_64\SwiftOnoneSupport.obj
+clang -c SwiftOnoneSupport.new.ll -o C:\Work\swift_msvc\build\firsttime\swift\stdlib\public\SwiftOnoneSupport\windows\x86_64\SwiftOnoneSupport.obj -mcmodel=large -target x86_64-pc-windows-msvc19.0.0
 
 cd c:/Work/swift_msvc/build/firsttime/swift/stdlib/public/SwiftOnoneSupport
 
-dlltool -z allexp.def --export-all-symbols ../../../stdlib/public/SwiftOnoneSupport/windows/x86_64/SwiftOnoneSupport.obj
+dlltool -z allexp.orig.def --export-all-symbols ../../../stdlib/public/SwiftOnoneSupport/windows/x86_64/SwiftOnoneSupport.obj
 
-(BASH)
-sed -e 's/"//g' -e 's/DATA$//' allexp.def > ttt.def; mv ttt.def allexp.def
+python c:/Work/swift_msvc/swift/misc/trim_exp.py allexp.orig.def allexp.def
 
 (In VS2015 x64 Native Tool Command Prompt)
-link /ERRORREPORT:PROMPT /OUT:"C:\Work\swift_msvc\build\firsttime\swift\Release\bin\swiftSwiftOnoneSupport.dll" /INCREMENTAL:NO /NOLOGO /LIBPATH:C:/Work/swift_msvc/build/firsttime/llvm/Release/lib /LIBPATH:C:/Work/swift_msvc/build/firsttime/llvm/Release/lib/Release kernel32.lib user32.lib gdi32.lib winspool.lib shell32.lib ole32.lib oleaut32.lib uuid.lib comdlg32.lib advapi32.lib ..\..\..\Release\lib\swift\windows\x86_64\swiftCore.lib /MANIFEST /MANIFESTUAC:"level='asInvoker' uiAccess='false'" /manifest:embed /PDB:"C:/Work/swift_msvc/build/firsttime/swift/Release/bin/swiftSwiftOnoneSupport.pdb" /SUBSYSTEM:CONSOLE /TLBID:1 /DYNAMICBASE /NXCOMPAT /IMPLIB:"C:/Work/swift_msvc/build/firsttime/swift/Release/lib/swift/windows/x86_64/swiftSwiftOnoneSupport.lib" /MACHINE:X64 /DLL C:\Work\swift_msvc\build\firsttime\swift\stdlib\public\SwiftOnoneSupport\windows\x86_64\SwiftOnoneSupport.obj    /DEF:allexp.def msvcrt.lib /MERGE:.rdata=.rodata
+link /ERRORREPORT:PROMPT /OUT:"C:\Work\swift_msvc\build\firsttime\swift\Release\lib\swift\windows\libswiftSwiftOnoneSupport.dll" /INCREMENTAL:NO /NOLOGO /LIBPATH:C:/Work/swift_msvc/build/firsttime/llvm/Release/lib /LIBPATH:C:/Work/swift_msvc/build/firsttime/llvm/Release/lib/Release kernel32.lib user32.lib gdi32.lib winspool.lib shell32.lib ole32.lib oleaut32.lib uuid.lib comdlg32.lib advapi32.lib ..\..\..\Release\lib\swift\windows\libswiftCore.lib /MANIFEST /MANIFESTUAC:"level='asInvoker' uiAccess='false'" /manifest:embed /PDB:"C:/Work/swift_msvc/build/firsttime/swift/Release/bin/libswiftSwiftOnoneSupport.pdb" /SUBSYSTEM:CONSOLE /TLBID:1 /DYNAMICBASE /NXCOMPAT /IMPLIB:"C:/Work/swift_msvc/build/firsttime/swift/Release/lib/swift/windows/libswiftSwiftOnoneSupport.lib" /MACHINE:X64 /DLL C:\Work\swift_msvc\build\firsttime\swift\stdlib\public\SwiftOnoneSupport\windows\x86_64\SwiftOnoneSupport.obj    /DEF:allexp.def msvcrt.lib /MERGE:.rdata=.rodata
 
-copy /y "C:\Work\swift_msvc\build\firsttime\swift\Release\bin\swiftSwiftOnoneSupport.dll" "C:\Work\swift_msvc\build\firsttime\swift\Release\lib\swift\windows\libswiftSwiftOnoneSupport.dll"
 
 //////////////////////////////////////////////////////////////////////////////////////////////////////////
 /// COMPILE & LINK Hello (in static)
@@ -144,7 +135,7 @@ copy /y "C:\Work\swift_msvc\build\firsttime\swift\Release\bin\swiftSwiftOnoneSup
 //  -- SwiftOnoneSupport.obj made on MSVC, remove .pdata (changed to .qdata)
 cd c:/Work/swift_msvc/build/firsttime/swift/Release/bin
 
-lib /out:libswiftCore.lib  ..\lib\swift\windows\x86_64\swiftRuntime.lib  ..\lib\swift\windows\x86_64\swiftStdlibStubs.lib C:/Work/swift_msvc/build/firsttime/swift/stdlib/public/core/windows/x86_64/Swift.obj C:\icu\lib64\icuuc.lib C:\icu\lib64\icui18n.lib SwiftOnoneSupport.obj
+lib /out:libswiftCore.lib  ..\lib\swift\windows\x86_64\swiftRuntime.lib  ..\lib\swift\windows\x86_64\swiftStdlibStubs.lib C:/Work/swift_msvc/build/firsttime/swift/stdlib/public/core/windows/x86_64/Swift.obj C:\icu\lib64\icuuc.lib C:\icu\lib64\icui18n.lib SwiftOnoneSupport.obj  /IGNORE:4006,4221
 
 lib /out:libswiftSwiftOnoneSupport.lib SwiftOnoneSupport.obj
 
@@ -152,23 +143,22 @@ swiftc -c Hello.swift -o Hello_static.obj
 OR swiftc -c Hello.swift -o Hello_static.obj -O
 OR swiftc -c Hello.swift -o Hello_static.obj -Onone
 
-link /out:hello_static.exe hello_static.obj libswiftCore.lib libswiftSwiftOnoneSupport.lib /MERGE:.rdata=.rodata /FORCE:MULTIPLE /IGNORE:4217,4006,4049
+link /out:hello_static.exe hello_static.obj libswiftCore.lib libswiftSwiftOnoneSupport.lib /MERGE:.rdata=.rodata /FORCE:MULTIPLE /IGNORE:4006,4049,4217
 
 //////////////////////////////////////////////////////////////////////////////////////////////////////////
 /// COMPILE & LINK Hello (in dynamic)
 /// 
 cd c:/Work/swift_msvc/build/firsttime/swift/Release/bin
 
-swiftc -emit-ir Hello.swift -o Hello.ll.orig
-OR swiftc -emit-ir Hello.swift -o Hello.ll.orig -O
-OR swiftc -emit-ir Hello.swift -o Hello.ll.orig -Onone
+swiftc -emit-ir Hello.swift -o Hello.orig.ll
+OR swiftc -emit-ir Hello.swift -o Hello.orig.ll -O
+OR swiftc -emit-ir Hello.swift -o Hello.orig.ll -Onone
 
-(BASH)
-sh ../../../../../swift/misc/append_imp.sh Hello.ll.orig Hello.ll
+python c:/Work/swift_msvc/swift/misc/inject_dllimport.py Hello.orig.ll Hello.ll
 
 clang -c hello.ll -o hello.obj -mcmodel=large -target x86_64-pc-windows-msvc19.0.0
 
-link /out:hello.exe hello.obj c:\Work\swift_msvc\build\firsttime\swift\Release\lib\swift\windows\x86_64\swiftCore.lib C:\icu\lib64\icuuc.lib C:\icu\lib64\icui18n.lib c:\Work\swift_msvc\build\firsttime\swift\Release\lib\swift\windows\x86_64\swiftSwiftOnoneSupport.lib /MERGE:.rdata=.rodata msvcrt.lib
+link /out:hello.exe hello.obj c:\Work\swift_msvc\build\firsttime\swift\Release\lib\swift\windows\libswiftCore.lib C:\icu\lib64\icuuc.lib C:\icu\lib64\icui18n.lib c:\Work\swift_msvc\build\firsttime\swift\Release\lib\swift\windows\libswiftSwiftOnoneSupport.lib /MERGE:.rdata=.rodata msvcrt.lib
 
 //////////////////////////////////////////////////////////////////////////////////////////////////////////
 //////////////////////////////////////////////////////////////////////////////////////////////////////////
