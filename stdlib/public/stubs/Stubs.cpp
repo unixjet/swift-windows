@@ -241,14 +241,38 @@ extern "C" uint64_t swift_float80ToString(char *Buffer, size_t BufferLength,
 SWIFT_RUNTIME_STDLIB_INTERFACE
 extern "C" ssize_t swift_stdlib_readLine_stdin(char **LinePtr) {
 #if defined(_MSC_VER)
-  if (std::cin.eof()) {
-    *LinePtr = nullptr;
+  if (LinePtr == nullptr)
     return -1;
+
+  int Capacity = 0;
+  ssize_t Pos = 0;
+  char *ReadBuf = *LinePtr;
+
+  for (;;) {
+    int ch = getc(stdin);
+    if (ferror(stdin))
+      return -1;
+    if (ch == EOF && Pos == 0)
+      return -1;
+
+    if (Capacity - Pos <= 1) {
+      // Capacity changes to 128, 128*2, 128*4, 128*8, ...
+      Capacity = Capacity ? Capacity * 2 : 128;
+      ReadBuf = static_cast<char *>(realloc(ReadBuf, Capacity));
+      if (ReadBuf == nullptr)
+        return -1;
+      *LinePtr = ReadBuf;
+    }
+
+    if (ch == EOF)
+      break;
+    ReadBuf[Pos++] = ch;
+    if (ch == '\n')
+      break;
   }
-  std::string Line;
-  std::getline(std::cin, Line);
-  *LinePtr = static_cast<char *>(std::malloc(Line.size() + 1));
-  return Line.size();
+
+  ReadBuf[Pos] = '\0';
+  return Pos;
 #else
   size_t Capacity = 0;
   return getline(LinePtr, &Capacity, stdin);

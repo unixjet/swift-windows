@@ -416,15 +416,15 @@ static int _addImageProtocolConformances(struct dl_phdr_info *info,
 #if defined(_MSC_VER)
   HMODULE handle;
 
-  if (!info->dlpi_name || info->dlpi_name[0] == '\0') {
+  if (!info->dlpi_name || info->dlpi_name[0] == '\0')
     handle = GetModuleHandle(nullptr);
-  } else
+  else
     handle = GetModuleHandle(info->dlpi_name);
 #else
   void *handle;
-  if (!info->dlpi_name || info->dlpi_name[0] == '\0') {
+  if (!info->dlpi_name || info->dlpi_name[0] == '\0')
     handle = dlopen(nullptr, RTLD_LAZY);
-  } else
+  else
     handle = dlopen(info->dlpi_name, RTLD_LAZY | RTLD_NOLOAD);
 #endif
 

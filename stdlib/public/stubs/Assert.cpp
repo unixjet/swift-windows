@@ -63,11 +63,11 @@ _swift_stdlib_reportFatalErrorInFile(const char *prefix, intptr_t prefixLength,
                                    uintptr_t line,
                                      uint32_t flags) {
   char *log;
-  swift_asprintf(&log, "%.*s: %.*s%sfile %.*s, line %zu\n",
-           (int)prefixLength, prefix,
-           (int)messageLength, message, (messageLength ? ": " : ""),
-           (int)fileLength, file, (size_t)line);
-  
+  swift_asprintf(&log, "%.*s: %.*s%sfile %.*s, line %zu\n", (int)prefixLength,
+                 prefix, (int)messageLength, message,
+                 (messageLength ? ": " : ""), (int)fileLength, file,
+                 (size_t)line);
+
   swift_reportError(flags, log);
   free(log);
 }
