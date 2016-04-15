@@ -20,19 +20,15 @@
 #include <stdlib.h>
 #include <stdio.h>
 #include <string.h>
+#include "llvm/Support/DataTypes.h"
 #include "../SwiftShims/LibcShims.h"
 
 #if defined(__linux__)
 #include <bsd/stdlib.h>
 #endif
 
-#if defined(_MSC_VER)
-static_assert(std::is_same<long long, swift::__swift_ssize_t>::value,
-			  "__swift_ssize_t is wrong");
-#else
 static_assert(std::is_same<ssize_t, swift::__swift_ssize_t>::value,
               "__swift_ssize_t is wrong");
-#endif
 
 namespace swift {
 

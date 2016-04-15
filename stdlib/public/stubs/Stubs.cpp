@@ -21,8 +21,6 @@
 #endif
 
 #if defined(_MSC_VER)
-#include <string>
-#include <iostream>
 // Avoid defining macro max(), min() which conflict with std::max(), std::min()
 #define NOMINMAX
 #include <windows.h>
