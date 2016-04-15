@@ -35,6 +35,10 @@ swift::getMethodDispatch(AbstractFunctionDecl *method) {
   if (method->hasForcedStaticDispatch())
     return MethodDispatch::Static;
 
+  // Import-as-member declarations are always statically referenced.
+  if (method->isImportAsMember())
+    return MethodDispatch::Static;
+
   // If this declaration is in a class but not marked final, then it is
   // always dynamically dispatched.
   auto dc = method->getDeclContext();
@@ -73,9 +77,12 @@ bool swift::requiresForeignToNativeThunk(ValueDecl *vd) {
   return false;
 }
 
-/// FIXME: merge requiresObjCDispatch() into getMethodDispatch() and add
+/// FIXME: merge requiresForeignEntryPoint() into getMethodDispatch() and add
 /// an ObjectiveC case to the MethodDispatch enum.
-bool swift::requiresObjCDispatch(ValueDecl *vd) {
+bool swift::requiresForeignEntryPoint(ValueDecl *vd) {
+  if (vd->isImportAsMember())
+    return true;
+
   // Final functions never require ObjC dispatch.
   if (vd->isFinal())
     return false;
@@ -84,9 +91,10 @@ bool swift::requiresObjCDispatch(ValueDecl *vd) {
     return true;
 
   if (auto *fd = dyn_cast<FuncDecl>(vd)) {
+  
     // Property accessors should be generated alongside the property.
     if (fd->isGetterOrSetter())
-      return requiresObjCDispatch(fd->getAccessorStorageDecl());
+      return requiresForeignEntryPoint(fd->getAccessorStorageDecl());
 
     return fd->getAttrs().hasAttribute<DynamicAttr>();
   }
@@ -99,7 +107,7 @@ bool swift::requiresObjCDispatch(ValueDecl *vd) {
   }
 
   if (auto *asd = dyn_cast<AbstractStorageDecl>(vd))
-    return asd->requiresObjCGetterAndSetter();
+    return asd->requiresForeignGetterAndSetter();
 
   return vd->getAttrs().hasAttribute<DynamicAttr>();
 }
@@ -183,9 +191,6 @@ SILDeclRef::SILDeclRef(SILDeclRef::Loc baseLoc,
       loc = cd;
       kind = Kind::Allocator;
       naturalUncurryLevel = 1;
-
-      // FIXME: Should we require the caller to think about this?
-      asForeign = false;
     }
     // Map EnumElementDecls to the EnumElement SILDeclRef of the element.
     else if (EnumElementDecl *ed = dyn_cast<EnumElementDecl>(vd)) {
@@ -256,12 +261,12 @@ bool SILDeclRef::isClangImported() const {
       return true;
 
     if (isa<ConstructorDecl>(d) || isa<EnumElementDecl>(d))
-      return true;
+      return !isForeign;
 
     if (auto *FD = dyn_cast<FuncDecl>(d))
       if (FD->isAccessor() ||
           isa<NominalTypeDecl>(d->getDeclContext()))
-        return true;
+        return !isForeign;
   }
   return false;
 }
@@ -311,7 +316,6 @@ SILLinkage SILDeclRef::getLinkage(ForDefinition_t forDefinition) const {
     return SILLinkage::Shared;
 
   // Declarations imported from Clang modules have shared linkage.
-  // FIXME: They shouldn't.
   const SILLinkage ClangLinkage = SILLinkage::Shared;
 
   if (isClangImported())
@@ -324,8 +328,15 @@ SILLinkage SILDeclRef::getLinkage(ForDefinition_t forDefinition) const {
       if (isa<ClangModuleUnit>(derivedFor->getModuleScopeContext()))
         return ClangLinkage;
   }
-  
-  // Otherwise, we have external linkage.
+
+  // If the module is being built with -sil-serialize-all, everything has
+  // to have public linkage.
+  if (moduleContext->getParentModule()->getResilienceStrategy()
+      == ResilienceStrategy::Fragile) {
+    return (forDefinition ? SILLinkage::Public : SILLinkage::PublicExternal);
+  }
+
+  // Otherwise, linkage is determined by accessibility at the AST level.
   switch (d->getEffectiveAccess()) {
     case Accessibility::Private:
       return (forDefinition ? SILLinkage::Private : SILLinkage::PrivateExternal);
@@ -364,28 +375,10 @@ bool SILDeclRef::isFragile() const {
   if (auto closure = getAbstractClosureExpr())
     dc = closure->getLocalContext();
   else
-    dc = getDecl()->getDeclContext();
+    dc = getDecl()->getInnermostDeclContext();
 
-  while (!dc->isModuleScopeContext()) {
-    // Local definitions in transparent contexts are fragile because
-    // external references to them can be exposed by mandatory inlining.
-    if (auto fn = dyn_cast<AbstractFunctionDecl>(dc))
-      if (fn->isTransparent() &&
-          fn->getEffectiveAccess() == Accessibility::Public)
-        return true;
-    // Check that this local context is not itself in a local transparent
-    // context.
-    dc = dc->getParent();
-  }
-
-  // Externally-visible transparent functions are fragile.
-  if (hasDecl())
-    if (auto fn = dyn_cast<AbstractFunctionDecl>(getDecl()))
-      if (fn->isTransparent() &&
-          fn->getEffectiveAccess() == Accessibility::Public)
-        return true;
-
-  return false;
+  // This is stupid
+  return (dc->getResilienceExpansion() == ResilienceExpansion::Minimal);
 }
 
 /// \brief True if the function has noinline attribute.
@@ -481,6 +474,31 @@ static std::string mangleConstant(SILDeclRef c, StringRef prefix) {
     introducer = "_TTO";
   }
   
+  // As a special case, Clang functions and globals don't get mangled at all.
+  if (c.hasDecl()) {
+    if (auto clangDecl = c.getDecl()->getClangDecl()) {
+      if (!c.isForeignToNativeThunk() && !c.isNativeToForeignThunk()
+          && !c.isCurried) {
+        if (auto namedClangDecl = dyn_cast<clang::DeclaratorDecl>(clangDecl)) {
+          if (auto asmLabel = namedClangDecl->getAttr<clang::AsmLabelAttr>()) {
+            mangler.append('\01');
+            mangler.append(asmLabel->getLabel());
+          } else if (namedClangDecl->hasAttr<clang::OverloadableAttr>()) {
+            std::string storage;
+            llvm::raw_string_ostream SS(storage);
+            // FIXME: When we can import C++, use Clang's mangler all the time.
+            mangleClangDecl(SS, namedClangDecl,
+                            c.getDecl()->getASTContext());
+            mangler.append(SS.str());
+          } else {
+            mangler.append(namedClangDecl->getName());
+          }
+          return mangler.finalize();
+        }
+      }
+    }
+  }
+  
   switch (c.kind) {
   //   entity ::= declaration                     // other declaration
   case SILDeclRef::Kind::Func:
@@ -512,29 +530,6 @@ static std::string mangleConstant(SILDeclRef c, StringRef prefix) {
     SWIFT_FALLTHROUGH;
 
   case SILDeclRef::Kind::EnumElement:
-    // As a special case, Clang functions and globals don't get mangled at all.
-    if (auto clangDecl = c.getDecl()->getClangDecl()) {
-      if (!c.isForeignToNativeThunk() && !c.isNativeToForeignThunk()
-          && !c.isCurried) {
-        if (auto namedClangDecl = dyn_cast<clang::DeclaratorDecl>(clangDecl)) {
-          if (auto asmLabel = namedClangDecl->getAttr<clang::AsmLabelAttr>()) {
-            mangler.append('\01');
-            mangler.append(asmLabel->getLabel());
-          } else if (namedClangDecl->hasAttr<clang::OverloadableAttr>()) {
-            std::string storage;
-            llvm::raw_string_ostream SS(storage);
-            // FIXME: When we can import C++, use Clang's mangler all the time.
-            mangleClangDecl(SS, namedClangDecl,
-                            c.getDecl()->getASTContext());
-            mangler.append(SS.str());
-          } else {
-            mangler.append(namedClangDecl->getName());
-          }
-          return mangler.finalize();
-        }
-      }
-    }
-
     mangler.append(introducer);
     mangler.mangleEntity(c.getDecl(), c.uncurryLevel);
     return mangler.finalize();

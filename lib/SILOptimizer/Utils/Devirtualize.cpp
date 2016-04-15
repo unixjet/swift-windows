@@ -473,8 +473,7 @@ bool swift::canDevirtualizeClassMethod(FullApplySite AI,
   if (AI.getFunction()->isFragile()) {
     // function_ref inside fragile function cannot reference a private or
     // hidden symbol.
-    if (!(F->isFragile() || isValidLinkageForFragileRef(F->getLinkage()) ||
-          F->isExternalDeclaration()))
+    if (!F->hasValidLinkageForFragileRef())
       return false;
   }
 
@@ -652,7 +651,7 @@ DevirtualizationResult swift::devirtualizeClassMethod(FullApplySite AI,
       B.createBranch(NewAI.getLoc(), NormalBB, { ResultValue });
     } else if (ResultCastRequired) {
       // Update all original uses by the new value.
-      for(auto *Use: OriginalResultUses) {
+      for (auto *Use: OriginalResultUses) {
         Use->set(ResultValue);
       }
     }
@@ -816,6 +815,13 @@ DevirtualizationResult swift::tryDevirtualizeWitnessMethod(ApplySite AI) {
 
   if (!F)
     return std::make_pair(nullptr, FullApplySite());
+
+  if (AI.getFunction()->isFragile()) {
+    // function_ref inside fragile function cannot reference a private or
+    // hidden symbol.
+    if (!F->hasValidLinkageForFragileRef())
+      return std::make_pair(nullptr, FullApplySite());
+  }
 
   auto Result = devirtualizeWitnessMethod(AI, F, Subs);
   return std::make_pair(Result.getInstruction(), Result);

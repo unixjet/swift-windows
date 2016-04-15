@@ -46,6 +46,10 @@ swift::isInstructionTriviallyDead(SILInstruction *I) {
     return false;
 
   if (auto *BI = dyn_cast<BuiltinInst>(I)) {
+    // Although the onFastPath builtin has no side-effects we don't want to
+    // remove it.
+    if (BI->getBuiltinInfo().ID == BuiltinValueKind::OnFastPath)
+      return false;
     return !BI->mayHaveSideEffects();
   }
 
@@ -77,17 +81,31 @@ swift::isInstructionTriviallyDead(SILInstruction *I) {
 
 /// \brief Return true if this is a release instruction and the released value
 /// is a part of a guaranteed parameter.
-bool swift::isGuaranteedParamRelease(SILInstruction *I) {
-  if (!isa<StrongReleaseInst>(I) || !isa<ReleaseValueInst>(I))
+bool swift::isIntermediateRelease(SILInstruction *I,
+                                  ConsumedArgToEpilogueReleaseMatcher &ERM) {
+  // Check whether this is a release instruction.
+  if (!isa<StrongReleaseInst>(I) && !isa<ReleaseValueInst>(I))
     return false;
+
   // OK. we have a release instruction.
   // Check whether this is a release on part of a guaranteed function argument.
   SILValue Op = stripValueProjections(I->getOperand(0));
   SILArgument *Arg = dyn_cast<SILArgument>(Op);
-  if (!Arg || !Arg->isFunctionArg() ||
-      !Arg->hasConvention(SILArgumentConvention::Direct_Guaranteed))
+  if (!Arg || !Arg->isFunctionArg())
     return false;
-  return true;
+  
+  // This is a release on a guaranteed parameter. Its not the final release.
+  if (Arg->hasConvention(SILArgumentConvention::Direct_Guaranteed))
+    return true;
+
+  // This is a release on an owned parameter and its not the epilogue release.
+  // Its not the final release.
+  SILInstruction *Rel = ERM.getSingleReleaseForArgument(Arg);
+  if (Rel && Rel != I)
+    return true;
+
+  // Failed to prove anything.
+  return false;
 }
 
 namespace {
@@ -1116,7 +1134,7 @@ SILInstruction *ValueLifetimeAnalysis:: findLastUserInBlock(SILBasicBlock *BB) {
 bool ValueLifetimeAnalysis::computeFrontier(Frontier &Fr, Mode mode) {
   bool NoCriticalEdges = true;
 
-  // Exit-blocks from the lifetime region. The value if live at the end of
+  // Exit-blocks from the lifetime region. The value is live at the end of
   // a predecessor block but not in the frontier block itself.
   llvm::SmallSetVector<SILBasicBlock *, 16> FrontierBlocks;
 
@@ -1421,7 +1439,7 @@ optimizeBridgedObjCToSwiftCast(SILInstruction *Inst,
          "Parameter should be @owned");
 
   // Emit a retain.
-  Builder.createRetainValue(Loc, SrcOp);
+  Builder.createRetainValue(Loc, SrcOp, Atomicity::Atomic);
 
   Args.push_back(InOutOptionalParam);
   Args.push_back(SrcOp);
@@ -1434,18 +1452,18 @@ optimizeBridgedObjCToSwiftCast(SILInstruction *Inst,
   if (auto *UCCAI = dyn_cast<UnconditionalCheckedCastAddrInst>(Inst)) {
     assert(UCCAI->getConsumptionKind() == CastConsumptionKind::TakeAlways);
     if (UCCAI->getConsumptionKind() == CastConsumptionKind::TakeAlways) {
-      Builder.createReleaseValue(Loc, SrcOp);
+      Builder.createReleaseValue(Loc, SrcOp, Atomicity::Atomic);
     }
   }
 
   if (auto *CCABI = dyn_cast<CheckedCastAddrBranchInst>(Inst)) {
     if (CCABI->getConsumptionKind() == CastConsumptionKind::TakeAlways) {
-      Builder.createReleaseValue(Loc, SrcOp);
+      Builder.createReleaseValue(Loc, SrcOp, Atomicity::Atomic);
     } else if (CCABI->getConsumptionKind() ==
                CastConsumptionKind::TakeOnSuccess) {
       // Insert a release in the success BB.
       Builder.setInsertionPoint(SuccessBB->begin());
-      Builder.createReleaseValue(Loc, SrcOp);
+      Builder.createReleaseValue(Loc, SrcOp, Atomicity::Atomic);
     }
   }
 
@@ -1479,28 +1497,6 @@ optimizeBridgedObjCToSwiftCast(SILInstruction *Inst,
 
   EraseInstAction(Inst);
   return (NewI) ? NewI : AI;
-}
-
-bool swift::isValidLinkageForFragileRef(SILLinkage linkage) {
-  switch (linkage) {
-  case SILLinkage::Private:
-  case SILLinkage::PrivateExternal:
-  case SILLinkage::Hidden:
-  case SILLinkage::HiddenExternal:
-    return false;
-
-  case SILLinkage::Shared:
-  case SILLinkage::SharedExternal:
-      // This handles some kind of generated functions, like constructors
-      // of clang imported types.
-      // TODO: check why those functions are not fragile anyway and make
-      // a less conservative check here.
-      return true;
-
-  case SILLinkage::Public:
-  case SILLinkage::PublicExternal:
-    return true;
-  }
 }
 
 /// Create a call of _bridgeToObjectiveC which converts an _ObjectiveCBridgeable
@@ -1568,9 +1564,7 @@ optimizeBridgedSwiftToObjCCast(SILInstruction *Inst,
          "Implementation of _bridgeToObjectiveC could not be found");
 
   if (Inst->getFunction()->isFragile() &&
-      !(BridgedFunc->isFragile() ||
-        isValidLinkageForFragileRef(BridgedFunc->getLinkage()) ||
-        BridgedFunc->isExternalDeclaration()))
+      !BridgedFunc->hasValidLinkageForFragileRef())
     return nullptr;
 
   auto ParamTypes = BridgedFunc->getLoweredFunctionType()->getParameters();
@@ -1593,15 +1587,15 @@ optimizeBridgedSwiftToObjCCast(SILInstruction *Inst,
     Src = Builder.createLoad(Loc, Src);
   }
 
-  if(ParamTypes[0].getConvention() == ParameterConvention::Direct_Guaranteed)
-    Builder.createRetainValue(Loc, Src);
+  if (ParamTypes[0].getConvention() == ParameterConvention::Direct_Guaranteed)
+    Builder.createRetainValue(Loc, Src, Atomicity::Atomic);
 
   // Generate a code to invoke the bridging function.
   auto *NewAI = Builder.createApply(Loc, FnRef, SubstFnTy, ResultTy, Subs, Src,
                                     false);
 
-  if(ParamTypes[0].getConvention() == ParameterConvention::Direct_Guaranteed)
-    Builder.createReleaseValue(Loc, Src);
+  if (ParamTypes[0].getConvention() == ParameterConvention::Direct_Guaranteed)
+    Builder.createReleaseValue(Loc, Src, Atomicity::Atomic);
 
   SILInstruction *NewI = NewAI;
 

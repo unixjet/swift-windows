@@ -60,6 +60,16 @@ public:
   /// If true, forward declarations will be imported using unavailable types
   /// instead of dropped altogether when possible.
   bool ImportForwardDeclarations = false;
+
+  /// Whether to use the import as member inference system
+  ///
+  /// When importing a global, try to infer whether we can import it as a
+  /// member of some type instead. This includes inits, computed properties,
+  /// and methods.
+  bool InferImportAsMember = false;
+
+  /// If true ignore the swift bridged attribute.
+  bool DisableSwiftBridgeAttr = false;
 };
 
 } // end namespace swift

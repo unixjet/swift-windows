@@ -44,6 +44,7 @@ extern SourceKit::UIdent KeyAccessibility;
 extern SourceKit::UIdent KeySetterAccessibility;
 extern SourceKit::UIdent KeyUSR;
 extern SourceKit::UIdent KeyOriginalUSR;
+extern SourceKit::UIdent KeyDefaultImplementationOf;
 extern SourceKit::UIdent KeyInterestedUSR;
 extern SourceKit::UIdent KeyLine;
 extern SourceKit::UIdent KeyColumn;
@@ -108,6 +109,7 @@ extern SourceKit::UIdent KeySimplified;
 
 extern SourceKit::UIdent KeyIsUnavailable;
 extern SourceKit::UIdent KeyIsDeprecated;
+extern SourceKit::UIdent KeyIsOptional;
 extern SourceKit::UIdent KeyPlatform;
 extern SourceKit::UIdent KeyMessage;
 extern SourceKit::UIdent KeyIntroduced;

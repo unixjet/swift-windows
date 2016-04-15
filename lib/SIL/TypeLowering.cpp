@@ -652,7 +652,7 @@ namespace {
 
     void emitRetainValue(SILBuilder &B, SILLocation loc,
                        SILValue aggValue) const override {
-      B.createRetainValue(loc, aggValue);
+      B.createRetainValue(loc, aggValue, Atomicity::Atomic);
     }
 
     void emitLoweredRetainValue(SILBuilder &B, SILLocation loc,
@@ -860,7 +860,7 @@ namespace {
 
     void emitRetainValue(SILBuilder &B, SILLocation loc,
                        SILValue value) const override {
-      B.createRetainValue(loc, value);
+      B.createRetainValue(loc, value, Atomicity::Atomic);
     }
 
     void emitLoweredRetainValue(SILBuilder &B, SILLocation loc,
@@ -868,7 +868,7 @@ namespace {
                               LoweringStyle style) const override {
       if (style == LoweringStyle::Shallow ||
           style == LoweringStyle::DeepNoEnum) {
-        B.createRetainValue(loc, value);
+        B.createRetainValue(loc, value, Atomicity::Atomic);
       } else {
         ifNonTrivialElement(B, loc, value,
           [&](SILBuilder &B, SILLocation loc, SILValue child,
@@ -930,7 +930,7 @@ namespace {
     void emitRetainValue(SILBuilder &B, SILLocation loc,
                        SILValue value) const override {
       if (!isa<FunctionRefInst>(value))
-        B.createStrongRetain(loc, value);
+        B.createStrongRetain(loc, value, Atomicity::Atomic);
     }
 
     void emitReleaseValue(SILBuilder &B, SILLocation loc,
@@ -947,12 +947,12 @@ namespace {
 
     void emitRetainValue(SILBuilder &B, SILLocation loc,
                        SILValue value) const override {
-      B.createUnownedRetain(loc, value);
+      B.createUnownedRetain(loc, value, Atomicity::Atomic);
     }
 
     void emitReleaseValue(SILBuilder &B, SILLocation loc,
                           SILValue value) const override {
-      B.createUnownedRelease(loc, value);
+      B.createUnownedRelease(loc, value, Atomicity::Atomic);
     }
   };
 
@@ -1620,6 +1620,12 @@ TypeConverter::getTypeLoweringForUncachedLoweredType(TypeKey key) {
                             CanGenericSignature(),
                             ResilienceExpansion::Minimal,
                             key.isDependent()).visit(contextType);
+
+  if (key.OrigType.isForeign()) {
+    assert(theInfo->isLoadable() && "Cannot lower address-only type with "
+           "foreign abstraction pattern");
+  }
+
   insert(key, theInfo);
   return *theInfo;
 }
@@ -2354,31 +2360,4 @@ TypeConverter::checkFunctionForABIDifferences(SILFunctionType *fnTy1,
   }
 
   return ABIDifference::Trivial;
-}
-
-SILLinkage
-TypeConverter::getLinkageForProtocolConformance(const NormalProtocolConformance *C,
-                                                ForDefinition_t definition) {
-  // Behavior conformances are always private.
-  if (C->isBehaviorConformance())
-    return (definition ? SILLinkage::Private : SILLinkage::PrivateExternal);
-  
-  // If the conformance is imported from Clang, give it shared linkage.
-  auto typeDecl = C->getType()->getNominalOrBoundGenericNominal();
-  auto typeUnit = typeDecl->getModuleScopeContext();
-  if (isa<ClangModuleUnit>(typeUnit)
-      && C->getDeclContext()->getParentModule() == typeUnit->getParentModule())
-    return SILLinkage::Shared;
-
-  // FIXME: This should be using std::min(protocol's access, type's access).
-  switch (C->getProtocol()->getEffectiveAccess()) {
-    case Accessibility::Private:
-      return (definition ? SILLinkage::Private : SILLinkage::PrivateExternal);
-
-    case Accessibility::Internal:
-      return (definition ? SILLinkage::Hidden : SILLinkage::HiddenExternal);
-
-    default:
-      return (definition ? SILLinkage::Public : SILLinkage::PublicExternal);
-  }
 }

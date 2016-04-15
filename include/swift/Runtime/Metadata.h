@@ -34,31 +34,6 @@
 
 namespace swift {
 
-/// A bump pointer for metadata allocations. Since metadata is (currently)
-/// never released, it does not support deallocation. This allocator by itself
-/// is not thread-safe; in concurrent uses, allocations must be guarded by
-/// a lock, such as the per-metadata-cache lock used to guard metadata
-/// instantiations. All allocations are pointer-aligned.
-class MetadataAllocator {
-  /// Address of the next available space. The allocator grabs a page at a time,
-  /// so the need for a new page can be determined by page alignment.
-  ///
-  /// Initializing to -1 instead of nullptr ensures that the first allocation
-  /// triggers a page allocation since it will always span a "page" boundary.
-  char *next = (char*)(~(uintptr_t)0U);
-  
-public:
-  MetadataAllocator() = default;
-
-  // Don't copy or move, please.
-  MetadataAllocator(const MetadataAllocator &) = delete;
-  MetadataAllocator(MetadataAllocator &&) = delete;
-  MetadataAllocator &operator=(const MetadataAllocator &) = delete;
-  MetadataAllocator &operator=(MetadataAllocator &&) = delete;
-  
-  void *alloc(size_t size);
-};
-  
 template <unsigned PointerSize>
 struct RuntimeTarget;
 
@@ -90,6 +65,10 @@ struct InProcess {
   
   template <typename T, bool Nullable = false>
   using FarRelativeDirectPointer = FarRelativeDirectPointer<T, Nullable>;
+
+  template <typename T, bool Nullable = false>
+  using FarRelativeIndirectablePointer =
+    FarRelativeIndirectablePointer<T, Nullable>;
   
   template <typename T, bool Nullable = true>
   using RelativeDirectPointer = RelativeDirectPointer<T, Nullable>;
@@ -118,6 +97,9 @@ struct External {
   
   template <typename T, bool Nullable = false>
   using FarRelativeDirectPointer = StoredPointer;
+
+  template <typename T, bool Nullable = false>
+  using FarRelativeIndirectablePointer = StoredSize;
   
   template <typename T, bool Nullable = true>
   using RelativeDirectPointer = int32_t;
@@ -144,6 +126,10 @@ using ConstTargetFarRelativeDirectPointer
 template <typename Runtime, typename Pointee, bool Nullable = true>
 using TargetRelativeDirectPointer
   = typename Runtime::template RelativeDirectPointer<Pointee, Nullable>;
+
+template <typename Runtime, typename Pointee, bool Nullable = true>
+using TargetFarRelativeIndirectablePointer
+  = typename Runtime::template FarRelativeIndirectablePointer<Pointee,Nullable>;
 
 struct HeapObject;
   
@@ -921,6 +907,9 @@ extern "C" const ValueWitnessTable _TWVXwGSqBo_; // weak Builtin.NativeObject?
 SWIFT_RUNTIME_EXPORT
 extern "C" const ExtraInhabitantsValueWitnessTable _TWVBb; // Builtin.BridgeObject
 
+SWIFT_RUNTIME_EXPORT
+extern "C" const ExtraInhabitantsValueWitnessTable _TWVBp; // Builtin.RawPointer
+
 #if SWIFT_OBJC_INTEROP
 // The ObjC-pointer table can be used for arbitrary ObjC pointer types.
 SWIFT_RUNTIME_EXPORT
@@ -1083,6 +1072,10 @@ template <typename Runtime> struct TargetGenericMetadata;
 template <typename Runtime> struct TargetClassMetadata;
 template <typename Runtime> struct TargetStructMetadata;
 template <typename Runtime> struct TargetOpaqueMetadata;
+
+// FIXME: https://bugs.swift.org/browse/SR-1155
+#pragma clang diagnostic push
+#pragma clang diagnostic ignored "-Winvalid-offsetof"
 
 /// The common structure of all type metadata.
 template <typename Runtime>
@@ -1298,6 +1291,8 @@ extern "C" const FullOpaqueMetadata _TMBo;        // Builtin.NativeObject
 SWIFT_RUNTIME_EXPORT
 extern "C" const FullOpaqueMetadata _TMBb;        // Builtin.BridgeObject
 SWIFT_RUNTIME_EXPORT
+extern "C" const FullOpaqueMetadata _TMBp;        // Builtin.RawPointer
+SWIFT_RUNTIME_EXPORT
 extern "C" const FullOpaqueMetadata _TMBB;        // Builtin.UnsafeValueBuffer
 #if SWIFT_OBJC_INTEROP
 SWIFT_RUNTIME_EXPORT
@@ -1480,14 +1475,31 @@ struct TargetNominalTypeDescriptor {
   };
   
   RelativeDirectPointerIntPair<TargetGenericMetadata<Runtime>,
-                               NominalTypeKind>
+                               NominalTypeKind, /*Nullable*/ true>
     GenericMetadataPatternAndKind;
+
+  using NonGenericMetadataAccessFunction = const Metadata *();
+
+  /// A pointer to the metadata access function for this type.
+  ///
+  /// The type of the returned function is speculative; in reality, it
+  /// takes one argument for each of the generic requirements, in the order
+  /// they are listed.  Therefore, the function type is correct only if
+  /// this type is non-generic.
+  ///
+  /// Not all type metadata have access functions.
+  TargetRelativeDirectPointer<Runtime, NonGenericMetadataAccessFunction,
+                              /*nullable*/ true> AccessFunction;
 
   /// A pointer to the generic metadata pattern that is used to instantiate
   /// instances of this type. Zero if the type is not generic.
   TargetGenericMetadata<Runtime> *getGenericMetadataPattern() const {
     return const_cast<TargetGenericMetadata<Runtime>*>(
                                     GenericMetadataPatternAndKind.getPointer());
+  }
+
+  NonGenericMetadataAccessFunction *getAccessFunction() const {
+    return AccessFunction.get();
   }
 
   NominalTypeKind getKind() const {
@@ -1928,9 +1940,9 @@ struct TargetValueMetadata : public TargetMetadata<Runtime> {
   Description;
 
   /// The parent type of this member type, or null if this is not a
-  /// member type.
-  FarRelativeIndirectablePointer<const TargetMetadata<Runtime>,
-    /*nullable*/ true> Parent;
+  /// member type.  It's acceptable to make this a direct pointer because
+  /// parent types are relatively uncommon.
+  TargetPointer<Runtime, const TargetMetadata<Runtime>> Parent;
 
   static bool classof(const TargetMetadata<Runtime> *metadata) {
     return metadata->getKind() == MetadataKind::Struct
@@ -2778,12 +2790,6 @@ public:
 using ProtocolConformanceRecord
   = TargetProtocolConformanceRecord<InProcess>;
 
-/// \brief Fetch a uniqued metadata object for a nominal type with
-/// resilient layout.
-SWIFT_RUNTIME_EXPORT
-extern "C" const Metadata *
-swift_getResilientMetadata(GenericMetadata *pattern);
-
 /// \brief Fetch a uniqued metadata object for a generic nominal type.
 ///
 /// The basic algorithm for fetching a metadata object is:
@@ -3028,11 +3034,16 @@ struct ClassFieldLayout {
 
 /// Initialize the field offset vector for a dependent-layout class, using the
 /// "Universal" layout strategy.
+///
+/// This will relocate the metadata if it doesn't have enough space
+/// for its superclass.  Note that swift_allocateGenericClassMetadata will
+/// never produce a metadata that requires relocation.
 SWIFT_RUNTIME_EXPORT
-extern "C" void swift_initClassMetadata_UniversalStrategy(ClassMetadata *self,
-                                      size_t numFields,
-                                      const ClassFieldLayout *fieldLayouts,
-                                      size_t *fieldOffsets);
+extern "C" ClassMetadata *
+swift_initClassMetadata_UniversalStrategy(ClassMetadata *self,
+                                          size_t numFields,
+                                          const ClassFieldLayout *fieldLayouts,
+                                          size_t *fieldOffsets);
 
 /// \brief Fetch a uniqued metadata for a metatype type.
 SWIFT_RUNTIME_EXPORT
@@ -3361,5 +3372,7 @@ std::string nameForMetadata(const Metadata *type,
                             bool qualified = true);
 
 } // end namespace swift
+
+#pragma clang diagnostic pop
 
 #endif /* SWIFT_RUNTIME_METADATA_H */

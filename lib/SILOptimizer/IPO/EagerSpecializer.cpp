@@ -44,7 +44,7 @@ llvm::cl::opt<bool> EagerSpecializeFlag(
 /// for new return or error values.
 static bool isTrivialReturnBlock(SILBasicBlock *RetBB) {
   auto *RetInst = RetBB->getTerminator();
-  assert(isa<ReturnInst>(RetInst) || isa<ThrowInst>(RetInst) &&
+  assert(RetInst->isFunctionExiting() &&
          "expected a properly terminated return or throw block");
 
   auto RetOperand = RetInst->getOperand(0);
@@ -87,10 +87,10 @@ static void addReturnValueImpl(SILBasicBlock *RetBB, SILBasicBlock *NewRetBB,
   SILLocation Loc = F->getLocation();
   
   auto *RetInst = RetBB->getTerminator();
-  assert(isa<ReturnInst>(RetInst) || isa<ThrowInst>(RetInst) &&
+  assert(RetInst->isFunctionExiting() &&
          "expected a properly terminated return or throw block");
   assert(RetInst->getOperand(0)->getType() == NewRetVal->getType() &&
-         "Mistmatched return type");
+         "Mismatched return type");
   SILBasicBlock *MergedBB = RetBB;
 
   // Split the return block if it is nontrivial.
@@ -273,6 +273,7 @@ void EagerDispatch::emitDispatchTo(SILFunction *NewFunc) {
     ++SubIt;
   }
   assert(SubIt == SubEnd && "Too many substitutions.");
+  (void) SubEnd;
 
   // 2. Convert call arguments, casting and adjusting for calling convention.
 
@@ -370,7 +371,7 @@ SILValue EagerDispatch::emitArgumentCast(SILArgument *OrigArg, unsigned Idx) {
 }
 
 /// Converts each generic function argument into a SILValue that can be passed
-/// to the specialized call by emiting a cast followed by a load.
+/// to the specialized call by emitting a cast followed by a load.
 ///
 /// Populates the CallArgs with the converted arguments.
 ///
@@ -441,7 +442,8 @@ static SILFunction *eagerSpecialize(SILFunction *GenericFunc,
   
   // Create a specialized function.
   GenericFuncSpecializer
-        FuncSpecializer(GenericFunc, SA.getSubstitutions(), ReInfo);
+        FuncSpecializer(GenericFunc, SA.getSubstitutions(),
+                        GenericFunc->isFragile(), ReInfo);
 
   SILFunction *NewFunc = FuncSpecializer.trySpecialization();
   if (!NewFunc)

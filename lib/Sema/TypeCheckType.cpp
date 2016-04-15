@@ -542,6 +542,7 @@ static void diagnoseUnboundGenericType(TypeChecker &tc, Type ty,SourceLoc loc) {
   auto unbound = ty->castTo<UnboundGenericType>();
   tc.diagnose(unbound->getDecl()->getLoc(), diag::generic_type_declared_here,
               unbound->getDecl()->getName());
+  // TODO: emit fixit for "NSArray" -> "NSArray<AnyObject>", etc.
 }
 
 /// \brief Returns a valid type or ErrorType in case of an error.
@@ -2493,7 +2494,8 @@ static bool isParamListRepresentableInObjC(TypeChecker &TC,
 }
 
 /// Check whether the given declaration occurs within a constrained
-/// extension, or an extension of a class with generic ancestry, and
+/// extension, or an extension of a class with generic ancestry, or an
+/// extension of an Objective-C runtime visible class, and
 /// therefore is not representable in Objective-C.
 static bool checkObjCInExtensionContext(TypeChecker &tc,
                                         const ValueDecl *value,
@@ -2518,10 +2520,18 @@ static bool checkObjCInExtensionContext(TypeChecker &tc,
       if (!CD)
         break;
 
-      if (CD->getGenericParams()) {
+      if (!CD->hasClangNode() && CD->getGenericParams()) {
         if (diagnose) {
-          tc.diagnose(value->getLoc(), diag::objc_in_generic_extension);
+          tc.diagnose(value, diag::objc_in_generic_extension);
         }
+        return true;
+      }
+
+      // Cannot define @objc members of an Objective-C runtime visible class,
+      // because doing so would create a category.
+      if (CD->isOnlyObjCRuntimeVisible()) {
+        if (diagnose)
+          tc.diagnose(value, diag::objc_in_objc_runtime_visible);
         return true;
       }
 
@@ -2788,7 +2798,7 @@ bool TypeChecker::isRepresentableInObjC(
       return false;
     }
 
-    // The error type is always AutoreleasingUnsafeMutablePointer<NSError?>.
+    // The error type is always 'AutoreleasingUnsafeMutablePointer<NSError?>?'.
     Type errorParameterType = getNSErrorType(dc);
     if (errorParameterType) {
       errorParameterType = OptionalType::get(errorParameterType);
@@ -2797,6 +2807,7 @@ bool TypeChecker::isRepresentableInObjC(
             Context.getAutoreleasingUnsafeMutablePointerDecl(),
             nullptr,
             errorParameterType);
+      errorParameterType = OptionalType::get(errorParameterType);
     }
 
     // Determine the parameter index at which the error will go.
@@ -3016,8 +3027,8 @@ void TypeChecker::diagnoseTypeNotRepresentableInObjC(const DeclContext *DC,
   }
 
   // Special diagnostic for classes.
-  if (auto *CT = T->getAs<ClassType>()) {
-    if (!CT->getDecl()->isObjC())
+  if (auto *CD = T->getClassOrBoundGenericClass()) {
+    if (!CD->isObjC())
       diagnose(TypeRange.Start, diag::not_objc_swift_class)
           .highlight(TypeRange);
     return;

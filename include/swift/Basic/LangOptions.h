@@ -15,8 +15,8 @@
 //
 //===----------------------------------------------------------------------===//
 
-#ifndef SWIFT_LANGOPTIONS_H
-#define SWIFT_LANGOPTIONS_H
+#ifndef SWIFT_BASIC_LANGOPTIONS_H
+#define SWIFT_BASIC_LANGOPTIONS_H
 
 #include "swift/Basic/LLVM.h"
 #include "clang/Basic/VersionTuple.h"
@@ -144,8 +144,19 @@ namespace swift {
     /// new enough?
     bool EnableTargetOSChecking = true;
 
+    /// Whether to use the import as member inference system
+    ///
+    /// When importing a global, try to infer whether we can import it as a
+    /// member of some type instead. This includes inits, computed properties,
+    /// and methods.
+    bool InferImportAsMember = false;
+
     /// Whether we are stripping the "NS" prefix from Foundation et al.
     bool StripNSPrefix = false;
+
+    /// Whether classes with Objective-C lightweight generic type parameters
+    /// should be imported into Swift as generic classes.
+    bool ImportObjCGenerics = false;
 
     /// Enable the Swift 3 migration via Fix-Its.
     bool Swift3Migration = false;
@@ -234,7 +245,6 @@ namespace swift {
         PlatformConditionValues;
     llvm::SmallVector<std::string, 2> CustomConditionalCompilationFlags;
   };
-}
+} // end namespace swift
 
-#endif // SWIFT_LANGOPTIONS_H
-
+#endif // SWIFT_BASIC_LANGOPTIONS_H

@@ -172,6 +172,9 @@ def disable_diagnostic_passes : Flag<["-"], "disable-diagnostic-passes">,
 def disable_llvm_optzns : Flag<["-"], "disable-llvm-optzns">,
   HelpText<"Don't run LLVM optimization passes">;
 
+def disable_sil_perf_optzns : Flag<["-"], "disable-sil-perf-optzns">,
+  HelpText<"Don't run SIL performance optimization passes">;
+
 def disable_llvm_arc_opts : Flag<["-"], "disable-llvm-arc-opts">,
   HelpText<"Don't run LLVM ARC optimization passes.">;
 
@@ -223,6 +226,14 @@ def enable_experimental_property_behaviors :
 def disable_availability_checking : Flag<["-"],
   "disable-availability-checking">,
   HelpText<"Disable checking for potentially unavailable APIs">;
+
+def enable_infer_import_as_member :
+  Flag<["-"], "enable-infer-import-as-member">,
+  HelpText<"Infer when a global could be imported as a member">;
+
+def enable_import_objc_generics :
+  Flag<["-"], "enable-import-objc-generics">,
+  HelpText<"Import Objective-C lightweight generic type params">;
 
 def enable_strip_ns_prefix :
   Flag<["-"], "enable-strip-ns-prefix">,

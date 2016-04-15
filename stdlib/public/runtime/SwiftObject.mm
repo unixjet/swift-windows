@@ -39,7 +39,6 @@
 #endif
 #include <stdio.h>
 #include <stdlib.h>
-#include <mutex>
 #include <unordered_map>
 #if SWIFT_OBJC_INTEROP
 # import <CoreFoundation/CFBase.h> // for CFTypeID
@@ -50,7 +49,7 @@
 using namespace swift;
 
 #if SWIFT_HAS_ISA_MASKING
-extern "C" __attribute__((weak_import))
+OBJC_EXPORT __attribute__((weak_import))
 const uintptr_t objc_debug_isa_class_mask;
 
 static uintptr_t computeISAMask() {
@@ -79,9 +78,12 @@ const ClassMetadata *swift::_swift_getClass(const void *object) {
 #if SWIFT_OBJC_INTEROP
 struct SwiftObject_s {
   void *isa  __attribute__((unavailable));
-  long refCount  __attribute__((unavailable));
+  uint32_t strongRefCount  __attribute__((unavailable));
+  uint32_t weakRefCount  __attribute__((unavailable));
 };
 
+static_assert(sizeof(SwiftObject_s) == sizeof(HeapObject),
+              "SwiftObject and HeapObject must have the same header");
 static_assert(std::is_trivially_constructible<SwiftObject_s>::value,
               "SwiftObject must be trivially constructible");
 static_assert(std::is_trivially_destructible<SwiftObject_s>::value,
@@ -92,13 +94,7 @@ __attribute__((objc_root_class))
 #endif
 SWIFT_RUNTIME_EXPORT
 @interface SwiftObject<NSObject> {
-  // FIXME: rdar://problem/18950072 Clang emits ObjC++ classes as having
-  // non-trivial structors if they contain any struct fields at all, regardless of
-  // whether they in fact have nontrivial default constructors. Dupe the body
-  // of SwiftObject_s into here as a workaround because we don't want to pay
-  // the cost of .cxx_destruct method dispatch at deallocation time.
-  void *magic_isa  __attribute__((unavailable));
-  long magic_refCount  __attribute__((unavailable));
+  SwiftObject_s header;
 }
 
 - (BOOL)isEqual:(id)object;
@@ -528,6 +524,49 @@ void swift::swift_unknownRelease(void *object)
   return objc_release(static_cast<id>(object));
 }
 
+SWIFT_RUNTIME_EXPORT
+void swift::swift_nonatomic_unknownRetain_n(void *object, int n)
+    SWIFT_CC(DefaultCC_IMPL) {
+  if (isObjCTaggedPointerOrNull(object)) return;
+  if (usesNativeSwiftReferenceCounting_allocated(object)) {
+    swift_nonatomic_retain_n(static_cast<HeapObject *>(object), n);
+    return;
+  }
+  for (int i = 0; i < n; ++i)
+    objc_retain(static_cast<id>(object));
+}
+
+SWIFT_RUNTIME_EXPORT
+void swift::swift_nonatomic_unknownRelease_n(void *object, int n)
+    SWIFT_CC(DefaultCC_IMPL) {
+  if (isObjCTaggedPointerOrNull(object)) return;
+  if (usesNativeSwiftReferenceCounting_allocated(object))
+    return swift_nonatomic_release_n(static_cast<HeapObject *>(object), n);
+  for (int i = 0; i < n; ++i)
+    objc_release(static_cast<id>(object));
+}
+
+SWIFT_RUNTIME_EXPORT
+void swift::swift_nonatomic_unknownRetain(void *object)
+    SWIFT_CC(DefaultCC_IMPL) {
+  if (isObjCTaggedPointerOrNull(object)) return;
+  if (usesNativeSwiftReferenceCounting_allocated(object)) {
+    swift_nonatomic_retain(static_cast<HeapObject *>(object));
+    return;
+  }
+  objc_retain(static_cast<id>(object));
+}
+
+SWIFT_RUNTIME_EXPORT
+void swift::swift_nonatomic_unknownRelease(void *object)
+    SWIFT_CC(DefaultCC_IMPL) {
+  if (isObjCTaggedPointerOrNull(object)) return;
+  if (usesNativeSwiftReferenceCounting_allocated(object))
+    return SWIFT_RT_ENTRY_CALL(swift_release)(static_cast<HeapObject *>(object));
+  return objc_release(static_cast<id>(object));
+}
+
+
 /// Return true iff the given BridgeObject is not known to use native
 /// reference-counting.
 ///
@@ -571,6 +610,28 @@ void *swift::swift_bridgeObjectRetain(void *object)
 }
 
 SWIFT_RUNTIME_EXPORT
+void *swift::swift_nonatomic_bridgeObjectRetain(void *object)
+    SWIFT_CC(DefaultCC_IMPL) {
+#if SWIFT_OBJC_INTEROP
+  if (isObjCTaggedPointer(object))
+    return object;
+#endif
+
+  auto const objectRef = toPlainObject_unTagged_bridgeObject(object);
+
+#if SWIFT_OBJC_INTEROP
+  if (!isNonNative_unTagged_bridgeObject(object)) {
+    swift_nonatomic_retain(static_cast<HeapObject *>(objectRef));
+    return static_cast<HeapObject *>(objectRef);
+  }
+  return objc_retain(static_cast<id>(objectRef));
+#else
+  swift_nonatomic_retain(static_cast<HeapObject *>(objectRef));
+  return static_cast<HeapObject *>(objectRef);
+#endif
+}
+
+SWIFT_RUNTIME_EXPORT
 void swift::swift_bridgeObjectRelease(void *object)
     SWIFT_CC(DefaultCC_IMPL) {
 #if SWIFT_OBJC_INTEROP
@@ -586,6 +647,25 @@ void swift::swift_bridgeObjectRelease(void *object)
   return objc_release(static_cast<id>(objectRef));
 #else
   swift_release(static_cast<HeapObject *>(objectRef));
+#endif
+}
+
+SWIFT_RUNTIME_EXPORT
+void swift::swift_nonatomic_bridgeObjectRelease(void *object)
+    SWIFT_CC(DefaultCC_IMPL) {
+#if SWIFT_OBJC_INTEROP
+  if (isObjCTaggedPointer(object))
+    return;
+#endif
+
+  auto const objectRef = toPlainObject_unTagged_bridgeObject(object);
+
+#if SWIFT_OBJC_INTEROP
+  if (!isNonNative_unTagged_bridgeObject(object))
+    return swift_nonatomic_release(static_cast<HeapObject *>(objectRef));
+  return objc_release(static_cast<id>(objectRef));
+#else
+  swift_nonatomic_release(static_cast<HeapObject *>(objectRef));
 #endif
 }
 
@@ -631,6 +711,51 @@ void swift::swift_bridgeObjectRelease_n(void *object, int n)
     objc_release(static_cast<id>(objectRef));
 #else
   swift_release_n(static_cast<HeapObject *>(objectRef), n);
+#endif
+}
+
+SWIFT_RUNTIME_EXPORT
+void *swift::swift_nonatomic_bridgeObjectRetain_n(void *object, int n)
+    SWIFT_CC(DefaultCC_IMPL) {
+#if SWIFT_OBJC_INTEROP
+  if (isObjCTaggedPointer(object))
+    return object;
+#endif
+
+  auto const objectRef = toPlainObject_unTagged_bridgeObject(object);
+
+#if SWIFT_OBJC_INTEROP
+  void *objc_ret = nullptr;
+  if (!isNonNative_unTagged_bridgeObject(object)) {
+    swift_nonatomic_retain_n(static_cast<HeapObject *>(objectRef), n);
+    return static_cast<HeapObject *>(objectRef);
+  }
+  for (int i = 0;i < n; ++i)
+    objc_ret = objc_retain(static_cast<id>(objectRef));
+  return objc_ret;
+#else
+  swift_nonatomic_retain_n(static_cast<HeapObject *>(objectRef), n);
+  return static_cast<HeapObject *>(objectRef);
+#endif
+}
+
+SWIFT_RUNTIME_EXPORT
+void swift::swift_nonatomic_bridgeObjectRelease_n(void *object, int n)
+    SWIFT_CC(DefaultCC_IMPL) {
+#if SWIFT_OBJC_INTEROP
+  if (isObjCTaggedPointer(object))
+    return;
+#endif
+
+  auto const objectRef = toPlainObject_unTagged_bridgeObject(object);
+
+#if SWIFT_OBJC_INTEROP
+  if (!isNonNative_unTagged_bridgeObject(object))
+    return swift_nonatomic_release_n(static_cast<HeapObject *>(objectRef), n);
+  for (int i = 0; i < n; ++i)
+    objc_release(static_cast<id>(objectRef));
+#else
+  swift_nonatomic_release_n(static_cast<HeapObject *>(objectRef), n);
 #endif
 }
 
@@ -1201,7 +1326,7 @@ SWIFT_RT_ENTRY_VISIBILITY
 extern "C" Class swift_getInitializedObjCClass(Class c)
     SWIFT_CC(RegisterPreservingCC_IMPL) {
   // Used when we have class metadata and we want to ensure a class has been
-  // initialized by the Objective C runtime. We need to do this because the
+  // initialized by the Objective-C runtime. We need to do this because the
   // class "c" might be valid metadata, but it hasn't been initialized yet.
   return [c class];
 }

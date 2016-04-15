@@ -740,6 +740,7 @@ public:
           }
         } callback;
         Fulfillments->searchTypeMetadata(IGM, ConcreteType, IsExact,
+                                         /*isSelf*/ false,
                                          /*sourceIndex*/ 0, MetadataPath(),
                                          callback);
       }
@@ -1254,7 +1255,6 @@ void IRGenModule::emitSILWitnessTable(SILWitnessTable *wt) {
 /// Generic functions and protocol witnesses carry polymorphic parameters.
 bool irgen::hasPolymorphicParameters(CanSILFunctionType ty) {
   switch (ty->getRepresentation()) {
-  case SILFunctionTypeRepresentation::CFunctionPointer:
   case SILFunctionTypeRepresentation::Block:
     // Should never be polymorphic.
     assert(!ty->isPolymorphic() && "polymorphic C function?!");
@@ -1263,8 +1263,13 @@ bool irgen::hasPolymorphicParameters(CanSILFunctionType ty) {
   case SILFunctionTypeRepresentation::Thick:
   case SILFunctionTypeRepresentation::Thin:
   case SILFunctionTypeRepresentation::Method:
-  case SILFunctionTypeRepresentation::ObjCMethod:
     return ty->isPolymorphic();
+
+  case SILFunctionTypeRepresentation::CFunctionPointer:
+  case SILFunctionTypeRepresentation::ObjCMethod:
+    // May be polymorphic at the SIL level, but no type metadata is actually
+    // passed.
+    return false;
 
   case SILFunctionTypeRepresentation::WitnessMethod:
     // Always carries polymorphic parameters for the Self type.
@@ -1453,8 +1458,6 @@ namespace {
 
   private:
     void initGenerics() {
-      assert(hasPolymorphicParameters(FnType));
-
       // The canonical mangling signature removes dependent types that are
       // equal to concrete types, but isn't necessarily parallel with
       // substitutions.
@@ -1462,20 +1465,22 @@ namespace {
     }
 
     void considerNewTypeSource(SourceKind kind, unsigned paramIndex,
-                               CanType type, IsExact_t isExact) {
+                               CanType type, IsExact_t isExact,
+                               bool isSelfParameter) {
       if (!Fulfillments.isInterestingTypeForFulfillments(type)) return;
 
       // Prospectively add a source.
       Sources.emplace_back(kind, paramIndex, type);
 
       // Consider the source.
-      if (!considerType(type, isExact, Sources.size() - 1, MetadataPath())) {
+      if (!considerType(type, isExact, isSelfParameter,
+                        Sources.size() - 1, MetadataPath())) {
         // If it wasn't used in any fulfillments, remove it.
         Sources.pop_back();
       }
     }
 
-    bool considerType(CanType type, IsExact_t isExact,
+    bool considerType(CanType type, IsExact_t isExact, bool isSelfParameter,
                       unsigned sourceIndex, MetadataPath &&path) {
       struct Callback : FulfillmentMap::InterestingKeysCallback {
         PolymorphicConvention &Self;
@@ -1495,7 +1500,8 @@ namespace {
           return Self.getConformsTo(type);
         }
       } callbacks(*this);
-      return Fulfillments.searchTypeMetadata(IGM, type, isExact, sourceIndex,
+      return Fulfillments.searchTypeMetadata(IGM, type, isExact, isSelfParameter,
+                                             sourceIndex,
                                              std::move(path), callbacks);
     }
 
@@ -1520,7 +1526,8 @@ namespace {
         // If the Self type is concrete, we have a witness thunk with a
         // fully substituted Self type. The witness table parameter is not
         // used.
-        considerType(selfTy, IsInexact, Sources.size() - 1, MetadataPath());
+        considerType(selfTy, IsInexact, /*isSelfParameter*/ true,
+                     Sources.size() - 1, MetadataPath());
       }
     }
 
@@ -1538,7 +1545,8 @@ namespace {
       if (isa<GenericTypeParamType>(selfTy))
         addSelfMetadataFulfillment(selfTy);
       else
-        considerType(selfTy, IsInexact, Sources.size() - 1, MetadataPath());
+        considerType(selfTy, IsInexact, /*isSelfParameter*/ true,
+                     Sources.size() - 1, MetadataPath());
     }
 
     void considerParameter(SILParameterInfo param, unsigned paramIndex,
@@ -1555,7 +1563,8 @@ namespace {
         if (!isSelfParameter) return;
         if (type->getNominalOrBoundGenericNominal()) {
           considerNewTypeSource(SourceKind::GenericLValueMetadata,
-                                paramIndex, type, IsExact);
+                                paramIndex, type, IsExact,
+                                isSelfParameter);
         }
         return;
 
@@ -1566,7 +1575,7 @@ namespace {
         // Classes are sources of metadata.
         if (type->getClassOrBoundGenericClass()) {
           considerNewTypeSource(SourceKind::ClassPointer, paramIndex, type,
-                                IsInexact);
+                                IsInexact, isSelfParameter);
           return;
         }
 
@@ -1577,7 +1586,7 @@ namespace {
 
           CanType objTy = metatypeTy.getInstanceType();
           considerNewTypeSource(SourceKind::Metadata, paramIndex, objTy,
-                                IsInexact);
+                                IsInexact, isSelfParameter);
           return;
         }
 

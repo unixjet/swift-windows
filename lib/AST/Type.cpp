@@ -14,8 +14,9 @@
 //
 //===----------------------------------------------------------------------===//
 
-#include "swift/AST/ArchetypeBuilder.h"
 #include "swift/AST/Types.h"
+#include "ForeignRepresentationInfo.h"
+#include "swift/AST/ArchetypeBuilder.h"
 #include "swift/AST/TypeVisitor.h"
 #include "swift/AST/TypeWalker.h"
 #include "swift/AST/Decl.h"
@@ -650,7 +651,7 @@ CanType CanType::getAnyOptionalObjectTypeImpl(CanType type,
   return CanType();
 }
 
-Type TypeBase::getAnyPointerElementType(PointerTypeKind &PTK)  {
+Type TypeBase::getAnyPointerElementType(PointerTypeKind &PTK) {
   if (auto boundTy = getAs<BoundGenericType>()) {
     auto &C = getASTContext();
     if (boundTy->getDecl() == C.getUnsafeMutablePointerDecl()) {
@@ -1942,8 +1943,7 @@ static ForeignRepresentableKind getObjCObjectRepresentable(Type type) {
     type = dynSelf->getSelfType();
 
   // @objc classes.
-  if (auto classType = type->getAs<ClassType>()) {
-    auto classDecl = classType->getDecl();
+  if (auto classDecl = type->getClassOrBoundGenericClass()) {
     auto &ctx = classDecl->getASTContext();
     if (auto resolver = ctx.getLazyResolver())
       resolver->resolveDeclSignature(classDecl);
@@ -2116,10 +2116,6 @@ getForeignRepresentable(Type type, ForeignLanguage language, DeclContext *dc) {
   // Pointers may be representable in ObjC.
   PointerTypeKind pointerKind;
   if (auto pointerElt = type->getAnyPointerElementType(pointerKind)) {
-    // FIXME: Optionality should be embedded in the pointer types.
-    if (wasOptional)
-      return failure();
-
     switch (pointerKind) {
     case PTK_UnsafeMutablePointer:
     case PTK_UnsafePointer:
@@ -2151,17 +2147,11 @@ getForeignRepresentable(Type type, ForeignLanguage language, DeclContext *dc) {
 
   // Determine whether this nominal type is known to be representable
   // in this foreign language.
-  auto result = ctx.getForeignRepresentable(nominal, language, dc);
-  if (result.first == ForeignRepresentableKind::None)
-    return result;
+  auto result = ctx.getForeignRepresentationInfo(nominal, language, dc);
+  if (result.getKind() == ForeignRepresentableKind::None)
+    return failure();
 
-  // The ability to bridge an optional is currently tied to the
-  // _ObjectiveCBridgeable protocol.
-  // FIXME: This will eventually be wrong, but it is convenient for now.
-  if (wasOptional &&
-      (!result.second ||
-       !result.second->getProtocol()->isSpecificProtocol(
-          KnownProtocolKind::ObjectiveCBridgeable)))
+  if (wasOptional && !result.isRepresentableAsOptional())
     return failure();
 
   // If our nominal type has type arguments, make sure they are
@@ -2204,7 +2194,7 @@ getForeignRepresentable(Type type, ForeignLanguage language, DeclContext *dc) {
     }
   }
 
-  return result;
+  return { result.getKind(), result.getConformance() };
 }
 
 std::pair<ForeignRepresentableKind, ProtocolConformance *>
@@ -2961,7 +2951,7 @@ Identifier DependentMemberType::getName() const {
 }
 
 static bool transformSILResult(SILResultInfo &result, bool &changed,
-                               const std::function<Type(Type)> &fn) {
+                               llvm::function_ref<Type(Type)> fn) {
   Type transType = result.getType().transform(fn);
   if (!transType) return true;
 
@@ -2974,7 +2964,7 @@ static bool transformSILResult(SILResultInfo &result, bool &changed,
 }
 
 static bool transformSILParameter(SILParameterInfo &param, bool &changed,
-                                  const std::function<Type(Type)> &fn) {
+                                  llvm::function_ref<Type(Type)> fn) {
   Type transType = param.getType().transform(fn);
   if (!transType) return true;
 
@@ -2986,7 +2976,7 @@ static bool transformSILParameter(SILParameterInfo &param, bool &changed,
   return false;
 }
 
-Type Type::transform(const std::function<Type(Type)> &fn) const {
+Type Type::transform(llvm::function_ref<Type(Type)> fn) const {
   // Transform this type node.
   Type transformed = fn(*this);
 
@@ -3495,11 +3485,11 @@ case TypeKind::Id:
 }
 
 
-bool Type::findIf(const std::function<bool(Type)> &pred) const {
+bool Type::findIf(llvm::function_ref<bool(Type)> pred) const {
   class Walker : public TypeWalker {
-    const std::function<bool(Type)> &Pred;
+    llvm::function_ref<bool(Type)> Pred;
   public:
-    explicit Walker(const std::function<bool(Type)> &pred) : Pred(pred) {}
+    explicit Walker(llvm::function_ref<bool(Type)> pred) : Pred(pred) {}
 
     virtual Action walkToTypePre(Type ty) override {
       if (Pred(ty))

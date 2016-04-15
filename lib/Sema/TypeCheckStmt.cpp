@@ -673,7 +673,7 @@ public:
     // Convert that Optional<T> value to Optional<Element>.
     auto optPatternType = OptionalType::get(S->getPattern()->getType());
     if (!optPatternType->isEqual(iteratorNext->getType()) &&
-        TC.convertToType(iteratorNext, optPatternType, DC)) {
+        TC.convertToType(iteratorNext, optPatternType, DC, S->getPattern())) {
       return nullptr;
     }
 
@@ -986,7 +986,14 @@ void TypeChecker::checkIgnoredExpr(Expr *E) {
   }
 
   auto valueE = E->getValueProvidingExpr();
-
+  
+  // Complain about '#selector'.
+  if (auto *ObjCSE = dyn_cast<ObjCSelectorExpr>(valueE)) {
+    diagnose(ObjCSE->getLoc(), diag::expression_unused_selector_result)
+      .highlight(E->getSourceRange());
+    return;
+  }
+    
   // Always complain about 'try?'.
   if (auto *OTE = dyn_cast<OptionalTryExpr>(valueE)) {
     diagnose(OTE->getTryLoc(), diag::expression_unused_optional_try)

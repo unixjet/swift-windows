@@ -109,8 +109,10 @@ static bool readOptionsBlock(llvm::BitstreamCursor &cursor,
     case options_block::IS_TESTABLE:
       extendedInfo.setIsTestable(true);
       break;
-    case options_block::IS_RESILIENT:
-      extendedInfo.setIsResilient(true);
+    case options_block::RESILIENCE_STRATEGY:
+      unsigned Strategy;
+      options_block::ResilienceStrategyLayout::readRecord(scratch, Strategy);
+      extendedInfo.setResilienceStrategy(ResilienceStrategy(Strategy));
       break;
     default:
       // Unknown options record, possibly for use by a future version of the
@@ -1565,7 +1567,7 @@ static const Decl* getGroupDecl(const Decl *D) {
 }
 
 Optional<StringRef> ModuleFile::getGroupNameById(unsigned Id) const {
-  if(!GroupNamesMap || GroupNamesMap->count(Id) == 0)
+  if (!GroupNamesMap || GroupNamesMap->count(Id) == 0)
     return None;
   auto Original = (*GroupNamesMap)[Id];
   if (Original.empty())
@@ -1576,7 +1578,7 @@ Optional<StringRef> ModuleFile::getGroupNameById(unsigned Id) const {
 }
 
 Optional<StringRef> ModuleFile::getSourceFileNameById(unsigned Id) const {
-  if(!GroupNamesMap || GroupNamesMap->count(Id) == 0)
+  if (!GroupNamesMap || GroupNamesMap->count(Id) == 0)
     return None;
   auto Original = (*GroupNamesMap)[Id];
   if (Original.empty())

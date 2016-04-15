@@ -10,32 +10,32 @@
 //
 //===----------------------------------------------------------------------===//
 
-#include "clang/AST/Attr.h"
-#include "clang/AST/Comment.h"
-#include "clang/AST/CommentVisitor.h"
 #include "swift/IDE/CodeCompletion.h"
 #include "swift/IDE/CodeCompletionCache.h"
 #include "swift/IDE/Utils.h"
-#include "swift/Basic/Fallthrough.h"
+#include "CodeCompletionResultBuilder.h"
 #include "swift/AST/ASTPrinter.h"
 #include "swift/AST/ASTWalker.h"
 #include "swift/AST/Comment.h"
 #include "swift/AST/LazyResolver.h"
 #include "swift/AST/NameLookup.h"
 #include "swift/AST/USRGeneration.h"
+#include "swift/Basic/Fallthrough.h"
 #include "swift/Basic/LLVM.h"
 #include "swift/ClangImporter/ClangImporter.h"
 #include "swift/ClangImporter/ClangModule.h"
 #include "swift/Parse/CodeCompletionCallbacks.h"
 #include "swift/Sema/IDETypeChecking.h"
 #include "swift/Subsystems.h"
-#include "llvm/ADT/StringRef.h"
 #include "llvm/ADT/SmallSet.h"
 #include "llvm/ADT/SmallString.h"
+#include "llvm/ADT/StringRef.h"
 #include "llvm/Support/raw_ostream.h"
 #include "llvm/Support/SaveAndRestore.h"
-#include "CodeCompletionResultBuilder.h"
 #include "clang/AST/ASTContext.h"
+#include "clang/AST/Attr.h"
+#include "clang/AST/Comment.h"
+#include "clang/AST/CommentVisitor.h"
 #include "clang/AST/Decl.h"
 #include "clang/Basic/Module.h"
 #include "clang/Index/USRGeneration.h"
@@ -90,7 +90,7 @@ return true;
     CHECK_CASE(recommended)
     CHECK_CASE(recommendedover)
 #undef CHECK_CASE
-  } while(!Content.empty());
+  } while (!Content.empty());
   return false;
 }
 
@@ -105,7 +105,7 @@ void splitTextByComma(StringRef Text, std::vector<StringRef>& Subs) {
 }
 
 namespace clang {
-  namespace comments {
+namespace comments {
 class WordPairsArrangedViewer {
   ArrayRef<std::pair<StringRef, StringRef>> Content;
   std::vector<StringRef> ViewedText;
@@ -201,10 +201,11 @@ void getClangDocKeyword(ClangImporter &Importer, const Decl *D,
     }
   }
 }
-}}
+} // end namespace comments
+} // end namespace clang
 
-namespace llvm {
-  namespace markup {
+namespace swift {
+namespace markup {
 class SwiftDocWordExtractor : public MarkupASTWalker {
   CommandWordsPairs &Pairs;
   CodeCompletionCommandKind Kind;
@@ -241,7 +242,7 @@ void getSwiftDocKeyword(const Decl* D, CommandWordsPairs &Words) {
   }
   if (!Interested)
     return;
-  static llvm::markup::MarkupContext MC;
+  static swift::markup::MarkupContext MC;
   auto DC = getDocComment(MC, D);
   if (!DC.hasValue())
     return;
@@ -257,7 +258,10 @@ void getSwiftDocKeyword(const Decl* D, CommandWordsPairs &Words) {
         break;
     }
   }
-}}}
+}
+} // end namespace markup
+} // end namespace swift
+
 typedef llvm::function_ref<bool(ValueDecl*, DeclVisibilityKind)> DeclFilter;
 DeclFilter DefaultFilter = [] (ValueDecl* VD, DeclVisibilityKind Kind) {return true;};
 
@@ -321,7 +325,7 @@ public:
     return Found;
   }
 };
-} // unnamed namespace
+} // end anonymous namespace
 
 static Stmt *findNearestStmt(const AbstractFunctionDecl *AFD, SourceLoc Loc,
                              StmtKind Kind) {
@@ -354,42 +358,43 @@ void CodeCompletionString::print(raw_ostream &OS) const {
       OS << "#}";
     }
     switch (C.getKind()) {
-    case Chunk::ChunkKind::AccessControlKeyword:
-    case Chunk::ChunkKind::DeclAttrKeyword:
-    case Chunk::ChunkKind::DeclAttrParamKeyword:
-    case Chunk::ChunkKind::OverrideKeyword:
-    case Chunk::ChunkKind::ThrowsKeyword:
-    case Chunk::ChunkKind::RethrowsKeyword:
-    case Chunk::ChunkKind::DeclIntroducer:
-    case Chunk::ChunkKind::Text:
-    case Chunk::ChunkKind::LeftParen:
-    case Chunk::ChunkKind::RightParen:
-    case Chunk::ChunkKind::LeftBracket:
-    case Chunk::ChunkKind::RightBracket:
-    case Chunk::ChunkKind::LeftAngle:
-    case Chunk::ChunkKind::RightAngle:
-    case Chunk::ChunkKind::Dot:
-    case Chunk::ChunkKind::Ellipsis:
-    case Chunk::ChunkKind::Comma:
-    case Chunk::ChunkKind::ExclamationMark:
-    case Chunk::ChunkKind::QuestionMark:
-    case Chunk::ChunkKind::Ampersand:
-    case Chunk::ChunkKind::Equal:
-    case Chunk::ChunkKind::Whitespace:
+    using ChunkKind = Chunk::ChunkKind;
+    case ChunkKind::AccessControlKeyword:
+    case ChunkKind::DeclAttrKeyword:
+    case ChunkKind::DeclAttrParamKeyword:
+    case ChunkKind::OverrideKeyword:
+    case ChunkKind::ThrowsKeyword:
+    case ChunkKind::RethrowsKeyword:
+    case ChunkKind::DeclIntroducer:
+    case ChunkKind::Text:
+    case ChunkKind::LeftParen:
+    case ChunkKind::RightParen:
+    case ChunkKind::LeftBracket:
+    case ChunkKind::RightBracket:
+    case ChunkKind::LeftAngle:
+    case ChunkKind::RightAngle:
+    case ChunkKind::Dot:
+    case ChunkKind::Ellipsis:
+    case ChunkKind::Comma:
+    case ChunkKind::ExclamationMark:
+    case ChunkKind::QuestionMark:
+    case ChunkKind::Ampersand:
+    case ChunkKind::Equal:
+    case ChunkKind::Whitespace:
       AnnotatedTextChunk = C.isAnnotation();
       SWIFT_FALLTHROUGH;
-    case Chunk::ChunkKind::CallParameterName:
-    case Chunk::ChunkKind::CallParameterInternalName:
-    case Chunk::ChunkKind::CallParameterColon:
-    case Chunk::ChunkKind::DeclAttrParamEqual:
-    case Chunk::ChunkKind::CallParameterType:
-    case Chunk::ChunkKind::CallParameterClosureType:
-    case CodeCompletionString::Chunk::ChunkKind::GenericParameterName:
+    case ChunkKind::CallParameterName:
+    case ChunkKind::CallParameterInternalName:
+    case ChunkKind::CallParameterColon:
+    case ChunkKind::DeclAttrParamEqual:
+    case ChunkKind::CallParameterType:
+    case ChunkKind::CallParameterClosureType:
+    case ChunkKind::GenericParameterName:
       if (AnnotatedTextChunk)
         OS << "['";
-      else if (C.getKind() == Chunk::ChunkKind::CallParameterInternalName)
+      else if (C.getKind() == ChunkKind::CallParameterInternalName)
         OS << "(";
-      else if (C.getKind() == Chunk::ChunkKind::CallParameterClosureType)
+      else if (C.getKind() == ChunkKind::CallParameterClosureType)
         OS << "##";
       for (char Ch : C.getText()) {
         if (Ch == '\n')
@@ -399,24 +404,24 @@ void CodeCompletionString::print(raw_ostream &OS) const {
       }
       if (AnnotatedTextChunk)
         OS << "']";
-      else if (C.getKind() == Chunk::ChunkKind::CallParameterInternalName)
+      else if (C.getKind() == ChunkKind::CallParameterInternalName)
         OS << ")";
       break;
-    case Chunk::ChunkKind::OptionalBegin:
-    case Chunk::ChunkKind::CallParameterBegin:
-    case CodeCompletionString::Chunk::ChunkKind::GenericParameterBegin:
+    case ChunkKind::OptionalBegin:
+    case ChunkKind::CallParameterBegin:
+    case ChunkKind::GenericParameterBegin:
       OS << "{#";
       break;
-    case Chunk::ChunkKind::DynamicLookupMethodCallTail:
-    case Chunk::ChunkKind::OptionalMethodCallTail:
+    case ChunkKind::DynamicLookupMethodCallTail:
+    case ChunkKind::OptionalMethodCallTail:
       OS << C.getText();
       break;
-    case Chunk::ChunkKind::TypeAnnotation:
+    case ChunkKind::TypeAnnotation:
       OS << "[#";
       OS << C.getText();
       OS << "#]";
       break;
-    case Chunk::ChunkKind::BraceStmtWithCursor:
+    case ChunkKind::BraceStmtWithCursor:
       OS << " {|}";
       break;
     }
@@ -899,9 +904,14 @@ CodeCompletionResult *CodeCompletionResultBuilder::takeResult() {
       typeRelation =
           calculateMaxTypeRelationForDecl(AssociatedDecl, ExpectedDeclTypes);
 
+    if (typeRelation == CodeCompletionResult::Invalid) {
+      IsNotRecommended = true;
+      NotRecReason = CodeCompletionResult::NotRecommendedReason::TypeMismatch;
+    }
+
     return new (*Sink.Allocator) CodeCompletionResult(
         SemanticContext, NumBytesToErase, CCS, AssociatedDecl, ModuleName,
-        /*NotRecommended=*/IsNotRecommended,
+        /*NotRecommended=*/IsNotRecommended, NotRecReason,
         copyString(*Sink.Allocator, BriefComment),
         copyAssociatedUSRs(*Sink.Allocator, AssociatedDecl),
         copyStringPairArray(*Sink.Allocator, CommentWords), typeRelation);
@@ -946,48 +956,49 @@ Optional<unsigned> CodeCompletionString::getFirstTextChunkIndex(
   for (auto i : indices(getChunks())) {
     auto &C = getChunks()[i];
     switch (C.getKind()) {
-    case CodeCompletionString::Chunk::ChunkKind::Text:
-    case CodeCompletionString::Chunk::ChunkKind::CallParameterName:
-    case CodeCompletionString::Chunk::ChunkKind::CallParameterInternalName:
-    case CodeCompletionString::Chunk::ChunkKind::GenericParameterName:
-    case CodeCompletionString::Chunk::ChunkKind::LeftParen:
-    case CodeCompletionString::Chunk::ChunkKind::LeftBracket:
-    case CodeCompletionString::Chunk::ChunkKind::Equal:
-    case CodeCompletionString::Chunk::ChunkKind::DeclAttrParamKeyword:
-    case CodeCompletionString::Chunk::ChunkKind::DeclAttrKeyword:
+    using ChunkKind = Chunk::ChunkKind;
+    case ChunkKind::Text:
+    case ChunkKind::CallParameterName:
+    case ChunkKind::CallParameterInternalName:
+    case ChunkKind::GenericParameterName:
+    case ChunkKind::LeftParen:
+    case ChunkKind::LeftBracket:
+    case ChunkKind::Equal:
+    case ChunkKind::DeclAttrParamKeyword:
+    case ChunkKind::DeclAttrKeyword:
       return i;
-    case CodeCompletionString::Chunk::ChunkKind::Dot:
-    case CodeCompletionString::Chunk::ChunkKind::ExclamationMark:
-    case CodeCompletionString::Chunk::ChunkKind::QuestionMark:
+    case ChunkKind::Dot:
+    case ChunkKind::ExclamationMark:
+    case ChunkKind::QuestionMark:
       if (includeLeadingPunctuation)
         return i;
       continue;
-    case CodeCompletionString::Chunk::ChunkKind::RightParen:
-    case CodeCompletionString::Chunk::ChunkKind::RightBracket:
-    case CodeCompletionString::Chunk::ChunkKind::LeftAngle:
-    case CodeCompletionString::Chunk::ChunkKind::RightAngle:
-    case CodeCompletionString::Chunk::ChunkKind::Ellipsis:
-    case CodeCompletionString::Chunk::ChunkKind::Comma:
-    case CodeCompletionString::Chunk::ChunkKind::Ampersand:
-    case CodeCompletionString::Chunk::ChunkKind::Whitespace:
-    case CodeCompletionString::Chunk::ChunkKind::AccessControlKeyword:
-    case CodeCompletionString::Chunk::ChunkKind::OverrideKeyword:
-    case CodeCompletionString::Chunk::ChunkKind::ThrowsKeyword:
-    case CodeCompletionString::Chunk::ChunkKind::RethrowsKeyword:
-    case CodeCompletionString::Chunk::ChunkKind::DeclIntroducer:
-    case CodeCompletionString::Chunk::ChunkKind::CallParameterColon:
-    case CodeCompletionString::Chunk::ChunkKind::DeclAttrParamEqual:
-    case CodeCompletionString::Chunk::ChunkKind::CallParameterType:
-    case CodeCompletionString::Chunk::ChunkKind::CallParameterClosureType:
-    case CodeCompletionString::Chunk::ChunkKind::OptionalBegin:
-    case CodeCompletionString::Chunk::ChunkKind::CallParameterBegin:
-    case CodeCompletionString::Chunk::ChunkKind::GenericParameterBegin:
-    case CodeCompletionString::Chunk::ChunkKind::DynamicLookupMethodCallTail:
-    case CodeCompletionString::Chunk::ChunkKind::OptionalMethodCallTail:
-    case CodeCompletionString::Chunk::ChunkKind::TypeAnnotation:
+    case ChunkKind::RightParen:
+    case ChunkKind::RightBracket:
+    case ChunkKind::LeftAngle:
+    case ChunkKind::RightAngle:
+    case ChunkKind::Ellipsis:
+    case ChunkKind::Comma:
+    case ChunkKind::Ampersand:
+    case ChunkKind::Whitespace:
+    case ChunkKind::AccessControlKeyword:
+    case ChunkKind::OverrideKeyword:
+    case ChunkKind::ThrowsKeyword:
+    case ChunkKind::RethrowsKeyword:
+    case ChunkKind::DeclIntroducer:
+    case ChunkKind::CallParameterColon:
+    case ChunkKind::DeclAttrParamEqual:
+    case ChunkKind::CallParameterType:
+    case ChunkKind::CallParameterClosureType:
+    case ChunkKind::OptionalBegin:
+    case ChunkKind::CallParameterBegin:
+    case ChunkKind::GenericParameterBegin:
+    case ChunkKind::DynamicLookupMethodCallTail:
+    case ChunkKind::OptionalMethodCallTail:
+    case ChunkKind::TypeAnnotation:
       continue;
 
-    case CodeCompletionString::Chunk::ChunkKind::BraceStmtWithCursor:
+    case ChunkKind::BraceStmtWithCursor:
       llvm_unreachable("should have already extracted the text");
     }
   }
@@ -1006,7 +1017,7 @@ void CodeCompletionString::getName(raw_ostream &OS) const {
   int TextSize = 0;
   if (FirstTextChunk.hasValue()) {
     for (auto C : getChunks().slice(*FirstTextChunk)) {
-      using ChunkKind = CodeCompletionString::Chunk::ChunkKind;
+      using ChunkKind = Chunk::ChunkKind;
       if (C.getKind() == ChunkKind::BraceStmtWithCursor)
         break;
 
@@ -1250,7 +1261,7 @@ public:
 
   void deliverCompletionResults();
 };
-} // end unnamed namespace
+} // end anonymous namespace
 
 void CodeCompletionCallbacksImpl::completeExpr() {
   if (DeliveredResults)
@@ -1291,8 +1302,8 @@ llvm::function_ref<Type(Type)> ArchetypeTransformer::getTransformerFunc() {
     auto *RootArc = cast<ArchetypeType>(Result.getPointer());
     llvm::SmallVector<Identifier, 1> Names;
     bool SelfDerived = false;
-    for(auto *AT = RootArc; AT; AT = AT->getParent()) {
-      if(!AT->getSelfProtocol())
+    for (auto *AT = RootArc; AT; AT = AT->getParent()) {
+      if (!AT->getSelfProtocol())
         Names.insert(Names.begin(), AT->getName());
       else
         SelfDerived = true;
@@ -1485,7 +1496,7 @@ private:
     if (auto *CD = VD->getClangDecl()) {
       clang::comments::getClangDocKeyword(*Importer, CD, Pairs);
     } else {
-      llvm::markup::getSwiftDocKeyword(VD, Pairs);
+      swift::markup::getSwiftDocKeyword(VD, Pairs);
     }
     Builder.addDeclDocCommentWords(llvm::makeArrayRef(Pairs));
   }
@@ -1600,14 +1611,29 @@ public:
       Builder.setAssociatedDecl(MD);
       Builder.addTextChunk(MD->getNameStr());
       Builder.addTypeAnnotation("Module");
-      Builder.setNotRecommended(Pair.second);
+      if (Pair.second)
+        Builder.setNotRecommended(CodeCompletionResult::NotRecommendedReason::
+                                    Redundant);
     }
   }
 
-  bool isModuleLoaded(ASTContext &Ctx, clang::Module *M) {
-    return Ctx.getLoadedModule(llvm::makeArrayRef(
-      std::make_pair(Ctx.getIdentifier(M->getTopLevelModuleName()),
-                     SourceLoc())));
+  void collectImportedModules(llvm::StringSet<> &ImportedModules) {
+    SmallVector<Module::ImportedModule, 16> Imported;
+    SmallVector<Module::ImportedModule, 16> FurtherImported;
+    CurrDeclContext->getParentSourceFile()->getImportedModules(Imported,
+      Module::ImportFilter::All);
+    while (!Imported.empty()) {
+      ModuleDecl *MD = Imported.back().second;
+      Imported.pop_back();
+      if (!ImportedModules.insert(MD->getNameStr()).second)
+        continue;
+      FurtherImported.clear();
+      MD->getImportedModules(FurtherImported, Module::ImportFilter::Public);
+      Imported.append(FurtherImported.begin(), FurtherImported.end());
+      for (auto SubMod : FurtherImported) {
+        Imported.push_back(SubMod);
+      }
+    }
   }
 
   void addImportModuleNames() {
@@ -1619,6 +1645,8 @@ public:
                 return LHS->getTopLevelModuleName().compare_lower(
                   RHS->getTopLevelModuleName()) < 0;
               });
+    llvm::StringSet<> ImportedModules;
+    collectImportedModules(ImportedModules);
     for (auto *M : Modules) {
       if (M->isAvailable() &&
           !M->getTopLevelModuleName().startswith("_") &&
@@ -1636,8 +1664,9 @@ public:
         Builder.addTypeAnnotation("Module");
 
         // Imported modules are not recommended.
-        Builder.setNotRecommended(isModuleLoaded(CurrDeclContext->
-          getASTContext(), M));
+        if (ImportedModules.count(MD->getNameStr()) != 0)
+          Builder.setNotRecommended(CodeCompletionResult::NotRecommendedReason::
+                                      Redundant);
       }
     }
   }
@@ -2492,7 +2521,7 @@ public:
           addCompoundFunctionName(CD, Reason);
           return;
         }
-        
+
         if (auto MT = ExprType->getRValueType()->getAs<AnyMetatypeType>()) {
           if (HaveDot) {
             Type Ty;
@@ -3280,6 +3309,7 @@ public:
     // If the expected type is ObjectiveC.Selector, add #selector.
     if (Ctx.LangOpts.EnableObjCInterop) {
       for (auto T : ExpectedTypes) {
+        T = T->lookThroughAllAnyOptionalTypes();
         if (auto structDecl = T->getStructOrBoundGenericStruct()) {
           if (structDecl->getName() == Ctx.Id_Selector &&
               structDecl->getParentModule()->getName() == Ctx.Id_ObjectiveC) {
@@ -3699,7 +3729,8 @@ public:
   }
 
   void addValueOverride(const ValueDecl *VD, DeclVisibilityKind Reason,
-                        CodeCompletionResultBuilder &Builder) {
+                        CodeCompletionResultBuilder &Builder,
+                        StringRef DeclIntroducer = "") {
 
     class DeclNameOffsetLocatorPrinter : public StreamPrinter {
     public:
@@ -3751,8 +3782,12 @@ public:
     if (missingDeclIntroducer && missingOverride)
       Builder.addOverrideKeyword();
 
-    if (missingDeclIntroducer)
-      Builder.addDeclIntroducer(DeclStr.str().substr(0, NameOffset));
+    if (missingDeclIntroducer) {
+      if (DeclIntroducer.empty())
+        Builder.addDeclIntroducer(DeclStr.str().substr(0, NameOffset));
+      else
+        Builder.addDeclIntroducer(DeclIntroducer);
+    }
 
     Builder.addTextChunk(DeclStr.str().substr(NameOffset));
   }
@@ -3772,6 +3807,16 @@ public:
         SemanticContextKind::Super, {});
     Builder.setAssociatedDecl(VD);
     addValueOverride(VD, Reason, Builder);
+  }
+
+  void addTypeAlias(const AssociatedTypeDecl *ATD, DeclVisibilityKind Reason) {
+    CodeCompletionResultBuilder Builder(Sink,
+      CodeCompletionResult::ResultKind::Declaration,
+      SemanticContextKind::Super, {});
+    Builder.setAssociatedDecl(ATD);
+    addValueOverride(ATD, Reason, Builder, "typealias ");
+    Builder.addTextChunk(" = ");
+    Builder.addSimpleNamedParameter("Type");
   }
 
   void addConstructor(const ConstructorDecl *CD) {
@@ -3794,10 +3839,17 @@ public:
     Builder.addBraceStmtWithCursor();
   }
 
+  llvm::StringSet<> SatisfiedAssociatedTypes;
+
   // Implement swift::VisibleDeclConsumer.
   void foundDecl(ValueDecl *D, DeclVisibilityKind Reason) override {
-    if (Reason == DeclVisibilityKind::MemberOfCurrentNominal)
+    if (Reason == DeclVisibilityKind::MemberOfCurrentNominal) {
+      if (D->getKind() == DeclKind::TypeAlias) {
+        ValueDecl *VD = dyn_cast<ValueDecl>(D);
+        SatisfiedAssociatedTypes.insert(VD->getName().str());
+      }
       return;
+    }
 
     if (AvailableAttr::isUnavailable(D))
       return;
@@ -3863,6 +3915,33 @@ public:
     }
   }
 
+  void addAssociatedTypes(Type CurrTy) {
+    if (hasFuncIntroducer || hasVarIntroducer || isKeywordSpecified("override"))
+      return;
+
+    assert(CurrTy);
+    NominalTypeDecl *NTD = dyn_cast_or_null<NominalTypeDecl>(CurrTy->
+                                                              getAnyNominal());
+
+    for (auto Conformance : NTD->getAllConformances()) {
+      auto Proto = Conformance->getProtocol();
+      if (!Proto->isAccessibleFrom(CurrDeclContext))
+        continue;
+      auto NormalConformance = Conformance->getRootNormalConformance();
+      for (auto Member : Proto->getMembers()) {
+        auto *ATD = dyn_cast<AssociatedTypeDecl>(Member);
+        if (!ATD)
+          continue;
+        // FIXME: Also exclude the type alias that has already been specified.
+        if (!NormalConformance->hasTypeWitness(ATD) ||
+            !ATD->getDefaultDefinitionLoc().isNull())
+          continue;
+        addTypeAlias(ATD,
+          DeclVisibilityKind::MemberOfProtocolImplementedByCurrentNominal);
+      }
+    }
+  }
+
   void getOverrideCompletions(SourceLoc Loc) {
     if (!CurrDeclContext->getAsGenericTypeOrGenericTypeExtensionContext())
       return;
@@ -3871,11 +3950,11 @@ public:
       lookupVisibleMemberDecls(*this, CurrTy, CurrDeclContext,
                                TypeResolver.get());
       addDesignatedInitializers(CurrTy);
+      addAssociatedTypes(CurrTy);
     }
   }
 };
-
-} // end unnamed namespace
+} // end anonymous namespace
 
 void CodeCompletionCallbacksImpl::completeDotExpr(Expr *E, SourceLoc DotLoc) {
   assert(P.Tok.is(tok::code_complete));
@@ -4337,7 +4416,7 @@ namespace  {
       return true;
     }
   };
-}
+} // end anonymous namespace
 
 /// Given an expression and its context, the analyzer tries to figure out the
 /// expected type of the expression by analyzing its context.
@@ -4716,7 +4795,7 @@ void CodeCompletionCallbacksImpl::doneParsing() {
     });
     CurDeclContext->walkContext(Walker);
     bool Success = false;
-    if(auto PE = Walker.ParentFarthest.get<Expr *>()) {
+    if (auto PE = Walker.ParentFarthest.get<Expr *>()) {
       Success = typeCheckUnresolvedExpr(*CurDeclContext, UnresolvedExpr, PE,
                                         PossibleTypes);
       Lookup.getUnresolvedMemberCompletions(
@@ -4902,7 +4981,7 @@ public:
     return new CodeCompletionCallbacksImpl(P, CompletionContext, Consumer);
   }
 };
-} // end unnamed namespace
+} // end anonymous namespace
 
 CodeCompletionCallbacksFactory *
 swift::ide::makeCodeCompletionCallbacksFactory(

@@ -126,7 +126,7 @@ struct d0100_FooStruct {
   func instanceFunc2(a: Int, b: inout Double) {}
 // PASS_COMMON-NEXT: {{^}}  func instanceFunc2(a: Int, b: inout Double){{$}}
 
-  func instanceFunc3(a: Int, let b: Double) { var a = a; a = 1; _ = a }
+  func instanceFunc3(a: Int, b: Double) { var a = a; a = 1; _ = a }
 // PASS_COMMON-NEXT: {{^}}  func instanceFunc3(a: Int, b: Double){{$}}
 
   func instanceFuncWithDefaultArg1(a: Int = 0) {}
@@ -1309,6 +1309,19 @@ public struct ArrayThingy {
     // PASS_PRINT_AST-NEXT: public func mineCopper() -> Int
     @warn_unused_result(message: "oops")
     public func mineCopper() -> Int { return 0 }
+}
+
+// @discardableResult attribute
+public struct DiscardableThingy {
+    // PASS_PRINT_AST: @discardableResult
+    // PASS_PRINT_AST-NEXT: public init()
+    @discardableResult
+    public init() {}
+
+    // PASS_PRINT_AST: @discardableResult
+    // PASS_PRINT_AST-NEXT: public func useless() -> Int
+    @discardableResult
+    public func useless() -> Int { return 0 }
 }
 
 

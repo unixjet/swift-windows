@@ -37,10 +37,12 @@ extension String {
     internal struct _ScratchIterator : IteratorProtocol {
       var core: _StringCore
       var idx: Int
+      @_versioned
       init(_ core: _StringCore, _ pos: Int) {
         self.idx = pos
         self.core = core
       }
+      @inline(__always)
       mutating func next() -> UTF16.CodeUnit? {
         if idx == core.endIndex {
           return nil
@@ -61,6 +63,7 @@ extension String {
       ///
       /// - Precondition: The next value is representable.
       @warn_unused_result
+      @inline(__always)
       public func successor() -> Index {
         var scratch = _ScratchIterator(_core, _position)
         var decoder = UTF16()
@@ -93,8 +96,8 @@ extension String {
         return Index(_core.endIndex, _core)
       }
 
-      internal var _position: Int
-      internal var _core: _StringCore
+      @_versioned internal var _position: Int
+      @_versioned internal var _core: _StringCore
     }
 
     /// The position of the first `UnicodeScalar` if the `String` is
@@ -251,13 +254,13 @@ extension String.UnicodeScalarView : RangeReplaceableCollection {
   /// Reserve enough space to store `n` ASCII characters.
   ///
   /// - Complexity: O(`n`).
-  public mutating func reserveCapacity(n: Int) {
+  public mutating func reserveCapacity(_ n: Int) {
     _core.reserveCapacity(n)
   }
   /// Append `x` to `self`.
   ///
   /// - Complexity: Amortized O(1).
-  public mutating func append(x: UnicodeScalar) {
+  public mutating func append(_ x: UnicodeScalar) {
     _core.append(x)
   }
   /// Append the elements of `newElements` to `self`.
@@ -277,7 +280,7 @@ extension String.UnicodeScalarView : RangeReplaceableCollection {
   public mutating func replaceSubrange<
     C: Collection where C.Iterator.Element == UnicodeScalar
   >(
-    bounds: Range<Index>, with newElements: C
+    _ bounds: Range<Index>, with newElements: C
   ) {
     let rawSubRange = bounds.startIndex._position
       ..< bounds.endIndex._position

@@ -23,18 +23,21 @@ public enum Process {
   /// with which the current process was invoked.
   internal static func _computeArguments() -> [String] {
     var result: [String] = []
+    let argv = unsafeArgv
     for i in 0..<Int(argc) {
-      let arg = unsafeArgv[i]
-      result.append(
-       arg == nil ? "" : String(cString: arg)
-      )
+      let arg = argv[i]!
+      let converted = String(cString: arg)
+      result.append(converted)
     }
     return result 
   }
 
+  @_versioned
   internal static var _argc: CInt = CInt()
+
+  @_versioned
   internal static var _unsafeArgv:
-    UnsafeMutablePointer<UnsafeMutablePointer<Int8>>
+    UnsafeMutablePointer<UnsafeMutablePointer<Int8>?>?
     = nil
 
   /// Access to the raw argc value from C.
@@ -45,8 +48,8 @@ public enum Process {
   /// Access to the raw argv value from C. Accessing the argument vector
   /// through this pointer is unsafe.
   public static var unsafeArgv:
-    UnsafeMutablePointer<UnsafeMutablePointer<Int8>> {
-    return _unsafeArgv
+    UnsafeMutablePointer<UnsafeMutablePointer<Int8>?> {
+    return _unsafeArgv!
   }
 
   /// Access to the swift arguments, also use lazy initialization of static
@@ -75,10 +78,10 @@ public enum Process {
 @_transparent
 public // COMPILER_INTRINSIC
 func _stdlib_didEnterMain(
-  argc argc: Int32, argv: UnsafeMutablePointer<UnsafeMutablePointer<Int8>>
+  argc: Int32, argv: UnsafeMutablePointer<UnsafeMutablePointer<Int8>?>
 ) {
   // Initialize the Process.argc and Process.unsafeArgv variables with the
   // values that were passed in to main.
   Process._argc = CInt(argc)
-  Process._unsafeArgv = UnsafeMutablePointer(argv)
+  Process._unsafeArgv = argv
 }

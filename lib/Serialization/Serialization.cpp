@@ -438,7 +438,7 @@ void Serializer::writeBlockInfoBlock() {
   BLOCK_RECORD(options_block, XCC);
   BLOCK_RECORD(options_block, IS_SIB);
   BLOCK_RECORD(options_block, IS_TESTABLE);
-  BLOCK_RECORD(options_block, IS_RESILIENT);
+  BLOCK_RECORD(options_block, RESILIENCE_STRATEGY);
 
   BLOCK(INPUT_BLOCK);
   BLOCK_RECORD(input_block, IMPORTED_MODULE);
@@ -594,9 +594,9 @@ void Serializer::writeHeader(const SerializationOptions &options) {
         IsTestable.emit(ScratchRecord);
       }
 
-      if (M->isResilienceEnabled()) {
-        options_block::IsResilientLayout IsResilient(Out);
-        IsResilient.emit(ScratchRecord);
+      if (M->getResilienceStrategy() != ResilienceStrategy::Default) {
+        options_block::ResilienceStrategyLayout Strategy(Out);
+        Strategy.emit(ScratchRecord, unsigned(M->getResilienceStrategy()));
       }
 
       if (options.SerializeOptionsForDebugging) {
@@ -3560,7 +3560,7 @@ class YamlGroupInputParser {
           GroupNameAndFileName.append(llvm::sys::path::stem(FileName));
           Map[FileName] = GroupNameAndFileName.str();
         } else if (Entry.getType() == llvm::yaml::Node::NodeKind::NK_Mapping) {
-          if(parseRoot(Map, &Entry, *pCombined))
+          if (parseRoot(Map, &Entry, *pCombined))
             return true;
         } else
           return true;
@@ -3609,7 +3609,7 @@ public:
       return true;
     }
     pFileNameToGroupNameMap pMap(new FileNameToGroupNameMap());
-    if(parseRoot(*pMap, Root, llvm::Twine()))
+    if (parseRoot(*pMap, Root, llvm::Twine()))
       return true;
 
     // Save the parsed map to the owner.
@@ -3630,18 +3630,6 @@ class DeclGroupNameContext {
     StringRef getGroupName(const Decl *VD) {
       return Enable ? getGroupNameInternal(VD) : StringRef(NullGroupName);
     };
-  };
-
-  // FIXME: Implement better name collectors.
-  struct GroupNameCollectorFromFileName : public GroupNameCollector {
-    GroupNameCollectorFromFileName(bool Enable) : GroupNameCollector(Enable) {}
-    StringRef getGroupNameInternal(const Decl *VD) override {
-      auto PathOp = VD->getDeclContext()->getParentSourceFile()->getBufferID();
-      if (!PathOp.hasValue())
-        return NullGroupName;
-      return llvm::sys::path::stem(StringRef(VD->getASTContext().SourceMgr.
-        getIdentifierForBuffer(PathOp.getValue())));
-    }
   };
 
   class GroupNameCollectorFromJson : public GroupNameCollector {
@@ -3696,7 +3684,7 @@ public:
 
   ArrayRef<StringRef> getOrderedGroupNames() {
     ViewBuffer.clear();
-    for(auto It = Map.begin(); It != Map.end(); ++ It) {
+    for (auto It = Map.begin(); It != Map.end(); ++ It) {
       ViewBuffer.push_back(It->first);
     }
     return llvm::makeArrayRef(ViewBuffer);

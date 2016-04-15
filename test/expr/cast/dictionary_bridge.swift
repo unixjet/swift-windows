@@ -2,6 +2,16 @@
 
 // REQUIRES: objc_interop
 
+// FIXME: Should go into the standard library.
+public extension _ObjectiveCBridgeable {
+  static func _unconditionallyBridgeFromObjectiveC(_ source: _ObjectiveCType?)
+      -> Self {
+    var result: Self? = nil
+    _forceBridgeFromObjectiveC(source!, result: &result)
+    return result!
+  }
+}
+
 class Root : Hashable { 
   var hashValue: Int {
     return 0
@@ -25,12 +35,12 @@ struct BridgedToObjC : Hashable, _ObjectiveCBridgeable {
     return ObjC()
   }
   static func _forceBridgeFromObjectiveC(
-    x: ObjC,
+    _ x: ObjC,
     result: inout BridgedToObjC?
   ) {
   }
   static func _conditionallyBridgeFromObjectiveC(
-    x: ObjC,
+    _ x: ObjC,
     result: inout BridgedToObjC?
   ) -> Bool {
     return true

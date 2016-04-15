@@ -65,6 +65,10 @@ option(SWIFT_INCLUDE_DOCS
     "Create targets for building docs."
     TRUE)
 
+option(SWIFT_BUILD_RUNTIME_WITH_HOST_COMPILER
+       "Use the host compiler and not the internal clang to build the swift runtime"
+       FALSE)
+
 set(SWIFT_ANALYZE_CODE_COVERAGE FALSE CACHE STRING
     "Build Swift with code coverage instrumenting enabled [FALSE, NOT-MERGED, MERGED]")
 set_property(CACHE SWIFT_ANALYZE_CODE_COVERAGE PROPERTY
@@ -85,7 +89,7 @@ set(SWIFT_ENABLE_GOLD_LINKER FALSE CACHE BOOL
     "Enable using the gold linker when available")
 
 set(_SWIFT_KNOWN_INSTALL_COMPONENTS
-    "compiler;clang-builtin-headers;clang-resource-dir-symlink;clang-builtin-headers-in-clang-resource-dir;stdlib;stdlib-experimental;sdk-overlay;editor-integration;tools;testsuite-tools;dev;license;sourcekit-xpc-service;sourcekit-inproc")
+    "autolink-driver;compiler;clang-builtin-headers;clang-resource-dir-symlink;clang-builtin-headers-in-clang-resource-dir;stdlib;stdlib-experimental;sdk-overlay;editor-integration;tools;testsuite-tools;dev;license;sourcekit-xpc-service;sourcekit-inproc")
 
 # Set the SWIFT_INSTALL_COMPONENTS variable to the default value if it is not passed in via -D
 set(SWIFT_INSTALL_COMPONENTS "${_SWIFT_KNOWN_INSTALL_COMPONENTS}" CACHE STRING
@@ -94,6 +98,7 @@ set(SWIFT_INSTALL_COMPONENTS "${_SWIFT_KNOWN_INSTALL_COMPONENTS}" CACHE STRING
 # components would approximately correspond to packages in a Debian-style Linux
 # packaging.  The following components are defined:
 #
+# * autolink-driver -- the Swift driver support tools
 # * compiler -- the Swift compiler and (on supported platforms) the REPL.
 # * clang-builtin-headers -- install a copy of Clang builtin headers under
 #   'lib/swift/clang'.  This is useful when Swift compiler is installed in
@@ -345,7 +350,7 @@ set(SWIFT_GYB_FLAGS
 
 # Directory to use as the Clang module cache when building Swift source files.
 set(SWIFT_MODULE_CACHE_PATH
-    "${CMAKE_BINARY_DIR}/${CMAKE_CFG_INTDIR}/clang-module-cache")
+    "${CMAKE_BINARY_DIR}/${CMAKE_CFG_INTDIR}/module-cache")
 
 # Xcode: use libc++ and c++11 using proper build settings.
 if(XCODE)
@@ -694,7 +699,11 @@ endif()
 #
 # Set up global CMake variables for API notes.
 #
-
+# API notes version 1.0.0
+#
+# Change the above comment to 'touch' this file and keep incremental builds
+# working when adding a new apinotes file.
+#
 set(SWIFT_API_NOTES_PATH "${SWIFT_SOURCE_DIR}/apinotes")
 if(NOT EXISTS "${SWIFT_API_NOTES_PATH}/Foundation.apinotes")
   message(FATAL_ERROR "API notes are not available in ${SWIFT_API_NOTES_PATH}")
@@ -711,9 +720,15 @@ if(SWIFT_BUILD_TOOLS)
   add_subdirectory(include)
   add_subdirectory(lib)
   add_subdirectory(tools)
+  add_subdirectory(tools/swift-reflection-dump)
 endif()
 add_subdirectory(utils)
 add_subdirectory(stdlib)
+
+if(SWIFT_BUILD_STDLIB AND SWIFT_INCLUDE_TESTS)
+  add_subdirectory(tools/swift-reflection-test)
+endif()
+
 if(SWIFT_BUILD_PERF_TESTSUITE AND "${CMAKE_SYSTEM_NAME}" STREQUAL "Darwin")
   add_subdirectory(benchmark)
 endif()

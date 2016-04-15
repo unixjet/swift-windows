@@ -19,6 +19,7 @@
 #include "swift/Runtime/Concurrent.h"
 #include "swift/Runtime/HeapObject.h"
 #include "swift/Runtime/Metadata.h"
+#include "swift/Runtime/Mutex.h"
 #include "llvm/ADT/DenseMap.h"
 #include "llvm/ADT/Optional.h"
 #include "llvm/ADT/PointerIntPair.h"
@@ -33,12 +34,9 @@
 #include <link.h>
 #endif
 
-#if defined(_MSC_VER)
-#include <windows.h>
-#else
+#if !defined(_MSC_VER)
 #include <dlfcn.h>
 #endif
-#include <mutex>
 
 using namespace swift;
 using namespace Demangle;
@@ -111,17 +109,10 @@ static void _addImageTypeMetadataRecordsBlock(const uint8_t *records,
 struct TypeMetadataState {
   ConcurrentMap<TypeMetadataCacheEntry> Cache;
   std::vector<TypeMetadataSection> SectionsToScan;
-#if defined(_MSC_VER)
-  std::mutex SectionsToScanLock;
-#else
-  pthread_mutex_t SectionsToScanLock;
-#endif
+  Mutex SectionsToScanLock;
 
   TypeMetadataState() {
     SectionsToScan.reserve(16);
-#if !defined(_MSC_VER)
-    pthread_mutex_init(&SectionsToScanLock, nullptr);
-#endif
 #if defined(__APPLE__) && defined(__MACH__)
     _initializeCallbacksToInspectDylib();
 #else
@@ -130,6 +121,7 @@ struct TypeMetadataState {
       SWIFT_TYPE_METADATA_SECTION);
 #endif
   }
+
 };
 
 static Lazy<TypeMetadataState> TypeMetadataRecords;
@@ -138,15 +130,8 @@ static void
 _registerTypeMetadataRecords(TypeMetadataState &T,
                              const TypeMetadataRecord *begin,
                              const TypeMetadataRecord *end) {
-#if defined(_MSC_VER)
-  T.SectionsToScanLock.lock();
+  ScopedLock guard(T.SectionsToScanLock);
   T.SectionsToScan.push_back(TypeMetadataSection{begin, end});
-  T.SectionsToScanLock.unlock();
-#else
-  pthread_mutex_lock(&T.SectionsToScanLock);
-  T.SectionsToScan.push_back(TypeMetadataSection{begin, end});
-  pthread_mutex_unlock(&T.SectionsToScanLock);
-#endif
 }
 
 static void _addImageTypeMetadataRecordsBlock(const uint8_t *records,
@@ -236,11 +221,10 @@ swift::_matchMetadataByMangledTypeName(const llvm::StringRef typeName,
   if (ntd == nullptr || ntd->Name.get() != typeName)
     return nullptr;
 
-  // Instantiate resilient types.
-  if (metadata == nullptr &&
-      ntd->getGenericMetadataPattern() &&
-      !ntd->GenericParams.isGeneric()) {
-    return swift_getResilientMetadata(ntd->getGenericMetadataPattern());
+  // Call the accessor if there is one.
+  if (metadata == nullptr && !ntd->GenericParams.isGeneric()) {
+    if (auto accessFn = ntd->getAccessFunction())
+      metadata = accessFn();
   }
 
   return metadata;
@@ -281,15 +265,9 @@ _typeByMangledName(const llvm::StringRef typeName) {
     return Value->getMetadata();
 
   // Check type metadata records
-#if defined(_MSC_VER)
-  T.SectionsToScanLock.lock();
-  foundMetadata = _searchTypeMetadataRecords(T, typeName);
-  T.SectionsToScanLock.unlock();
-#else
-  pthread_mutex_lock(&T.SectionsToScanLock);
-  foundMetadata = _searchTypeMetadataRecords(T, typeName);
-  pthread_mutex_unlock(&T.SectionsToScanLock);
-#endif
+  T.SectionsToScanLock.lock([&] {
+    foundMetadata = _searchTypeMetadataRecords(T, typeName);
+  });
 
   // Check protocol conformances table. Note that this has no support for
   // resolving generic types yet.

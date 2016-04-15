@@ -2047,7 +2047,7 @@ static void checkAccessibility(TypeChecker &TC, const Decl *D) {
   }
 }
 
-/// Figure out if a declaration should be exported to Objective C.
+/// Figure out if a declaration should be exported to Objective-C.
 static Optional<ObjCReason> shouldMarkAsObjC(TypeChecker &TC,
                                              const ValueDecl *VD,
                                              bool allowImplicit = false){
@@ -2090,9 +2090,14 @@ static Optional<ObjCReason> shouldMarkAsObjC(TypeChecker &TC,
   // make it implicitly @objc. However, if the declaration cannot be represented
   // as @objc, don't diagnose.
   Type contextTy = VD->getDeclContext()->getDeclaredTypeInContext();
-  if (auto classDecl = contextTy->getClassOrBoundGenericClass())
+  if (auto classDecl = contextTy->getClassOrBoundGenericClass()) {
+    // One cannot define @objc members of Objective-C runtime visible classes.
+    if (classDecl->isOnlyObjCRuntimeVisible())
+      return None;
+
     if (classDecl->checkObjCAncestry() != ObjCClassKind::NonObjC)
       return ObjCReason::DoNotDiagnose;
+  }
 
   return None;
 }
@@ -3245,7 +3250,7 @@ public:
         // default-initializable. If so, do it.
         if (PBD->getPattern(i)->hasType() &&
             !PBD->getInit(i) &&
-            PBD->hasStorage() &&
+            PBD->getPattern(i)->hasStorage() &&
             !PBD->getPattern(i)->getType()->is<ErrorType>()) {
 
           // If we have a type-adjusting attribute (like ownership), apply it now.
@@ -3829,6 +3834,18 @@ public:
           TC.diagnose(CD, diag::inheritance_from_final_class,
                       Super->getName());
           return;
+        }
+
+        if (Super->hasClangNode() && Super->getGenericParams()
+            && superclassTy->hasTypeParameter()) {
+          TC.diagnose(CD,
+                      diag::inheritance_from_unspecialized_objc_generic_class,
+                      Super->getName());
+        }
+
+        if (Super->isOnlyObjCRuntimeVisible()) {
+          TC.diagnose(CD, diag::inheritance_from_objc_runtime_visible_class,
+                      Super->getName());
         }
       }
 
@@ -5108,6 +5125,7 @@ public:
 
     UNINTERESTING_ATTR(WarnUnusedResult)
     UNINTERESTING_ATTR(WarnUnqualifiedAccess)
+    UNINTERESTING_ATTR(DiscardableResult)
 
 #undef UNINTERESTING_ATTR
 
@@ -5589,8 +5607,9 @@ public:
       }
 
       TC.checkInheritanceClause(ED);
-      if (auto nominal = ExtendedTy->getAnyNominal())
+      if (auto nominal = ExtendedTy->getAnyNominal()) {
         TC.validateDecl(nominal);
+      }
 
       validateAttributes(TC, ED);
     }
@@ -5870,15 +5889,18 @@ public:
       DD->setInvalid();
     }
 
-    Type FnTy;
-    if (DD->getDeclContext()->isGenericTypeContext())
-      FnTy = PolymorphicFunctionType::get(SelfTy,
-                                          TupleType::getEmpty(TC.Context),
-                             DD->getDeclContext()->getGenericParamsOfContext());
-    else
-      FnTy = FunctionType::get(SelfTy, TupleType::getEmpty(TC.Context));
+    if (!DD->hasType()) {
+      Type FnTy;
+      if (DD->getDeclContext()->isGenericTypeContext()) {
+        FnTy = PolymorphicFunctionType::get(SelfTy,
+                                            TupleType::getEmpty(TC.Context),
+                            DD->getDeclContext()->getGenericParamsOfContext());
+      } else {
+        FnTy = FunctionType::get(SelfTy, TupleType::getEmpty(TC.Context));
+      }
 
-    DD->setType(FnTy);
+      DD->setType(FnTy);
+    }
 
     // Do this before markAsObjC() to diagnose @nonobjc better
     validateAttributes(TC, DD);

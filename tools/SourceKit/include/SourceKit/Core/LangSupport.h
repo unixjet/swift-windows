@@ -329,6 +329,7 @@ struct DocEntityInfo {
   llvm::SmallString<32> Argument;
   llvm::SmallString<64> USR;
   llvm::SmallString<64> OriginalUSR;
+  llvm::SmallString<64> ProvideImplementationOfUSR;
   llvm::SmallString<64> DocComment;
   llvm::SmallString<64> FullyAnnotatedDecl;
   std::vector<DocGenericParam> GenericParams;
@@ -337,6 +338,7 @@ struct DocEntityInfo {
   unsigned Length = 0;
   bool IsUnavailable = false;
   bool IsDeprecated = false;
+  bool IsOptional = false;
   swift::Type Ty;
 };
 

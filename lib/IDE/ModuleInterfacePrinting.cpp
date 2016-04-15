@@ -182,6 +182,30 @@ swift::ide::collectModuleGroups(Module *M, std::vector<StringRef> &Scratch) {
   return llvm::makeArrayRef(Scratch);
 }
 
+/// Determine whether the given extension has a Clang node that
+/// created it (vs. being a Swift extension).
+static bool extensionHasClangNode(ExtensionDecl *ext) {
+  // If it has a Clang node (directly), 
+  if (ext->hasClangNode()) return true;
+
+  // If it has a global imported as a member.
+  auto members = ext->getMembers();
+  if (members.empty()) return false;
+  return members.front()->hasClangNode();
+}
+
+/// Retrieve the Clang node for the given extension, if it has one.
+/// created it (vs. being a Swift extension).
+static ClangNode extensionGetClangNode(ExtensionDecl *ext) {
+  // If it has a Clang node (directly), 
+  if (ext->hasClangNode()) return ext->getClangNode();
+
+  // If it has a global imported as a member.
+  auto members = ext->getMembers();
+  if (members.empty()) return ClangNode();
+  return members.front()->getClangNode();
+}
+
 Optional<StringRef>
 swift::ide::findGroupNameForUSR(ModuleDecl *M, StringRef USR) {
   for (auto File : M->getFiles()) {
@@ -320,9 +344,8 @@ void swift::ide::printSubmoduleInterface(
       continue;
     }
 
-    auto addToClangDecls = [&](Decl *D) {
-      assert(D->hasClangNode());
-      auto CN = D->getClangNode();
+    auto addToClangDecls = [&](Decl *D, ClangNode CN) {
+      assert(CN && "No Clang node here");
       clang::SourceLocation Loc = CN.getLocation();
 
       auto *OwningModule = Importer.getClangOwningModule(CN);
@@ -333,9 +356,19 @@ void swift::ide::printSubmoduleInterface(
     };
 
     if (D->hasClangNode()) {
-      addToClangDecls(D);
+      addToClangDecls(D, D->getClangNode());
       continue;
     }
+
+    // If we have an extension containing globals imported as members,
+    // use the first member as the Clang node.
+    if (auto Ext = dyn_cast<ExtensionDecl>(D)) {
+      if (extensionHasClangNode(Ext)) {
+        addToClangDecls(Ext, extensionGetClangNode(Ext));
+        continue;
+      }
+    }
+
     if (FullModuleName.empty()) {
       // If group name is given and the decl does not belong to the group, skip it.
       if (!GroupNames.empty()){
@@ -438,7 +471,7 @@ void swift::ide::printSubmoduleInterface(
       // Clang extensions (categories) are always printed in source order.
       // Swift extensions are printed with their associated type unless it's
       // a cross-module extension.
-      if (!Ext->hasClangNode()) {
+      if (!extensionHasClangNode(Ext)) {
         auto ExtendedNominal = Ext->getExtendedType()->getAnyNominal();
         if (Ext->getModuleContext() == ExtendedNominal->getModuleContext())
           return false;
@@ -448,15 +481,15 @@ void swift::ide::printSubmoduleInterface(
     if (auto NTD = dyn_cast<NominalTypeDecl>(D)) {
       if (PrintSynthesizedExtensions) {
         pAnalyzer.reset(new SynthesizedExtensionAnalyzer(NTD, AdjustedOptions));
-        AdjustedOptions.BracketOptions.shouldCloseNominal =
+        AdjustedOptions.BracketOptions = {NTD, true, true,
           !pAnalyzer->hasMergeGroup(SynthesizedExtensionAnalyzer::
-                                    MergeGroupKind::MergeableWithTypeDef);
+                                    MergeGroupKind::MergeableWithTypeDef)};
       }
     }
     if (D->print(Printer, AdjustedOptions)) {
-      if (AdjustedOptions.BracketOptions.shouldCloseNominal)
+      if (AdjustedOptions.BracketOptions.shouldCloseNominal(D))
         Printer << "\n";
-      AdjustedOptions.BracketOptions.shouldCloseNominal = true;
+      AdjustedOptions.BracketOptions = BracketOptions();
       if (auto NTD = dyn_cast<NominalTypeDecl>(D)) {
         std::queue<NominalTypeDecl *> SubDecls{{NTD}};
 
@@ -469,24 +502,25 @@ void swift::ide::printSubmoduleInterface(
             if (auto N = dyn_cast<NominalTypeDecl>(Sub))
               SubDecls.push(N);
 
-          if (!PrintSynthesizedExtensions) {
-            // Print Ext and add sub-types of Ext.
-            for (auto Ext : NTD->getExtensions()) {
+          // Print Ext and add sub-types of Ext.
+          for (auto Ext : NTD->getExtensions()) {
+            if (!PrintSynthesizedExtensions) {
               if (!shouldPrint(Ext, AdjustedOptions)) {
                 Printer.callAvoidPrintDeclPost(Ext);
                 continue;
               }
-              if (Ext->hasClangNode())
+              if (extensionHasClangNode(Ext))
                 continue; // will be printed in its source location, see above.
               Printer << "\n";
               Ext->print(Printer, AdjustedOptions);
               Printer << "\n";
-              for (auto Sub : Ext->getMembers())
-                if (auto N = dyn_cast<NominalTypeDecl>(Sub))
-                  SubDecls.push(N);
             }
-            continue;
+            for (auto Sub : Ext->getMembers())
+              if (auto N = dyn_cast<NominalTypeDecl>(Sub))
+                SubDecls.push(N);
           }
+          if (!PrintSynthesizedExtensions)
+            continue;
 
           bool IsTopLevelDecl = D == NTD;
 
@@ -498,9 +532,8 @@ void swift::ide::printSubmoduleInterface(
             SynthesizedExtensionAnalyzer::MergeGroupKind::MergeableWithTypeDef,
             [&](ArrayRef<ExtensionAndIsSynthesized> Decls){
               for (auto ET : Decls) {
-                AdjustedOptions.BracketOptions.shouldOpenExtension = false;
-                AdjustedOptions.BracketOptions.shouldCloseExtension =
-                  Decls.back().first == ET.first;
+                AdjustedOptions.BracketOptions = {ET.first, false,
+                                        Decls.back().first == ET.first, true};
                 if (ET.second)
                   AdjustedOptions.
                     initArchetypeTransformerForSynthesizedExtensions(NTD,
@@ -509,7 +542,7 @@ void swift::ide::printSubmoduleInterface(
                 if (ET.second)
                   AdjustedOptions.
                     clearArchetypeTransformerForSynthesizedExtensions();
-                if (AdjustedOptions.BracketOptions.shouldCloseExtension)
+                if (AdjustedOptions.BracketOptions.shouldCloseExtension(ET.first))
                   Printer << "\n";
               }
           });
@@ -529,11 +562,10 @@ void swift::ide::printSubmoduleInterface(
               SynthesizedExtensionAnalyzer::MergeGroupKind::All,
             [&](ArrayRef<ExtensionAndIsSynthesized> Decls){
               for (auto ET : Decls) {
-                AdjustedOptions.BracketOptions.shouldOpenExtension =
-                  Decls.front().first == ET.first;
-                AdjustedOptions.BracketOptions.shouldCloseExtension =
-                  Decls.back().first == ET.first;
-                if (AdjustedOptions.BracketOptions.shouldOpenExtension)
+                AdjustedOptions.BracketOptions = {ET.first,
+                  Decls.front().first == ET.first,
+                  Decls.back().first == ET.first, true};
+                if (AdjustedOptions.BracketOptions.shouldOpenExtension(ET.first))
                   Printer << "\n";
                 if (ET.second)
                   AdjustedOptions.
@@ -543,11 +575,11 @@ void swift::ide::printSubmoduleInterface(
                 if (ET.second)
                   AdjustedOptions.
                     clearArchetypeTransformerForSynthesizedExtensions();
-                if (AdjustedOptions.BracketOptions.shouldCloseExtension)
+                if (AdjustedOptions.BracketOptions.shouldCloseExtension(ET.first))
                   Printer << "\n";
             }
           });
-          AdjustedOptions.BracketOptions.reset();
+          AdjustedOptions.BracketOptions = BracketOptions();
         }
       }
       return true;

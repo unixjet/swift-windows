@@ -1357,7 +1357,7 @@ endfunction()
 #   Sources to add into this library.
 function(add_swift_library name)
   set(SWIFTLIB_options
-      SHARED IS_STDLIB IS_STDLIB_CORE IS_SDK_OVERLAY TARGET_LIBRARY
+      SHARED IS_STDLIB IS_STDLIB_CORE IS_SDK_OVERLAY TARGET_LIBRARY IS_HOST
       API_NOTES_NON_OVERLAY DONT_EMBED_BITCODE)
   cmake_parse_arguments(SWIFTLIB
     "${SWIFTLIB_options}"
@@ -1436,6 +1436,9 @@ function(add_swift_library name)
     # SDKs building the variants of this library.
     list_intersect(
         "${SWIFTLIB_TARGET_SDKS}" "${SWIFT_SDKS}" SWIFTLIB_TARGET_SDKS)
+    if(SWIFTLIB_IS_HOST)
+      list_union("${SWIFTLIB_TARGET_SDKS}" "${SWIFT_HOST_VARIANT_SDK}" SWIFTLIB_TARGET_SDKS)
+    endif()
     foreach(sdk ${SWIFTLIB_TARGET_SDKS})
       set(THIN_INPUT_TARGETS)
 
@@ -1465,7 +1468,7 @@ function(add_swift_library name)
         elseif("${sdk}" STREQUAL "TVOS" OR "${sdk}" STREQUAL "TVOS_SIMULATOR")
           list(APPEND swiftlib_module_depends_flattened
               ${SWIFTLIB_SWIFT_MODULE_DEPENDS_TVOS})
-        elseif("${SDK}" STREQUAL "WATCHOS" OR "${sdk}" STREQUAL "WATCHOS_SIMULATOR")
+        elseif("${sdk}" STREQUAL "WATCHOS" OR "${sdk}" STREQUAL "WATCHOS_SIMULATOR")
           list(APPEND swiftlib_module_depends_flattened
               ${SWIFTLIB_SWIFT_MODULE_DEPENDS_WATCHOS})
         endif()
@@ -1536,8 +1539,8 @@ function(add_swift_library name)
           ${SWIFTLIB_IS_STDLIB_CORE_keyword}
           ${SWIFTLIB_IS_SDK_OVERLAY_keyword}
           INSTALL_IN_COMPONENT "${SWIFTLIB_INSTALL_IN_COMPONENT}"
-	  DEPLOYMENT_VERSION_IOS "${SWIFTLIB_DEPLOYMENT_VERSION_IOS}"
-	  )
+          DEPLOYMENT_VERSION_IOS "${SWIFTLIB_DEPLOYMENT_VERSION_IOS}"
+        )
 
         # Add dependencies on the (not-yet-created) custom lipo target.
         foreach(DEP ${SWIFTLIB_LINK_LIBRARIES})
@@ -1642,13 +1645,15 @@ function(add_swift_library name)
       if(SWIFTLIB_IS_STDLIB)
         foreach(arch ${SWIFT_SDK_${sdk}_ARCHITECTURES})
           set(VARIANT_SUFFIX "-${SWIFT_SDK_${sdk}_LIB_SUBDIR}-${arch}")
-          add_dependencies("swift-stdlib${VARIANT_SUFFIX}"
-              ${lipo_target}
-              ${lipo_target_static})
-          if(NOT "${name}" STREQUAL "swiftStdlibCollectionUnittest")
-            add_dependencies("swift-test-stdlib${VARIANT_SUFFIX}"
+          if(TARGET "swift-stdlib${VARIANT_SUFFIX}" AND TARGET "swift-test-stdlib${VARIANT_SUFFIX}")
+            add_dependencies("swift-stdlib${VARIANT_SUFFIX}"
                 ${lipo_target}
                 ${lipo_target_static})
+            if(NOT "${name}" STREQUAL "swiftStdlibCollectionUnittest")
+              add_dependencies("swift-test-stdlib${VARIANT_SUFFIX}"
+                  ${lipo_target}
+                  ${lipo_target_static})
+            endif()
           endif()
         endforeach()
       endif()
@@ -1764,10 +1769,6 @@ function(_add_swift_executable_single name)
   list(APPEND link_flags
       "-L${SWIFTLIB_DIR}/${SWIFT_SDK_${SWIFTEXE_SINGLE_SDK}_LIB_SUBDIR}")
 
-  foreach(FAT_LIBRARY ${SWIFTEXE_SINGLE_LINK_FAT_LIBRARIES})
-    list(APPEND link_flags "-l${FAT_LIBRARY}")
-  endforeach()
-
   if(SWIFTEXE_SINGLE_DISABLE_ASLR)
     list(APPEND link_flags "-Wl,-no_pie")
   endif()
@@ -1840,7 +1841,7 @@ function(_add_swift_executable_single name)
       PROPERTIES
       HEADER_FILE_ONLY true)
 
-  target_link_libraries("${name}" ${SWIFTEXE_SINGLE_LINK_LIBRARIES})
+  target_link_libraries("${name}" ${SWIFTEXE_SINGLE_LINK_LIBRARIES} ${SWIFTEXE_SINGLE_LINK_FAT_LIBRARIES})
   swift_common_llvm_config("${name}" ${SWIFTEXE_SINGLE_COMPONENT_DEPENDS})
 
   set_target_properties(${name}
@@ -1857,7 +1858,7 @@ endfunction()
 function(add_swift_target_executable name)
   # Parse the arguments we were given.
   cmake_parse_arguments(SWIFTEXE_TARGET
-    "EXCLUDE_FROM_ALL;DONT_STRIP_NON_MAIN_SYMBOLS;DISABLE_ASLR"
+    "EXCLUDE_FROM_ALL;DONT_STRIP_NON_MAIN_SYMBOLS;DISABLE_ASLR;BUILD_WITH_STDLIB"
     ""
     "DEPENDS;COMPONENT_DEPENDS;LINK_FAT_LIBRARIES"
     ${ARGN})
@@ -1895,6 +1896,10 @@ function(add_swift_target_executable name)
         # By default, don't build executables for target SDKs to avoid building
         # target stdlibs.
         set(SWIFTEXE_TARGET_EXCLUDE_FROM_ALL_FLAG_CURRENT "EXCLUDE_FROM_ALL")
+      endif()
+
+      if(SWIFTEXE_TARGET_BUILD_WITH_STDLIB)
+        add_dependencies("swift-test-stdlib${VARIANT_SUFFIX}" ${VARIANT_NAME})
       endif()
 
       # Don't add the ${arch} to the suffix.  We want to link against fat

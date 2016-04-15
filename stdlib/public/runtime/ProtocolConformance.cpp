@@ -18,6 +18,7 @@
 #include "swift/Basic/Lazy.h"
 #include "swift/Runtime/Concurrent.h"
 #include "swift/Runtime/Metadata.h"
+#include "swift/Runtime/Mutex.h"
 #include "Private.h"
 
 #if defined(__APPLE__) && defined(__MACH__)
@@ -29,11 +30,8 @@
 #endif
 
 #if defined(_MSC_VER)
-#include <windows.h>
-#else
 #include <dlfcn.h>
 #endif
-#include <mutex>
 
 using namespace swift;
 
@@ -246,17 +244,10 @@ static void _addImageProtocolConformancesBlock(const uint8_t *conformances,
 struct ConformanceState {
   ConcurrentMap<ConformanceCacheEntry> Cache;
   std::vector<ConformanceSection> SectionsToScan;
-#if defined(_MSC_VER)
-  std::mutex SectionsToScanLock;
-#else
-  pthread_mutex_t SectionsToScanLock;
-#endif
+  Mutex SectionsToScanLock;
   
   ConformanceState() {
     SectionsToScan.reserve(16);
-#if !defined(_MSC_VER)
-    pthread_mutex_init(&SectionsToScanLock, nullptr);
-#endif
 #if defined(__APPLE__) && defined(__MACH__)
     _initializeCallbacksToInspectDylib();
 #else
@@ -301,15 +292,8 @@ static void
 _registerProtocolConformances(ConformanceState &C,
                               const ProtocolConformanceRecord *begin,
                               const ProtocolConformanceRecord *end) {
-#if defined(_MSC_VER)
-  C.SectionsToScanLock.lock();
+  ScopedLock guard(C.SectionsToScanLock);
   C.SectionsToScan.push_back(ConformanceSection{begin, end});
-  C.SectionsToScanLock.unlock();
-#else
-  pthread_mutex_lock(&C.SectionsToScanLock);
-  C.SectionsToScan.push_back(ConformanceSection{begin, end});
-  pthread_mutex_unlock(&C.SectionsToScanLock);
-#endif
 }
 
 static void _addImageProtocolConformancesBlock(const uint8_t *conformances,
@@ -590,14 +574,9 @@ recur:
       return FoundConformance.first;
   }
 
-  unsigned failedGeneration = ConformanceCacheGeneration;
-
   // If we didn't have an up-to-date cache entry, scan the conformance records.
-#if defined(_MSC_VER)
   C.SectionsToScanLock.lock();
-#else
-  pthread_mutex_lock(&C.SectionsToScanLock);
-#endif
+  unsigned failedGeneration = ConformanceCacheGeneration;
 
   // If we have no new information to pull in (and nobody else pulled in
   // new information while we waited on the lock), we're done.
@@ -605,11 +584,7 @@ recur:
     if (failedGeneration != ConformanceCacheGeneration) {
       // Someone else pulled in new conformances while we were waiting.
       // Start over with our newly-populated cache.
-#if defined(_MSC_VER)
       C.SectionsToScanLock.unlock();
-#else
-      pthread_mutex_unlock(&C.SectionsToScanLock);
-#endif
       type = origType;
       goto recur;
     }
@@ -618,11 +593,7 @@ recur:
     // Save the failure for this type-protocol pair in the cache.
     C.cacheFailure(type, protocol);
 
-#if defined(_MSC_VER)
-	C.SectionsToScanLock.unlock();
-#else
-    pthread_mutex_unlock(&C.SectionsToScanLock);
-#endif
+    C.SectionsToScanLock.unlock();
     return nullptr;
   }
 
@@ -682,11 +653,8 @@ recur:
     }
   }
   ++ConformanceCacheGeneration;
-#if defined(_MSC_VER)
+
   C.SectionsToScanLock.unlock();
-#else
-  pthread_mutex_unlock(&C.SectionsToScanLock);
-#endif
   // Start over with our newly-populated cache.
   type = origType;
   goto recur;
@@ -697,11 +665,7 @@ swift::_searchConformancesByMangledTypeName(const llvm::StringRef typeName) {
   auto &C = Conformances.get();
   const Metadata *foundMetadata = nullptr;
 
-#if defined(_MSC_VER)
-  C.SectionsToScanLock.lock();
-#else
-  pthread_mutex_lock(&C.SectionsToScanLock);
-#endif
+  ScopedLock guard(C.SectionsToScanLock);
 
   unsigned sectionIdx = 0;
   unsigned endSectionIdx = C.SectionsToScan.size();
@@ -720,12 +684,6 @@ swift::_searchConformancesByMangledTypeName(const llvm::StringRef typeName) {
     if (foundMetadata != nullptr)
       break;
   }
-
-#if defined(_MSC_VER)
-  C.SectionsToScanLock.unlock();
-#else
-  pthread_mutex_unlock(&C.SectionsToScanLock);
-#endif
 
   return foundMetadata;
 }

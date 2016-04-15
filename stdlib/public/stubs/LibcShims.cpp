@@ -23,10 +23,6 @@
 #include "llvm/Support/DataTypes.h"
 #include "../SwiftShims/LibcShims.h"
 
-#if defined(__linux__)
-#include <bsd/stdlib.h>
-#endif
-
 static_assert(std::is_same<ssize_t, swift::__swift_ssize_t>::value,
               "__swift_ssize_t is wrong");
 
@@ -36,9 +32,9 @@ void _swift_stdlib_free(void *ptr) { free(ptr); }
 
 int _swift_stdlib_putchar_unlocked(int c) {
 #if defined(_MSC_VER)
-	return _putc_nolock(c, stdout);
+  return _putc_nolock(c, stdout);
 #else
-	return putchar_unlocked(c);
+  return putchar_unlocked(c);
 #endif
 }
 
@@ -86,11 +82,13 @@ size_t _swift_stdlib_malloc_size(const void *ptr) {
 #error No malloc_size analog known for this platform/libc.
 #endif
 
-static std::random_device RandomeDevice;
-static std::mt19937 MersenneRandom(RandomeDevice());
+static std::mt19937 &getGlobalMT19937() {
+  static std::mt19937 MersenneRandom;
+  return MersenneRandom;
+}
 
-__swift_uint32_t _swift_stdlib_cxx11_mt19937(void) {
-  return MersenneRandom();
+__swift_uint32_t _swift_stdlib_cxx11_mt19937() {
+  return getGlobalMT19937()();
 }
 
 __swift_uint32_t
@@ -98,7 +96,7 @@ _swift_stdlib_cxx11_mt19937_uniform(__swift_uint32_t upper_bound) {
   if (upper_bound > 0)
     upper_bound--;
   std::uniform_int_distribution<__swift_uint32_t> RandomUniform(0, upper_bound);
-  return RandomUniform(MersenneRandom);
+  return RandomUniform(getGlobalMT19937());
 }
 
 } // namespace swift

@@ -21,6 +21,7 @@
 #include "swift/AST/Mangle.h"
 #include "swift/AST/PrintOptions.h"
 #include "swift/AST/RawComment.h"
+#include "swift/AST/SourceEntityWalker.h"
 #include "swift/AST/USRGeneration.h"
 #include "swift/Basic/Demangle.h"
 #include "swift/Basic/DemangleWrappers.h"
@@ -35,9 +36,9 @@
 #include "swift/IDE/CommentConversion.h"
 #include "swift/IDE/ModuleInterfacePrinting.h"
 #include "swift/IDE/REPLCodeCompletion.h"
-#include "swift/IDE/SourceEntityWalker.h"
 #include "swift/IDE/SyntaxModel.h"
 #include "swift/IDE/Utils.h"
+#include "swift/Sema/IDETypeChecking.h"
 #include "swift/Markup/Markup.h"
 #include "swift/Config.h"
 #include "clang/APINotes/APINotesReader.h"
@@ -209,6 +210,9 @@ Action(llvm::cl::desc("Mode:"), llvm::cl::init(ActionType::None),
 static llvm::cl::opt<std::string>
 SourceFilename("source-filename", llvm::cl::desc("Name of the source file"));
 
+static llvm::cl::opt<std::string>
+SecondSourceFilename("second-source-filename", llvm::cl::desc("Name of the second source file"));
+
 static llvm::cl::list<std::string>
 InputFilenames(llvm::cl::Positional, llvm::cl::desc("[input files...]"),
                llvm::cl::ZeroOrMore);
@@ -289,6 +293,11 @@ ObjCForwardDeclarations("enable-objc-forward-declarations",
 static llvm::cl::opt<bool>
 Swift3Migration("swift3-migration",
                    llvm::cl::desc("Enable Fix-It based migration aids for Swift 3"),
+                   llvm::cl::init(false));
+
+static llvm::cl::opt<bool>
+InferImportAsMember("enable-infer-import-as-member",
+                   llvm::cl::desc("Infer when a global could be imported as a member"),
                    llvm::cl::init(false));
 
 static llvm::cl::opt<bool>
@@ -532,6 +541,7 @@ removeCodeCompletionTokens(llvm::MemoryBuffer *Input,
 
 static int doCodeCompletion(const CompilerInvocation &InitInvok,
                             StringRef SourceFilename,
+                            StringRef SecondSourceFileName,
                             StringRef CodeCompletionToken,
                             bool CodeCompletionDiagnostics,
                             bool CodeCompletionKeywords) {
@@ -562,6 +572,7 @@ static int doCodeCompletion(const CompilerInvocation &InitInvok,
   CompilerInvocation Invocation(InitInvok);
   Invocation.setCodeCompletionPoint(CleanFile.get(), CodeCompletionOffset);
 
+
   std::unique_ptr<ide::OnDiskCodeCompletionCache> OnDiskCache;
   if (!options::CompletionCachePath.empty()) {
     OnDiskCache = llvm::make_unique<ide::OnDiskCodeCompletionCache>(
@@ -582,7 +593,9 @@ static int doCodeCompletion(const CompilerInvocation &InitInvok,
                                               *Consumer.get()));
 
   Invocation.setCodeCompletionFactory(CompletionCallbacksFactory.get());
-
+  if (!SecondSourceFileName.empty()) {
+    Invocation.addInputFilename(SecondSourceFileName);
+  }
   CompilerInstance CI;
 
   PrintingDiagnosticConsumer PrintDiags;
@@ -1045,7 +1058,7 @@ static int doStructureAnnotation(const CompilerInvocation &InitInvok,
 
 namespace {
 
-class AnnotationPrinter : public ide::SourceEntityWalker {
+class AnnotationPrinter : public SourceEntityWalker {
   SourceManager &SM;
   unsigned BufferID;
   llvm::raw_ostream &OS;
@@ -1562,11 +1575,29 @@ static int doPrintLocalTypes(const CompilerInvocation &InitInvok,
 
 namespace {
 class AnnotatingPrinter : public StreamPrinter {
+  llvm::SmallDenseMap<ValueDecl*, ValueDecl*> DefaultImplementationMap;
+  bool InProtocol = false;
 public:
   using StreamPrinter::StreamPrinter;
 
   void printDeclPre(const Decl *D, Optional<BracketOptions> Bracket) override {
-    OS << "<decl:" << Decl::getKindName(D->getKind()) << '>';
+    StringRef HasDefault = "";
+    if (D->getKind() == DeclKind::Protocol) {
+      InProtocol = true;
+      DefaultImplementationMap.clear();
+      ProtocolDecl *PD = const_cast<ProtocolDecl*>(dyn_cast<ProtocolDecl>(D));
+      collectDefaultImplementationForProtocolMembers(PD,
+                                                     DefaultImplementationMap);
+    }
+    if (InProtocol) {
+      if (auto *VD = const_cast<ValueDecl*>(dyn_cast<ValueDecl>(D))) {
+        for (auto Pair : DefaultImplementationMap) {
+          if (Pair.getSecond() == VD)
+             HasDefault = "(HasDefault)";
+        }
+      }
+    }
+    OS << "<decl:" << Decl::getKindName(D->getKind()) << HasDefault << '>';
   }
   void printDeclLoc(const Decl *D) override {
     OS << "<loc>";
@@ -1575,6 +1606,9 @@ public:
     OS << "</loc>";
   }
   void printDeclPost(const Decl *D, Optional<BracketOptions> Bracket) override {
+    if (D->getKind() == DeclKind::Protocol) {
+      InProtocol = false;
+    }
     OS << "</decl>";
   }
   void printStructurePre(PrintStructureKind Kind, const Decl *D) override {
@@ -1590,7 +1624,7 @@ public:
   void printSynthesizedExtensionPre(const ExtensionDecl *ED,
                                     const NominalTypeDecl *NTD,
                                     Optional<BracketOptions> Bracket) override {
-    if (Bracket.hasValue() && !Bracket.getValue().shouldOpenExtension)
+    if (Bracket.hasValue() && !Bracket.getValue().shouldOpenExtension(ED))
       return;
     OS << "<synthesized>";
   }
@@ -1598,7 +1632,7 @@ public:
   void printSynthesizedExtensionPost(const ExtensionDecl *ED,
                                      const NominalTypeDecl *NTD,
                                      Optional<BracketOptions> Bracket) override {
-    if (Bracket.hasValue() && !Bracket.getValue().shouldCloseExtension)
+    if (Bracket.hasValue() && !Bracket.getValue().shouldCloseExtension(ED))
       return;
     OS << "</synthesized>";
   }
@@ -1629,7 +1663,7 @@ struct GroupNamesPrinter {
   }
 
   void addDecl(const Decl *D) {
-    if(auto VD = dyn_cast<ValueDecl>(D)) {
+    if (auto VD = dyn_cast<ValueDecl>(D)) {
       if (!VD->isImplicit() && !VD->isPrivateStdlibDecl()) {
         StringRef Name = VD->getGroupName().hasValue() ?
           VD->getGroupName().getValue() : "";
@@ -1936,10 +1970,10 @@ public:
     if (D->isImplicit())
       return true;
 
-    llvm::markup::MarkupContext MC;
+    swift::markup::MarkupContext MC;
     auto DC = getDocComment(MC, D);
-    if(DC.hasValue())
-      llvm::markup::dump(DC.getValue()->getDocument(), OS);
+    if (DC.hasValue())
+      swift::markup::dump(DC.getValue()->getDocument(), OS);
 
     return true;
   }
@@ -2329,7 +2363,7 @@ static int doPrintTypeInterface(const CompilerInvocation &InitInvok,
 
 namespace {
 
-class USRPrinter : public ide::SourceEntityWalker {
+class USRPrinter : public SourceEntityWalker {
   SourceManager &SM;
   unsigned BufferID;
   llvm::raw_ostream &OS;
@@ -2645,10 +2679,12 @@ int main(int argc, char *argv[]) {
   InitInvok.getLangOptions().CodeCompleteInitsInPostfixExpr |=
       options::CodeCompleteInitsInPostfixExpr;
   InitInvok.getLangOptions().Swift3Migration |= options::Swift3Migration;
-  InitInvok.getLangOptions().StripNSPrefix |= options::StripNSPrefix;
+  InitInvok.getLangOptions().InferImportAsMember |=
+    options::InferImportAsMember;  InitInvok.getLangOptions().StripNSPrefix |= options::StripNSPrefix;
   InitInvok.getClangImporterOptions().ImportForwardDeclarations |=
     options::ObjCForwardDeclarations;
-
+  InitInvok.getClangImporterOptions().InferImportAsMember |=
+    options::InferImportAsMember;
   if (!options::ResourceDir.empty()) {
     InitInvok.setRuntimeResourcePath(options::ResourceDir);
   }
@@ -2733,6 +2769,7 @@ int main(int argc, char *argv[]) {
     }
     ExitCode = doCodeCompletion(InitInvok,
                                 options::SourceFilename,
+                                options::SecondSourceFilename,
                                 options::CodeCompletionToken,
                                 options::CodeCompletionDiagnostics,
                                 options::CodeCompletionKeywords);

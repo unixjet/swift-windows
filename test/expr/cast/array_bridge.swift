@@ -2,6 +2,16 @@
 
 // REQUIRES: objc_interop
 
+// FIXME: Should go into the standard library.
+public extension _ObjectiveCBridgeable {
+  static func _unconditionallyBridgeFromObjectiveC(_ source: _ObjectiveCType?)
+      -> Self {
+    var result: Self? = nil
+    _forceBridgeFromObjectiveC(source!, result: &result)
+    return result!
+  }
+}
+
 class A {
   var x = 0
 }
@@ -15,12 +25,12 @@ struct B : _ObjectiveCBridgeable {
     return A()
   }
   static func _forceBridgeFromObjectiveC(
-    x: A,
+    _ x: A,
     result: inout B?
   ){
   }
   static func _conditionallyBridgeFromObjectiveC(
-    x: A,
+    _ x: A,
     result: inout B?
   ) -> Bool {
     return true
@@ -56,12 +66,12 @@ struct F : _ObjectiveCBridgeable {
     return E()
   }
   static func _forceBridgeFromObjectiveC(
-    x: E,
+    _ x: E,
     result: inout F?
   ) {
   }
   static func _conditionallyBridgeFromObjectiveC(
-    x: E,
+    _ x: E,
     result: inout F?
   ) -> Bool {
     return true
@@ -83,12 +93,12 @@ struct H : _ObjectiveCBridgeable {
     return G()
   }
   static func _forceBridgeFromObjectiveC(
-    x: G,
+    _ x: G,
     result: inout H?
   ) {
   }
   static func _conditionallyBridgeFromObjectiveC(
-    x: G,
+    _ x: G,
     result: inout H?
   ) -> Bool {
     return true
@@ -113,12 +123,12 @@ struct I : _ObjectiveCBridgeable {
     return A()
   }
   static func _forceBridgeFromObjectiveC(
-    x: AnyObject,
+    _ x: AnyObject,
     result: inout I?
   ) {
   }
   static func _conditionallyBridgeFromObjectiveC(
-    x: AnyObject,
+    _ x: AnyObject,
     result: inout I?
   ) -> Bool {
     return true

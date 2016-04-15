@@ -299,8 +299,7 @@ extern "C" long double _swift_fmodl(long double lhs, long double rhs) {
 // This implementation is copied here to avoid a new dependency
 // on compiler-rt on Linux.
 // FIXME: rdar://14883575 Libcompiler_rt omits muloti4
-#if (defined(__APPLE__) && defined(__arm64__)) || \
-    (defined(__linux__) && defined(__x86_64__)) || \
+#if (defined(__linux__) && defined(__x86_64__)) || \
     (defined(__linux__) && defined(__aarch64__)) || \
     (defined(__linux__) && defined(__powerpc64__))
 
@@ -318,13 +317,13 @@ __muloti4(ti_int a, ti_int b, int* overflow)
     if (a == MIN)
     {
         if (b != 0 && b != 1)
-	    *overflow = 1;
-	return result;
+            *overflow = 1;
+        return result;
     }
     if (b == MIN)
     {
         if (a != 0 && a != 1)
-	    *overflow = 1;
+            *overflow = 1;
         return result;
     }
     ti_int sa = a >> (N - 1);

@@ -763,9 +763,11 @@ static bool ParseLangArgs(LangOptions &Opts, ArgList &Args,
   Opts.Swift3Migration |= Args.hasArg(OPT_swift3_migration);
   Opts.WarnOmitNeedlessWords = Args.hasArg(OPT_warn_omit_needless_words);
   Opts.StripNSPrefix |= Args.hasArg(OPT_enable_strip_ns_prefix);
+  Opts.InferImportAsMember |= Args.hasArg(OPT_enable_infer_import_as_member);
   if (Args.hasArg(OPT_disable_infer_iuos)) {
     Opts.InferIUOs = false;
   }
+  Opts.ImportObjCGenerics = Args.hasArg(OPT_enable_import_objc_generics);
 
   Opts.EnableThrowWithoutTry |= Args.hasArg(OPT_enable_throw_without_try);
 
@@ -876,10 +878,13 @@ static bool ParseClangImporterArgs(ClangImporterOptions &Opts,
     });
   }
 
+  Opts.InferImportAsMember |= Args.hasArg(OPT_enable_infer_import_as_member);
   Opts.DumpClangDiagnostics |= Args.hasArg(OPT_dump_clang_diagnostics);
 
   if (Args.hasArg(OPT_embed_bitcode))
     Opts.Mode = ClangImporterOptions::Modes::EmbedBitcode;
+
+  Opts.DisableSwiftBridgeAttr |= Args.hasArg(OPT_disable_swift_bridge_attr);
 
   return false;
 }
@@ -1058,6 +1063,7 @@ static bool ParseSILArgs(SILOptions &Opts, ArgList &Args,
   Opts.RemoveRuntimeAsserts |= Args.hasArg(OPT_remove_runtime_asserts);
 
   Opts.EnableARCOptimizations |= !Args.hasArg(OPT_disable_arc_opts);
+  Opts.DisableSILPerfOptimizations |= Args.hasArg(OPT_disable_sil_perf_optzns);
   Opts.VerifyAll |= Args.hasArg(OPT_sil_verify_all);
   Opts.DebugSerialization |= Args.hasArg(OPT_sil_debug_serialization);
   Opts.EmitVerboseSIL |= Args.hasArg(OPT_emit_verbose_sil);

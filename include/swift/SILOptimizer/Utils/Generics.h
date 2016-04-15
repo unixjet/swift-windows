@@ -36,9 +36,8 @@ namespace swift {
 ///
 /// This is the top-level entry point for specializing an existing call site.
 void trySpecializeApplyOfGeneric(
-  ApplySite Apply,
-  llvm::SmallVectorImpl<SILInstruction *> &DeadApplies,
-  llvm::SmallVectorImpl<SILFunction *> &NewFunctions);
+    ApplySite Apply, DeadInstructionSet &DeadApplies,
+    llvm::SmallVectorImpl<SILFunction *> &NewFunctions);
 
 /// Helper class to describe re-abstraction of function parameters done during
 /// specialization.
@@ -136,6 +135,7 @@ class GenericFuncSpecializer {
   SILModule &M;
   SILFunction *GenericFunc;
   ArrayRef<Substitution> ParamSubs;
+  IsFragile_t Fragile;
   const ReabstractionInfo &ReInfo;
 
   TypeSubstitutionMap ContextSubs;
@@ -143,6 +143,7 @@ class GenericFuncSpecializer {
 public:
   GenericFuncSpecializer(SILFunction *GenericFunc,
                          ArrayRef<Substitution> ParamSubs,
+                         IsFragile_t Fragile,
                          const ReabstractionInfo &ReInfo);
 
   /// If we already have this specialization, reuse it.

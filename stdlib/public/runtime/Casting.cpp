@@ -32,13 +32,18 @@
 #include "stddef.h"
 
 #include <cstring>
-#include <mutex>
 #if defined(_MSC_VER)
 #include <shared_mutex>
 #else
 #include <pthread.h>
 #endif
 #include <type_traits>
+
+#if !defined(_MSC_VER)
+// FIXME: SR-946 - we ideally want to switch off of using pthread_rwlock
+//                 directly and instead expand Mutex.h to support rwlocks.
+#include <mutex>
+#endif
 
 // FIXME: Clang defines max_align_t in stddef.h since 3.6.
 // Remove this hack when we don't care about older Clangs on all platforms.
@@ -1622,12 +1627,18 @@ static bool _dynamicCastFromExistential(OpaqueValue *dest,
 
   bool result = swift_dynamicCast(dest, srcValue, srcCapturedType,
                                   targetType, subFlags);
-  // Deallocate the existential husk if we took from it.
-  if (canTake && result && isOutOfLine)
-    _maybeDeallocateOpaqueExistential(src, result, flags);
-  // If we couldn't take, we still may need to destroy the whole value.
-  else if (!canTake && shouldDeallocateSource(result, flags))
-    srcType->vw_destroy(src);
+
+  if (!canTake) {
+    // swift_dynamicCast performed no memory management.
+    // Destroy the value if requested.
+    if (shouldDeallocateSource(result, flags))
+      srcType->vw_destroy(src);
+  } else {
+    // swift_dynamicCast took or destroyed the value as per the original request
+    // We may still have an opaque existential container to deallocate.
+    if (isOutOfLine)
+      _maybeDeallocateOpaqueExistential(src, result, flags);
+  }
 
   return result;
 }
@@ -2066,10 +2077,16 @@ checkDynamicCastFromOptional(OpaqueValue *dest,
       _fail(src, srcType, targetType, flags);
       return {false, nullptr};
     }
+
+    // Get the destination payload type
+    const Metadata *targetPayloadType =
+      cast<EnumMetadata>(targetType)->getGenericArgs()[0];
+
     // Inject the .none tag
-    swift_storeEnumTagSinglePayload(dest, payloadType, enumCase,
+    swift_storeEnumTagSinglePayload(dest, targetPayloadType, enumCase,
                                     1 /*emptyCases=*/);
-    _succeed(dest, src, srcType, flags);
+
+    // We don't have to destroy the source, because it was nil.
     return {true, nullptr};
   }
   // .Some

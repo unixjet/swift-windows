@@ -64,6 +64,7 @@ KNOWN_SETTINGS=(
     cmark-build-type            "Debug"          "the CMake build variant for CommonMark (Debug, RelWithDebInfo, Release, MinSizeRel).  Defaults to Debug."
     lldb-extra-cmake-args       ""               "extra command line args to pass to lldb cmake"
     lldb-extra-xcodebuild-args  ""               "extra command line args to pass to lldb xcodebuild"
+    lldb-test-cc                ""               "CC to use for building LLDB testsuite test inferiors.  Defaults to just-built, in-tree clang.  If set to 'host-toolchain', sets it to same as host-cc."
     lldb-test-with-curses       ""               "run test lldb test runner using curses terminal control"
     lldb-no-debugserver         ""               "delete debugserver after building it, and don't try to codesign it"
     lldb-use-system-debugserver ""               "don't try to codesign debugserver, and use the system's debugserver instead"
@@ -86,6 +87,7 @@ KNOWN_SETTINGS=(
     enable-ubsan                ""               "enable Undefined Behavior Sanitizer"
     cmake                       ""               "path to the cmake binary"
     distcc                      ""               "use distcc in pump mode"
+    build-runtime-with-host-compiler   "1"       "use the host c++ compiler to build everything"
     user-config-args            ""               "User-supplied arguments to cmake when used to do configuration"
     cmake-generator             "Unix Makefiles" "kind of build system to generate; see output of 'cmake --help' for choices"
     verbose-build               ""               "print the commands executed during the build"
@@ -189,6 +191,7 @@ KNOWN_SETTINGS=(
     darwin-deployment-version-tvos    "9.0"      "minimum deployment target version for tvOS"
     darwin-deployment-version-watchos "2.0"      "minimum deployment target version for watchOS"
 
+    extra-cmake-options         ""               "Extra options to pass to CMake for all targets"
     extra-swift-args            ""               "Extra arguments to pass to swift modules which match regex. Assumed to be a flattened cmake list consisting of [module_regexp, args, module_regexp, args, ...]"
     sil-verify-all              "0"              "If enabled, run the SIL verifier after each transform when building Swift files during this build process"
     swift-enable-ast-verifier   "1"              "If enabled, and the assertions are enabled, the built Swift compiler will run the AST verifier every time it is invoked"
@@ -490,12 +493,12 @@ function set_deployment_target_based_options() {
                 -DCMAKE_OSX_SYSROOT:PATH="$(xcrun --sdk ${xcrun_sdk_name} --show-sdk-path)"
                 -DLLVM_HOST_TRIPLE:STRING="${llvm_host_triple}"
                 -DLLVM_ENABLE_LIBCXX:BOOL=TRUE
-                -DLLVM_TOOL_COMPILER_RT_BUILD:BOOL="$(false_true ${#CROSS_COMPILE_TOOLS_DEPLOYMENT_TARGETS[@]})"
+                -DLLVM_TOOL_COMPILER_RT_BUILD:BOOL="$(false_true ${SKIP_COMPILER_RT})"
                 -DCOMPILER_RT_ENABLE_IOS:BOOL="$(false_true ${SKIP_IOS})"
                 -DCOMPILER_RT_ENABLE_WATCHOS:BOOL=FALSE
                 -DCOMPILER_RT_ENABLE_TVOS:BOOL=FALSE
             )
-	    if [[ $(true_false "${LLVM_ENABLE_LTO}") = "TRUE" ]]; then
+            if [[ $(true_false "${LLVM_ENABLE_LTO}") = "TRUE" ]]; then
                 if [[ $(cmake_needs_to_specify_standard_computed_defaults) = "TRUE" ]]; then
                     llvm_cmake_options=(
                         "${llvm_cmake_options[@]}"
@@ -504,15 +507,15 @@ function set_deployment_target_based_options() {
                     )
                 fi
 
-		llvm_cmake_options=(
-		    "${llvm_cmake_options[@]}"
-		    "-DCMAKE_C_FLAGS=-O2 -flto -gline-tables-only -fno-stack-protector "
-		    "-DCMAKE_CXX_FLAGS=-O2 -flto -gline-tables-only -fno-stack-protector "
-		    "-DCMAKE_C_FLAGS_RELWITHDEBINFO=-O2 -flto -gline-tables-only -fno-stack-protector "
-		    "-DCMAKE_CXX_FLAGS_RELWITHDEBINFO=-O2 -flto -gline-tables-only -fno-stack-protector "
-		    "-DLLVM_PARALLEL_LINK_JOBS=$(num_llvm_parallel_lto_link_jobs)"
-		)
-	    fi
+                lvm_cmake_options=(
+                    "${llvm_cmake_options[@]}"
+                    "-DCMAKE_C_FLAGS=-O2 -flto -gline-tables-only -fno-stack-protector "
+                    "-DCMAKE_CXX_FLAGS=-O2 -flto -gline-tables-only -fno-stack-protector "
+                    "-DCMAKE_C_FLAGS_RELWITHDEBINFO=-O2 -flto -gline-tables-only -fno-stack-protector "
+                    "-DCMAKE_CXX_FLAGS_RELWITHDEBINFO=-O2 -flto -gline-tables-only -fno-stack-protector "
+                    "-DLLVM_PARALLEL_LINK_JOBS=$(num_llvm_parallel_lto_link_jobs)"
+                )
+            fi
 
             if [[ $(true_false "${SWIFT_ENABLE_LTO}") = "TRUE" ]]; then
                 if [[ $(cmake_needs_to_specify_standard_computed_defaults) = "TRUE" ]]; then
@@ -738,6 +741,11 @@ if [[ "${SKIP_BUILD_WATCHOS_SIMULATOR}" ]] ; then
     SKIP_TEST_WATCHOS_SIMULATOR=1
 fi
 
+# FIXME: We currently do not support cross-compiling swift with compiler-rt.
+if [[ "${CROSS_COMPILE_TOOLS_DEPLOYMENT_TARGETS}" ]]; then
+    SKIP_COMPILER_RT=1
+fi
+
 # WORKSPACE, BUILD_DIR and INSTALLABLE_PACKAGE must be absolute paths
 case "${WORKSPACE}" in
     /*) ;;
@@ -829,6 +837,23 @@ function cmake_needs_to_specify_standard_computed_defaults() {
     else
         echo "FALSE"
     fi
+}
+
+function copy_swift_stdlib_tool_substitute() {
+    if [ ! -f "$1" ] ; then
+        echo "--- Copy swift-stdlib-tool ---"
+        set -x
+        cp "${SWIFT_SOURCE_DIR}/utils/swift-stdlib-tool-substitute" "$1"
+        { set +x; } 2>/dev/null
+    fi
+}
+
+function make_relative_symlink() {
+    local SOURCE=$1
+    local TARGET=$2
+    local TARGET_DIR=$(dirname $2)
+    local RELATIVE_SOURCE=$(python -c "import os.path; print(os.path.relpath(\""${SOURCE}"\", \""${TARGET_DIR}"\"))")
+    ln -sf "${RELATIVE_SOURCE}" "${TARGET}"
 }
 
 # A list of deployment targets to cross-compile the Swift host tools for.
@@ -986,14 +1011,14 @@ if [ ! -e "${WORKSPACE}/clang" ] ; then
     fi
 fi
 if [ ! -d "${CLANG_SOURCE_DIR}" ] ; then
-    ln -sf "${WORKSPACE}/clang" "${CLANG_SOURCE_DIR}"
+    make_relative_symlink "${WORKSPACE}/clang" "${CLANG_SOURCE_DIR}"
 fi
 
 # Symlink compiler-rt into the llvm tree, if it exists.
 COMPILER_RT_SOURCE_DIR="${LLVM_SOURCE_DIR}/projects/compiler-rt"
 if [ -e "${WORKSPACE}/compiler-rt" ] ; then
     if [ ! -d "${COMPILER_RT_SOURCE_DIR}" ] ; then
-        ln -sf "${WORKSPACE}/compiler-rt" "${COMPILER_RT_SOURCE_DIR}"
+        make_relative_symlink "${WORKSPACE}/compiler-rt" "${COMPILER_RT_SOURCE_DIR}"
     fi
 fi
 
@@ -1182,6 +1207,16 @@ if [[ "${EXPORT_COMPILE_COMMANDS}" ]] ; then
     )
 fi
 
+if [[ "${EXTRA_CMAKE_OPTIONS}" ]] ; then
+    for cmake_opt in $(echo "${EXTRA_CMAKE_OPTIONS}" | tr "," "\n")
+    do
+        COMMON_CMAKE_OPTIONS=(
+            "${COMMON_CMAKE_OPTIONS[@]}"
+            "${cmake_opt}"
+        )
+    done
+fi
+
 if [[ "${DISTCC}" ]] ; then
     # On some platforms, 'pump' may be unrelated to distcc, in which case it's
     # called 'distcc-pump'.
@@ -1231,6 +1266,10 @@ case "${CMAKE_GENERATOR}" in
             "${COMMON_CMAKE_OPTIONS[@]}"
             -DCMAKE_CONFIGURATION_TYPES="Debug;Release;MinSizeRel;RelWithDebInfo"
         )
+
+        # FIXME: We currently do not support building compiler-rt with the
+        # Xcode generator.
+        SKIP_COMPILER_RT=1
         ;;
 esac
 
@@ -1513,6 +1552,12 @@ for deployment_target in "${HOST_TARGET}" "${CROSS_TOOLS_DEPLOYMENT_TARGETS[@]}"
             -DSWIFT_COMPILER_VERSION="${SWIFT_COMPILER_VERSION}"
         )
     fi
+    if [[ "${DARWIN_TOOLCHAIN_VERSION}" ]] ; then
+        swift_cmake_options=(
+            "${swift_cmake_options[@]}"
+            -DDARWIN_TOOLCHAIN_VERSION="${DARWIN_TOOLCHAIN_VERSION}"
+        )
+    fi
 
     if [[ "${ENABLE_ASAN}" ]] ; then
         swift_cmake_options=(
@@ -1743,6 +1788,7 @@ for deployment_target in "${HOST_TARGET}" "${CROSS_TOOLS_DEPLOYMENT_TARGETS[@]}"
                     -DSWIFT_INSTALL_COMPONENTS:STRING="${SWIFT_INSTALL_COMPONENTS}"
                     -DSWIFT_EMBED_BITCODE_SECTION:BOOL=$(true_false "${EMBED_BITCODE_SECTION}")
                     -DSWIFT_ENABLE_LTO:BOOL=$(true_false "${SWIFT_ENABLE_LTO}")
+                    -DSWIFT_BUILD_RUNTIME_WITH_HOST_COMPILER:BOOL=$(true_false "${BUILD_RUNTIME_WITH_HOST_COMPILER}")
                     "${swift_cmake_options[@]}"
                     "${SWIFT_SOURCE_DIR}"
                 )
@@ -1920,16 +1966,21 @@ for deployment_target in "${HOST_TARGET}" "${CROSS_TOOLS_DEPLOYMENT_TARGETS[@]}"
                 SWIFTC_BIN="$(build_directory_bin ${deployment_target} swift)/swiftc"
                 XCTEST_BUILD_DIR=$(build_directory ${deployment_target} xctest)
                 if [[ "$(uname -s)" == "Darwin" ]] ; then
+                    # xcodebuild requires swift-stdlib-tool to build a Swift
+                    # framework. This is normally present when building XCTest
+                    # via a packaged .xctoolchain, but here we are using the
+                    # swiftc that was just built--no toolchain exists yet. As a
+                    # result, we must copy swift-stdlib-tool ourselves.
+                    copy_swift_stdlib_tool_substitute "$(build_directory_bin ${deployment_target} swift)/swift-stdlib-tool"
+
                     set -x
                     xcodebuild \
                         -workspace "${XCTEST_SOURCE_DIR}"/XCTest.xcworkspace \
                         -scheme SwiftXCTest \
                         SWIFT_EXEC="${SWIFTC_BIN}" \
                         SWIFT_LINK_OBJC_RUNTIME=YES \
-                        SKIP_INSTALL=NO \
-                        DEPLOYMENT_LOCATION=YES \
-                        DSTROOT="${XCTEST_BUILD_DIR}" \
-                        INSTALL_PATH="/"
+                        SYMROOT="${XCTEST_BUILD_DIR}" \
+                        OBJROOT="${XCTEST_BUILD_DIR}"
                     { set +x; } 2>/dev/null
                 else
                     FOUNDATION_BUILD_DIR=$(build_directory ${deployment_target} foundation)
@@ -2056,6 +2107,27 @@ for deployment_target in "${HOST_TARGET}" "${CROSS_TOOLS_DEPLOYMENT_TARGETS[@]}"
             ${DISTCC_PUMP} "${CMAKE}" --build "${build_dir}" $(cmake_config_opt ${product}) -- ${BUILD_ARGS} ${build_targets[@]}
             { set +x; } 2>/dev/null
         fi
+
+        # When we are building LLVM create symlinks to the c++ headers.
+        if [[ "${product}" == "llvm" ]]; then
+            set -x
+
+            # Find the location of the c++ header dir.
+            if [[ "$(uname -s)" == "Darwin" ]] ; then
+              HOST_CXX_DIR=$(dirname ${HOST_CXX})
+              HOST_CXX_HEADERS_DIR="$HOST_CXX_DIR/../../usr/include/c++"
+            else # Linux
+              HOST_CXX_HEADERS_DIR="/usr/include/c++"
+            fi
+
+            # Find the path in which the local clang build is expecting to find
+            # the c++ header files.
+            BUILT_CXX_INCLUDE_DIR="$llvm_build_dir/include"
+
+            echo "symlinking the system headers ($HOST_CXX_HEADERS_DIR) into the local clang build directory ($BUILT_CXX_INCLUDE_DIR)."
+            ln -s -f "$HOST_CXX_HEADERS_DIR" "$BUILT_CXX_INCLUDE_DIR"
+            { set +x; } 2>/dev/null
+        fi
     done
 done
 # END OF BUILD PHASE
@@ -2160,7 +2232,19 @@ for deployment_target in "${STDLIB_DEPLOYMENT_TARGETS[@]}"; do
                     fi
                 fi
 
-                SWIFTCC="${swift_build_dir}/bin/swiftc" SWIFTLIBS="${swift_build_dir}/lib/swift" "${LLDB_SOURCE_DIR}"/test/dotest.py --executable "${lldb_executable}" --rerun-all-issues -C ${HOST_CC} ${LLDB_FORMATTER_OPTS}
+                # figure out which C/C++ compiler we should use for building test inferiors.
+                if [[ "${LLDB_TEST_CC}" == "host-toolchain" ]]; then
+                    # Use the host toolchain: i.e. the toolchain specified by HOST_CC
+                    LLDB_DOTEST_CC_OPTS="-C ${HOST_CC}"
+                elif [[ -n "${LLDB_TEST_CC}" ]]; then
+                    # Use exactly the compiler path specified by the user.
+                    LLDB_DOTEST_CC_OPTS="-C ${LLDB_TEST_CC}"
+                else
+                    # Use the clang that was just built in the tree.
+                    LLDB_DOTEST_CC_OPTS="-C ${llvm_build_dir}"/bin/clang
+                fi
+                
+                SWIFTCC="${swift_build_dir}/bin/swiftc" SWIFTLIBS="${swift_build_dir}/lib/swift" "${LLDB_SOURCE_DIR}"/test/dotest.py --executable "${lldb_executable}" --rerun-all-issues ${LLDB_DOTEST_CC_OPTS} ${LLDB_FORMATTER_OPTS}
                 popd
                 continue
                 ;;
@@ -2194,7 +2278,9 @@ for deployment_target in "${STDLIB_DEPLOYMENT_TARGETS[@]}"; do
                         -workspace "${XCTEST_SOURCE_DIR}"/XCTest.xcworkspace \
                         -scheme SwiftXCTestFunctionalTests \
                         SWIFT_EXEC="${SWIFTC_BIN}" \
-                        SWIFT_LINK_OBJC_RUNTIME=YES
+                        SWIFT_LINK_OBJC_RUNTIME=YES \
+                        SYMROOT="${XCTEST_BUILD_DIR}" \
+                        OBJROOT="${XCTEST_BUILD_DIR}"
                     { set +x; } 2>/dev/null
                 else
                     FOUNDATION_BUILD_DIR=$(build_directory ${deployment_target} foundation)
@@ -2493,10 +2579,7 @@ if [[ "${INSTALLABLE_PACKAGE}" ]] ; then
     echo "--- Creating installable package ---"
     echo "-- Package file: ${INSTALLABLE_PACKAGE} --"
     if [[ "$(uname -s)" == "Darwin" ]] ; then
-      if [ ! -f "${INSTALL_DESTDIR}/${INSTALL_PREFIX}/bin/swift-stdlib-tool" ] ; then
-        echo "--- Copy swift-stdlib-tool ---"
-        cp "${SWIFT_SOURCE_DIR}/utils/swift-stdlib-tool-substitute" "${INSTALL_DESTDIR}/${INSTALL_PREFIX}/bin/swift-stdlib-tool"
-      fi
+      copy_swift_stdlib_tool_substitute "${INSTALL_DESTDIR}/${INSTALL_PREFIX}/bin/swift-stdlib-tool"
       
       # Create plist for xctoolchain.
       echo "-- Create Info.plist --"
@@ -2559,3 +2642,4 @@ if [[ "${INSTALLABLE_PACKAGE}" ]] ; then
         { set +x; } 2>/dev/null
     fi
 fi
+

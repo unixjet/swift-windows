@@ -62,11 +62,11 @@ static bool isDelayedOperatorDecl(ValueDecl *vd) {
 
 static bool isArithmeticOperatorDecl(ValueDecl *vd) {
   return vd && 
-  ( vd->getName().str() == "+" ||
-    vd->getName().str() == "-" ||
-    vd->getName().str() == "*" ||
-    vd->getName().str() == "/" ||
-    vd->getName().str() == "%" );
+  (vd->getName().str() == "+" ||
+   vd->getName().str() == "-" ||
+   vd->getName().str() == "*" ||
+   vd->getName().str() == "/" ||
+   vd->getName().str() == "%");
 }
 
 namespace {
@@ -189,7 +189,7 @@ namespace {
         LTI.haveStringLiteral = true;
         auto tyvar = expr->getType()->getAs<TypeVariableType>();
 
-        if (tyvar)  {
+        if (tyvar) {
           LTI.stringLiteralTyvars.push_back(tyvar);
         }
 
@@ -1193,7 +1193,7 @@ namespace {
             indexExpr = parenExpr->getSubExpr();
           }
           
-          if(isa<IntegerLiteralExpr>(indexExpr)) {
+          if (isa<IntegerLiteralExpr>(indexExpr)) {
             
             outputTy = baseTy->getAs<BoundGenericType>()->getGenericArgs()[0];
             
@@ -1614,7 +1614,7 @@ namespace {
     Type visitUnresolvedDotExpr(UnresolvedDotExpr *expr) {
       // Open a member constraint for constructor delegations on the
       // subexpr type.
-      if (CS.TC.getSelfForInitDelegationInConstructor(CS.DC, expr)){
+      if (CS.TC.getSelfForInitDelegationInConstructor(CS.DC, expr)) {
         auto baseTy = expr->getBase()->getType()
                         ->getLValueOrInOutObjectType();
 
@@ -2850,6 +2850,15 @@ namespace {
         return { false, expr };
       }
 
+      // Don't visit CoerceExpr with an empty sub expression. They may occur
+      // if the body of a closure was not visited while pre-checking because
+      // of an error in the closure's signature
+      if (auto coerceExpr = dyn_cast<CoerceExpr>(expr)) {
+        if (!coerceExpr->getSubExpr()) {
+          return { false, expr };
+        }
+      }
+
       return { true, expr };
     }
 
@@ -2901,7 +2910,9 @@ namespace {
     ArgumentLabelWalker(ConstraintSystem &cs, Expr *expr) 
       : CS(cs), ParentMap(expr->getParentMap()) { }
 
-    void associateArgumentLabels(Expr *arg, ArrayRef<Identifier> labels,
+    using State = ConstraintSystem::ArgumentLabelState;
+
+    void associateArgumentLabels(Expr *arg, State labels,
                                  bool labelsArePermanent) {
       // Our parent must be a call.
       auto call = dyn_cast_or_null<CallExpr>(ParentMap[arg]);
@@ -2932,21 +2943,28 @@ namespace {
 
       // Record the labels.
       if (!labelsArePermanent)
-        labels = CS.allocateCopy(labels);
+        labels.Labels = CS.allocateCopy(labels.Labels);
       CS.ArgumentLabels[CS.getConstraintLocator(fn)] = labels;
     }
 
     std::pair<bool, Expr *> walkToExprPre(Expr *expr) override {
       if (auto tuple = dyn_cast<TupleExpr>(expr)) {
         if (tuple->hasElementNames())
-          associateArgumentLabels(expr, tuple->getElementNames(), true);
+          associateArgumentLabels(expr,
+                                  { tuple->getElementNames(),
+                                    tuple->hasTrailingClosure() },
+                                  /*labelsArePermanent*/ true);
         else {
           llvm::SmallVector<Identifier, 4> names(tuple->getNumElements(),
                                                  Identifier()); 
-          associateArgumentLabels(expr, names, false);
+          associateArgumentLabels(expr, { names, tuple->hasTrailingClosure() },
+                                  /*labelsArePermanent*/ false);
         }
       } else if (auto paren = dyn_cast<ParenExpr>(expr)) {
-        associateArgumentLabels(paren, { Identifier() }, false);
+        associateArgumentLabels(paren,
+                                { { Identifier() },
+                                  paren->hasTrailingClosure() },
+                                /*labelsArePermanent*/ false);
       }
 
       return { true, expr };
@@ -3138,22 +3156,45 @@ Type swift::checkMemberType(DeclContext &DC, Type BaseTy,
   return Type();
 }
 
-bool swift::isExtensionApplied(DeclContext &DC, Type BaseTy,
-                               const ExtensionDecl *ED) {
+static ArrayRef<Identifier> getSubstitutableTypeNames(SubstitutableType *Ty,
+                                           std::vector<Identifier> &Scratch,
+                                                      bool &IsSelfDependent) {
+  IsSelfDependent = false;
+  for (auto Cur = Ty; Cur; Cur = Cur->getParent()) {
+    if (Cur->getName().str() == "Self") {
+      IsSelfDependent = true;
+      break;
+    }
+    Scratch.insert(Scratch.begin(), Cur->getName());
+  }
+  return llvm::makeArrayRef(Scratch);
+}
 
-  // We need to make sure the extension is about the give type decl.
-  bool FoundExtension = false;
-  if (auto ND = BaseTy->getNominalOrBoundGenericNominal()) {
-    for (auto ET : ND->getExtensions()) {
-      if (ET == ED) {
-        FoundExtension = true;
-        break;
-      }
+static ArrayRef<Identifier> getDependentMemberNames(DependentMemberType *Dep,
+                                            std::vector<Identifier> &Scratch,
+                                                    bool &IsSelfDependent) {
+  DependentMemberType *Prev = nullptr;
+  IsSelfDependent = false;
+  for (DependentMemberType *Cur = Dep; Cur;
+       Prev = Cur, Cur = Cur->getBase()->getAs<DependentMemberType>()) {
+    Scratch.insert(Scratch.begin(), Cur->getName());
+    Prev = Cur;
+  }
+  if (Type Base = Prev->getBase()) {
+    if (SubstitutableType *Sub = Base->getAs<SubstitutableType>()) {
+      getSubstitutableTypeNames(Sub, Scratch, IsSelfDependent);
     }
   }
-  assert(FoundExtension && "Cannot find the extension.");
-  ConstraintSystemOptions Options;
+  return llvm::makeArrayRef(Scratch);
+}
 
+bool swift::isExtensionApplied(DeclContext &DC, Type BaseTy,
+                               const ExtensionDecl *ED) {
+  ConstraintSystemOptions Options;
+  NominalTypeDecl *Nominal = BaseTy->getNominalOrBoundGenericNominal();
+  if (!Nominal || !BaseTy->isSpecialized() ||
+      ED->getGenericRequirements().empty())
+    return true;
   std::unique_ptr<TypeChecker> CreatedTC;
   // If the current ast context has no type checker, create one for it.
   auto *TC = static_cast<TypeChecker*>(DC.getASTContext().getLazyResolver());
@@ -3161,32 +3202,45 @@ bool swift::isExtensionApplied(DeclContext &DC, Type BaseTy,
     CreatedTC.reset(new TypeChecker(DC.getASTContext()));
     TC = CreatedTC.get();
   }
-
-  // Build substitution map for the given type.
-  SmallVector<Type, 3> Scratch;
-  auto genericArgs = BaseTy->getAllGenericArgs(Scratch);
-  TypeSubstitutionMap substitutions;
-  auto genericParams = BaseTy->getNominalOrBoundGenericNominal()
-                         ->getInnermostGenericParamTypes();
-  assert(genericParams.size() == genericArgs.size());
-  for (unsigned i = 0, n = genericParams.size(); i != n; ++i) {
-    auto gp = genericParams[i]->getCanonicalType()->castTo<GenericTypeParamType>();
-    substitutions[gp] = genericArgs[i];
-  }
   ConstraintSystem CS(*TC, &DC, Options);
   auto Loc = CS.getConstraintLocator(nullptr);
-  if (ED->getGenericRequirements().empty())
-    return true;
+  std::vector<Identifier> Scratch;
+  bool Failed = false;
+  SmallVector<Type, 3> TypeScratch;
+
+  // Prepare type substitution map.
+  auto GenericArgs = BaseTy->getAllGenericArgs(TypeScratch);
+  TypeSubstitutionMap Substitutions;
+  auto GenericParams = Nominal->getInnermostGenericParamTypes();
+  assert(GenericParams.size() == GenericArgs.size());
+  for (unsigned I = 0, N = GenericParams.size(); I != N; ++I) {
+    auto GP = GenericParams[I]->getCanonicalType()->castTo<GenericTypeParamType>();
+    Substitutions[GP] = GenericArgs[I];
+  }
+  auto resolveType = [&](Type Ty) {
+    ArrayRef<Identifier> Names;
+    bool IsSelfDependent = false;
+    if (SubstitutableType *Sub = Ty->getAs<SubstitutableType>()) {
+      Scratch.clear();
+      Names = getSubstitutableTypeNames(Sub, Scratch, IsSelfDependent);
+    } else if (DependentMemberType *Dep = Ty->getAs<DependentMemberType>()) {
+      Scratch.clear();
+      Names = getDependentMemberNames(Dep, Scratch, IsSelfDependent);
+    } else
+      return Ty;
+    return IsSelfDependent ? checkMemberType(DC, BaseTy, Names)
+      :Ty.subst(DC.getParentModule(), Substitutions,
+                                       SubstFlags::IgnoreMissing);
+  };
   auto createMemberConstraint = [&](Requirement &Req, ConstraintKind Kind) {
-
-    // Use the substitution map of the given type to substitute the parameter of
-    // the extension.
-    auto First = Req.getFirstType().subst(ED->getParentModule(), substitutions,
-      SubstFlags::IgnoreMissing);
-
+    auto First = resolveType(Req.getFirstType());
+    auto Second = resolveType(Req.getSecondType());
+    if (First.isNull() || Second.isNull()) {
+      Failed = true;
+      return;
+    }
     // Add constraints accordingly.
-    CS.addConstraint(Constraint::create(CS, Kind, First, Req.getSecondType(),
-                                        DeclName(), Loc));
+    CS.addConstraint(Constraint::create(CS, Kind, First, Second, DeclName(), Loc));
   };
 
   // For every requirement, add a constraint.
@@ -3205,6 +3259,8 @@ bool swift::isExtensionApplied(DeclContext &DC, Type BaseTy,
         break;
     }
   }
+  if (Failed)
+    return true;
 
   // Having a solution implies the extension's requirements have been fulfilled.
   return CS.solveSingle().hasValue();
@@ -3267,17 +3323,44 @@ swift::resolveValueMember(DeclContext &DC, Type BaseTy, DeclName Name) {
     ConstraintKind::ValueMember, Name, BaseTy, nullptr, false);
   if (LookupResult.ViableCandidates.empty())
     return Result;
-  if (OverloadChoice *Choice = LookupResult.getFavoredChoice()) {
-    Result.Favored = Choice->getDecl();
-  }
+  ConstraintLocator *Locator = CS.getConstraintLocator(nullptr);
+  TypeVariableType *TV = CS.createTypeVariable(Locator, TVO_CanBindToLValue);
+  CS.addOverloadSet(TV, LookupResult.ViableCandidates, Locator);
+  Optional<Solution> OpSolution = CS.solveSingle();
+  if (!OpSolution.hasValue())
+    return Result;
+  SelectedOverload Selected = OpSolution.getValue().overloadChoices[Locator];
+  Result.Favored = Selected.choice.getDecl();
   for (OverloadChoice& Choice : LookupResult.ViableCandidates) {
     ValueDecl *VD = Choice.getDecl();
     if (VD != Result.Favored)
       Result.OtherViables.push_back(VD);
   }
-  if (!Result.Favored) {
-    Result.Favored = Result.OtherViables.front();
-    Result.OtherViables.erase(Result.OtherViables.begin());
-  }
   return Result;
+}
+
+void swift::collectDefaultImplementationForProtocolMembers(ProtocolDecl *PD,
+                    llvm::SmallDenseMap<ValueDecl*, ValueDecl*> &DefaultMap) {
+  Type BaseTy = PD->getDeclaredTypeInContext();
+  DeclContext *DC = PD->getDeclContext();
+  auto *TC = static_cast<TypeChecker*>(DC->getASTContext().getLazyResolver());
+  if (!TC) {
+    TC = new TypeChecker(DC->getASTContext());
+  }
+  for (Decl *D : PD->getMembers()) {
+    ValueDecl *VD = dyn_cast<ValueDecl>(D);
+    if (!VD)
+      continue;
+    ResolveMemberResult Result = resolveValueMember(*DC, BaseTy,
+                                                    VD->getFullName());
+    if (Result.OtherViables.empty())
+      continue;
+    if (!Result.Favored->getDeclContext()->isGenericTypeContext())
+      continue;
+    for (ValueDecl *Default : Result.OtherViables) {
+      if (Default->getDeclContext()->isExtensionContext()) {
+        DefaultMap.insert({Default, VD});
+      }
+    }
+  }
 }

@@ -1,6 +1,95 @@
+Note: This is in reverse chronological order, so newer entries are added to the top.
 
 Swift 3.0
 -------
+
+* As part of the changes for SE-0055 (see below), the *pointee* types of
+  imported pointers (e.g. the `id` in `id *`) are no longer assumed to always
+  be `_Nullable` even if annotated otherwise. However, an implicit or explicit
+  annotation of `_Null_unspecified` on a pointee type is still imported as
+  `Optional`.
+
+* [SE-0055](https://github.com/apple/swift-evolution/blob/master/proposals/0055-optional-unsafe-pointers.md):
+  The types `UnsafePointer`, `UnsafeMutablePointer`,
+  `AutoreleasingUnsafeMutablePointer`, `OpaquePointer`, `Selector`, and `Zone`
+  (formerly `NSZone`) now represent non-nullable pointers, i.e. pointers that
+  are never `nil`. A nullable pointer is now represented using `Optional`, e.g.
+  `UnsafePointer<Int>?` For types imported from C, non-object pointers (such as
+  `int *`) now have their nullability taken into account.
+
+  One possible area of difficulty is passing a nullable pointer to a function
+  that uses C variadics. Swift will not permit this directly, so as a
+  workaround please use the following idiom to pass it as a pointer-sized
+  integer value instead:
+
+  ```swift
+  unsafeBitCast(nullablePointer, to: Int.self)
+  ```
+
+* [SE-0046] (https://github.com/apple/swift-evolution/blob/master/proposals/0046-first-label.md) Function parameters now have consistent labelling across all function parameters. With this update the first parameter declarations will now match the existing behavior of the second and later parameters. This change makes the language simpler. 
+
+    Functions that were written and called as follows 
+    ```swift
+      func foo(x: Int, y: Int) {
+      }
+      foo(1, y: 2)
+      
+      func bar(a a: Int, b: Int) {
+      } 
+      bar(a: 3, b: 4)
+    ```
+    will now be written as (to achieve the same behavior):
+    ```swift
+        func foo(_ x: Int, y: Int) {}
+        foo(1, y: 2)
+        func bar(a: Int, b: Int) {} 
+        bar(a: 3, b: 4)
+    ```
+
+* [SE-0037](https://github.com/apple/swift-evolution/blob/master/proposals/0037-clarify-comments-and-operators.md)
+  Comments are now treated as whitespace when determining whether an operator is
+  prefix, postfix, or binary. For example, these now work:
+  ```swift
+    if /*comment*/!foo { ... }
+    1 +/*comment*/2
+  ```
+
+  This also means that comments can no longer appear between a unary operator
+  and its argument.
+  ```swift
+    foo/* comment */! // no longer works
+  ```
+
+  Any parse errors resulting from this change can be resolved by moving the
+  comment outside of the expression.
+
+* [SE-0031](https://github.com/apple/swift-evolution/blob/master/proposals/0031-adjusting-inout-declarations.md) The location of the inout attribute has been moved to after the `:` and before the parameter type.
+```swift
+  func foo(inout x: Int) {
+  }
+```
+  will now be written as:
+```swift
+  func foo(x: inout Int) {
+  }
+```
+
+* [SE-0053](https://github.com/apple/swift-evolution/blob/master/proposals/0053-remove-let-from-function-parameters.md) `let` is no longer accepted as a parameter attribute for functions. The compiler provides a fixit to remove it from the function declaration.
+
+* [SE-0003](https://github.com/apple/swift-evolution/blob/master/proposals/0003-remove-var-parameters.md) `var` is no longer accepted as a parameter attribute for functions. The compiler provides a fixit to create a shadow copy in the function body.
+```swift
+  func foo(var x: Int) {
+  }
+```
+  will now be written as:
+```swift
+  func foo(x: Int) {
+    var x = x
+  }
+```
+
+* The "none" members of imported NS_OPTIONS option sets are marked as unavailable
+  when they are imported.  Use [] to make an empty option set, instead of a None member.
 
 * [SE-0043](https://github.com/apple/swift-evolution/blob/master/proposals/0043-declare-variables-in-case-labels-with-multiple-patterns.md)
   landed, adding the ability to declare variables in multiple patterns in cases.
@@ -62,6 +151,13 @@ Swift 3.0
         } catch is SomeError {
             throw OtherError()
         }
+    }
+    ```
+* Throwing closure arguments of a rethrowing function may now be optional. For example:
+
+    ```swift
+    func executeClosureIfNotNil(closure: (() throws -> Void)?) rethrows {
+        try closure?()
     }
     ```
 
@@ -2649,7 +2745,7 @@ Swift 2.2
 
   In many common cases, this will just work.  Unfortunately, values
   are returned from `CF`-style APIs in a wide variety of ways, and
-  unlike Objective C methods, there simply isn't enough consistency
+  unlike Objective-C methods, there simply isn't enough consistency
   for Swift to be able to safely apply the documented conventions
   universally.  The framework teams have already audited many of the
   most important `CF`-style APIs, and those APIs should be imported
