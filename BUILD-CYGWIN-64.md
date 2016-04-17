@@ -74,26 +74,24 @@ Download sources
   git clone https://github.com/apple/swift-cmark.git cmark
   git clone https://github.com/ninja-build/ninja.git
 
-  cd swift; git checkout swift-cygwin-20160312 ; cd ..
-  cd llvm; git checkout swift-cygwin-20160312 ; cd ..
-  cd clang; git checkout swift-cygwin-20160312 ; cd ..
+  cd swift; git checkout swift-cygwin-20160418 ; cd ..
+  cd llvm; git checkout swift-cygwin-20160418 ; cd ..
+  cd clang; git checkout swift-cygwin-20160418 ; cd ..
   cd cmark; git checkout 6873b; cd ..
   cd ninja; git checkout 2eb1cc9; cd ..
 ```
-  
+
 Build
 -----
 ```
+  mkdir $WORK_DIR/build/Ninja-ReleaseAssert/swift-cygwin-x86_64/lib/swift/cygwin
+  cd $WORK_DIR/build/Ninja-ReleaseAssert/swift-cygwin-x86_64/lib/swift
+  ln -s cygwin windows
+  
   cd $WORK_DIR/swift
   utils/build-script -R
 ```
   
 Build Troubleshoot
 ------------------
-Currently, the build processing needs some manual works.
-```
-1.  ninja: error: unknown target 'swift-test-stdlib-cygwin-x86_64'
-
-    /usr/bin/cmake --build $WORK_DIR/build/Ninja-ReleaseAssert/swift-cygwin-x86_64 -- all
-```	
-
+  The build processing should be completed without manual work.

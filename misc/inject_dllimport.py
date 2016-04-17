@@ -4,6 +4,7 @@ import re
 
 replace_map = { \
   r'external global':'external dllimport global', \
+  r'external constant':'external dllimport constant', \
   r'@_TWVBo = external dllimport':'@_TWVBo = external', \
   r'@_TWVBo':'@__imp__TWVBo' \
   }
