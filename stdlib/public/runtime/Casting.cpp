@@ -22,6 +22,7 @@
 #include "swift/Runtime/Enum.h"
 #include "swift/Runtime/HeapObject.h"
 #include "swift/Runtime/Metadata.h"
+#include "swift/Runtime/Mutex.h"
 #include "llvm/ADT/DenseMap.h"
 #include "llvm/ADT/PointerIntPair.h"
 #include "swift/Runtime/Debug.h"
@@ -32,18 +33,7 @@
 #include "stddef.h"
 
 #include <cstring>
-#if defined(_MSC_VER)
-#include <shared_mutex>
-#else
-#include <pthread.h>
-#endif
 #include <type_traits>
-
-#if !defined(_MSC_VER)
-// FIXME: SR-946 - we ideally want to switch off of using pthread_rwlock
-//                 directly and instead expand Mutex.h to support rwlocks.
-#include <mutex>
-#endif
 
 // FIXME: Clang defines max_align_t in stddef.h since 3.6.
 // Remove this hack when we don't care about older Clangs on all platforms.
@@ -357,69 +347,37 @@ swift_getTypeName(const Metadata *type, bool qualified) {
   using Pair = TwoWordPair<const char *, uintptr_t>;
   using Key = llvm::PointerIntPair<const Metadata *, 1, bool>;
 
-#if defined(_MSC_VER)  
-  static Lazy<std::shared_timed_mutex>  SharedMutex;
-#else
-  static pthread_rwlock_t TypeNameCacheLock = PTHREAD_RWLOCK_INITIALIZER;
-#endif
+  static StaticReadWriteLock TypeNameCacheLock;
   static Lazy<llvm::DenseMap<Key, std::pair<const char *, size_t>>>
     TypeNameCache;
-
+  
   Key key(type, qualified);
   auto &cache = TypeNameCache.get();
-#if defined(_MSC_VER)
-  auto &TypeNameCacheLock = SharedMutex.get();
-#endif
 
-#if defined(_MSC_VER)
-  TypeNameCacheLock.lock_shared();
-#else
-  pthread_rwlock_rdlock(&TypeNameCacheLock);
-#endif
-  auto found = cache.find(key);
-  if (found != cache.end()) {
-    auto result = found->second;
-#if defined(_MSC_VER)
-	TypeNameCacheLock.unlock_shared();
-#else
-	pthread_rwlock_unlock(&TypeNameCacheLock);
-#endif
-    return Pair{result.first, result.second};
-  }
-  
-#if defined(_MSC_VER)
-  TypeNameCacheLock.unlock_shared();
-  TypeNameCacheLock.lock();
-#else
-  pthread_rwlock_unlock(&TypeNameCacheLock);
-  pthread_rwlock_wrlock(&TypeNameCacheLock);
-#endif
-  // Someone may have beaten us to the write lock.
-  found = cache.find(key);
-  if (found != cache.end()) {
-    auto result = found->second;
-#if defined(_MSC_VER)
-	TypeNameCacheLock.unlock();
-#else
-	pthread_rwlock_unlock(&TypeNameCacheLock);
-#endif
-    return Pair{result.first, result.second};
-  }
-  
-  // Build the metadata name.
-  auto name = nameForMetadata(type, qualified);
-  // Copy it to memory we can reference forever.
-  auto size = name.size();
-  auto result = (char*)malloc(size + 1);
-  memcpy(result, name.data(), size);
-  result[size] = 0;
-  cache.insert({key, {result, size}});
-#if defined(_MSC_VER)
-  TypeNameCacheLock.unlock();
-#else
-  pthread_rwlock_unlock(&TypeNameCacheLock);
-#endif
-  return Pair{result, size};
+  Pair pair;
+  TypeNameCacheLock.readWriteLock(
+      [&] {
+        auto found = cache.find(key);
+        if (found != cache.end()) {
+          auto result = found->second;
+          pair = Pair{result.first, result.second};
+          return true; // Cache hit, return true (e.g. done)
+        }
+        return false; // Cache missed, return false to move to write lock.
+      },
+      [&] {
+        // Build the metadata name.
+        auto name = nameForMetadata(type, qualified);
+        // Copy it to memory we can reference forever.
+        auto size = name.size();
+        auto result = (char *)malloc(size + 1);
+        memcpy(result, name.data(), size);
+        result[size] = 0;
+        cache.insert({key, {result, size}});
+        pair = Pair{result, size};
+      });
+
+  return pair;
 }
 
 /// Report a dynamic cast failure.
@@ -1627,18 +1585,12 @@ static bool _dynamicCastFromExistential(OpaqueValue *dest,
 
   bool result = swift_dynamicCast(dest, srcValue, srcCapturedType,
                                   targetType, subFlags);
-
-  if (!canTake) {
-    // swift_dynamicCast performed no memory management.
-    // Destroy the value if requested.
-    if (shouldDeallocateSource(result, flags))
-      srcType->vw_destroy(src);
-  } else {
-    // swift_dynamicCast took or destroyed the value as per the original request
-    // We may still have an opaque existential container to deallocate.
-    if (isOutOfLine)
-      _maybeDeallocateOpaqueExistential(src, result, flags);
-  }
+  // Deallocate the existential husk if we took from it.
+  if (canTake && result && isOutOfLine)
+    _maybeDeallocateOpaqueExistential(src, result, flags);
+  // If we couldn't take, we still may need to destroy the whole value.
+  else if (!canTake && shouldDeallocateSource(result, flags))
+    srcType->vw_destroy(src);
 
   return result;
 }

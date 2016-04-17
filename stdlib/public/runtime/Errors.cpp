@@ -28,6 +28,7 @@
 #endif
 #include <stdarg.h>
 #include "swift/Runtime/Debug.h"
+#include "swift/Runtime/Mutex.h"
 #include "swift/Basic/Demangle.h"
 #if !defined(_MSC_VER)
 #include <cxxabi.h>
@@ -173,14 +174,11 @@ struct crashreporter_annotations_t gCRAnnotations
 static void
 reportOnCrash(uint32_t flags, const char *message)
 {
-  // FIXME: SR-946 - we can't yet switch the following to use swift::Mutex
-  //                 since swift::Mutex uses fatalError and we could end
-  //                 up back here again ...and again ...and again
-  static pthread_mutex_t crashlogLock = PTHREAD_MUTEX_INITIALIZER;
-  pthread_mutex_lock(&crashlogLock);
-  
-  char *oldMessage = (char *)CRGetCrashLogMessage();
+  static StaticUnsafeMutex crashlogLock();
 
+  crashlogLock.lock();
+
+  char *oldMessage = (char *)CRGetCrashLogMessage();
   char *newMessage;
   if (oldMessage) {
     asprintf(&newMessage, "%s%s", oldMessage, message);
@@ -188,10 +186,10 @@ reportOnCrash(uint32_t flags, const char *message)
   } else {
     newMessage = strdup(message);
   }
-
+  
   CRSetCrashLogMessage(newMessage);
 
-  pthread_mutex_unlock(&crashlogLock);
+  crashlogLock.unlock();
 }
 
 #else
