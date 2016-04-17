@@ -37,7 +37,7 @@ module SwiftGlibc [system] {
       export *
     }
 
-% if CMAKE_SDK in ["LINUX"]:
+% if CMAKE_SDK in ["LINUX", "CYGWIN"]:
     module features {
       header "@GLIBC_INCLUDE_PATH@/features.h"
       export *
@@ -133,10 +133,13 @@ module SwiftGlibc [system] {
 
   // POSIX
   module POSIX {
+% if CMAKE_SDK not in ["CYGWIN"]:
     module aio {
       header "@GLIBC_INCLUDE_PATH@/aio.h"
       export *
     }
+% end
+
     module arpa {
       module inet {
         header "@GLIBC_INCLUDE_PATH@/arpa/inet.h"
@@ -144,10 +147,14 @@ module SwiftGlibc [system] {
       }
       export *
     }
+
+% if CMAKE_SDK not in ["CYGWIN"]:
     module cpio {
       header "@GLIBC_INCLUDE_PATH@/cpio.h"
       export *
     }
+% end
+
     module dirent {
       header "@GLIBC_INCLUDE_PATH@/dirent.h"
       export *
@@ -160,10 +167,14 @@ module SwiftGlibc [system] {
       header "@GLIBC_INCLUDE_PATH@/fcntl.h"
       export *
     }
+
+% if CMAKE_SDK not in ["CYGWIN"]:
     module fmtmsg {
       header "@GLIBC_INCLUDE_PATH@/fmtmsg.h"
       export *
     }
+% end
+
     module fnmatch {
       header "@GLIBC_INCLUDE_PATH@/fnmatch.h"
       export *
@@ -222,10 +233,14 @@ module SwiftGlibc [system] {
         export *
       }
     }
+
+% if CMAKE_SDK not in ["CYGWIN"]:
     module nl_types {
       header "@GLIBC_INCLUDE_PATH@/nl_types.h"
       export *
     }
+% end
+
     module poll {
       header "@GLIBC_INCLUDE_PATH@/poll.h"
       export *
@@ -347,10 +362,14 @@ module SwiftGlibc [system] {
       header "@GLIBC_INCLUDE_PATH@/termios.h"
       export *
     }
+
+% if CMAKE_SDK not in ["CYGWIN"]:
     module ulimit {
       header "@GLIBC_INCLUDE_PATH@/ulimit.h"
       export *
     }
+% end
+
     module unistd {
       header "@GLIBC_INCLUDE_PATH@/unistd.h"
       export *
@@ -363,7 +382,7 @@ module SwiftGlibc [system] {
       header "@GLIBC_INCLUDE_PATH@/utmpx.h"
       export *
     }
-% if CMAKE_SDK in ["LINUX"]:
+% if CMAKE_SDK in ["LINUX", "CYGWIN"]:
     module wait {
       header "@GLIBC_INCLUDE_PATH@/wait.h"
       export *
