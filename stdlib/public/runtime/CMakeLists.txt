@@ -18,10 +18,17 @@ if(SWIFT_RUNTIME_ENABLE_LEAK_CHECKER)
 endif()
 
 set(swift_runtime_port_sources)
-if(("${CMAKE_SYSTEM_NAME}" STREQUAL "Windows") OR
-   ("${CMAKE_SYSTEM_NAME}" STREQUAL "CYGWIN"))
+if("${CMAKE_SYSTEM_NAME}" STREQUAL "Windows")
   set(swift_runtime_port_sources
+      MutexWin32.cpp
       CygwinPort.cpp)
+elseif("${CMAKE_SYSTEM_NAME}" STREQUAL "CYGWIN")
+  set(swift_runtime_port_sources
+      MutexPThread.cpp
+      CygwinPort.cpp)
+else()
+  set(swift_runtime_port_sources
+      MutexPThread.cpp)
 endif()
     
 set(swift_runtime_objc_sources)
@@ -46,7 +53,6 @@ set(swift_runtime_sources
     KnownMetadata.cpp
     Metadata.cpp
     MetadataLookup.cpp
-    MutexPThread.cpp
     Once.cpp
     ProtocolConformance.cpp
     Reflection.cpp
@@ -57,6 +63,8 @@ set(swift_runtime_sources
 set(LLVM_OPTIONAL_SOURCES
     Remangle.cpp
     swift_sections.S
+    MutexPThread.cpp
+    MutexWin32.cpp
     CygwinPort.cpp
     ${swift_runtime_sources}
     ${swift_runtime_objc_sources}

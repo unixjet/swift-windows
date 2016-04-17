@@ -18,6 +18,7 @@
 #ifndef SWIFT_RUNTIME_MUTEX_WIN32_H
 #define SWIFT_RUNTIME_MUTEX_WIN32_H
 
+#define NOMINMAX
 #include <windows.h>
 
 namespace swift {

@@ -29,7 +29,7 @@
 #include <link.h>
 #endif
 
-#if defined(_MSC_VER)
+#if !defined(_MSC_VER)
 #include <dlfcn.h>
 #endif
 
