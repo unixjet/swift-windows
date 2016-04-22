@@ -436,8 +436,12 @@ class StaticConditionVariable {
   StaticConditionVariable &operator=(StaticConditionVariable &&) = delete;
 
 public:
-  constexpr StaticConditionVariable()
-      : Handle(ConditionPlatformHelper::staticInit()) {}
+#if CONDITION_SUPPORTS_CONSTEXPR
+  constexpr
+#endif
+      StaticConditionVariable()
+      : Handle(ConditionPlatformHelper::staticInit()) {
+  }
 
   /// See ConditionVariable::notifyOne
   void notifyOne() { ConditionPlatformHelper::notifyOne(Handle); }
@@ -460,7 +464,12 @@ class StaticMutex {
   StaticMutex &operator=(StaticMutex &&) = delete;
 
 public:
-  constexpr StaticMutex() : Handle(MutexPlatformHelper::staticInit()) {}
+#if MUTEX_SUPPORTS_CONSTEXPR
+  constexpr
+#endif
+      StaticMutex()
+      : Handle(MutexPlatformHelper::staticInit()) {
+  }
 
   /// See Mutex::lock
   void lock() { MutexPlatformHelper::lock(Handle); }
@@ -530,8 +539,12 @@ class StaticReadWriteLock {
   StaticReadWriteLock &operator=(StaticReadWriteLock &&) = delete;
 
 public:
-  constexpr StaticReadWriteLock()
-      : Handle(ReadWriteLockPlatformHelper::staticInit()) {}
+#if READWRITELOCK_SUPPORTS_CONSTEXPR
+  constexpr
+#endif
+      StaticReadWriteLock()
+      : Handle(ReadWriteLockPlatformHelper::staticInit()) {
+  }
 
   /// See ReadWriteLock::readLock
   void readLock() { ReadWriteLockPlatformHelper::readLock(Handle); }
@@ -605,7 +618,12 @@ class StaticUnsafeMutex {
   StaticUnsafeMutex &operator=(StaticUnsafeMutex &&) = delete;
 
 public:
-  constexpr StaticUnsafeMutex() : Handle(MutexPlatformHelper::staticInit()) {}
+#if MUTEX_SUPPORTS_CONSTEXPR
+  constexpr
+#endif
+      StaticUnsafeMutex()
+      : Handle(MutexPlatformHelper::staticInit()) {
+  }
 
   /// The lock() method has the following properties:
   /// - Behaves as an atomic operation.
@@ -754,14 +772,31 @@ typedef ScopedRWLockT<ReadWriteLock, false, true> ScopedWriteUnlock;
 typedef ScopedRWLockT<StaticReadWriteLock, false, true> StaticScopedWriteUnlock;
 
 // Enforce literal requirements for static variants.
+#if MUTEX_SUPPORTS_CONSTEXPR
 static_assert(std::is_literal_type<StaticMutex>::value,
               "StaticMutex must be literal type");
-static_assert(std::is_literal_type<StaticConditionVariable>::value,
-              "StaticConditionVariable must be literal type");
-static_assert(std::is_literal_type<StaticReadWriteLock>::value,
-              "StaticReadWriteLock must be literal type");
 static_assert(std::is_literal_type<StaticUnsafeMutex>::value,
               "StaticUnsafeMutex must be literal type");
+#else
+// Your platform doesn't currently support staticly allocated Mutex
+// you will possibly see global-constructors warnings
+#endif
+
+#if CONDITION_SUPPORTS_CONSTEXPR
+static_assert(std::is_literal_type<StaticConditionVariable>::value,
+              "StaticConditionVariable must be literal type");
+#else
+// Your platform doesn't currently support staticly allocated ConditionVar
+// you will possibly see global-constructors warnings
+#endif
+
+#if READWRITELOCK_SUPPORTS_CONSTEXPR
+static_assert(std::is_literal_type<StaticReadWriteLock>::value,
+              "StaticReadWriteLock must be literal type");
+#else
+// Your platform doesn't currently support staticly allocated ReadWriteLocks
+// you will possibly see global-constructors warnings
+#endif
 }
 
 #endif
