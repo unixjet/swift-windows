@@ -436,7 +436,7 @@ class StaticConditionVariable {
   StaticConditionVariable &operator=(StaticConditionVariable &&) = delete;
 
 public:
-  StaticConditionVariable()
+  constexpr StaticConditionVariable()
       : Handle(ConditionPlatformHelper::staticInit()) {}
 
   /// See ConditionVariable::notifyOne
@@ -460,7 +460,7 @@ class StaticMutex {
   StaticMutex &operator=(StaticMutex &&) = delete;
 
 public:
-  StaticMutex() : Handle(MutexPlatformHelper::staticInit()) {}
+  constexpr StaticMutex() : Handle(MutexPlatformHelper::staticInit()) {}
 
   /// See Mutex::lock
   void lock() { MutexPlatformHelper::lock(Handle); }
@@ -530,7 +530,7 @@ class StaticReadWriteLock {
   StaticReadWriteLock &operator=(StaticReadWriteLock &&) = delete;
 
 public:
-  StaticReadWriteLock()
+  constexpr StaticReadWriteLock()
       : Handle(ReadWriteLockPlatformHelper::staticInit()) {}
 
   /// See ReadWriteLock::readLock
@@ -605,7 +605,7 @@ class StaticUnsafeMutex {
   StaticUnsafeMutex &operator=(StaticUnsafeMutex &&) = delete;
 
 public:
-  StaticUnsafeMutex() : Handle(MutexPlatformHelper::staticInit()) {}
+  constexpr StaticUnsafeMutex() : Handle(MutexPlatformHelper::staticInit()) {}
 
   /// The lock() method has the following properties:
   /// - Behaves as an atomic operation.
@@ -754,14 +754,14 @@ typedef ScopedRWLockT<ReadWriteLock, false, true> ScopedWriteUnlock;
 typedef ScopedRWLockT<StaticReadWriteLock, false, true> StaticScopedWriteUnlock;
 
 // Enforce literal requirements for static variants.
-//static_assert(std::is_literal_type<StaticMutex>::value,
-//              "StaticMutex must be literal type");
-//static_assert(std::is_literal_type<StaticConditionVariable>::value,
-//              "StaticConditionVariable must be literal type");
-//static_assert(std::is_literal_type<StaticReadWriteLock>::value,
-//              "StaticReadWriteLock must be literal type");
-//static_assert(std::is_literal_type<StaticUnsafeMutex>::value,
-//              "StaticUnsafeMutex must be literal type");
+static_assert(std::is_literal_type<StaticMutex>::value,
+              "StaticMutex must be literal type");
+static_assert(std::is_literal_type<StaticConditionVariable>::value,
+              "StaticConditionVariable must be literal type");
+static_assert(std::is_literal_type<StaticReadWriteLock>::value,
+              "StaticReadWriteLock must be literal type");
+static_assert(std::is_literal_type<StaticUnsafeMutex>::value,
+              "StaticUnsafeMutex must be literal type");
 }
 
 #endif

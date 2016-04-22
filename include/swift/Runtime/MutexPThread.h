@@ -31,7 +31,7 @@ typedef pthread_rwlock_t ReadWriteLockHandle;
 ///
 /// See ConditionVariable
 struct ConditionPlatformHelper {
-  static ConditionHandle staticInit() {
+  static constexpr ConditionHandle staticInit() {
     return PTHREAD_COND_INITIALIZER;
   };
   static void init(ConditionHandle &condition);
@@ -46,7 +46,7 @@ struct ConditionPlatformHelper {
 ///
 /// See Mutex
 struct MutexPlatformHelper {
-  static MutexHandle staticInit() {
+  static constexpr MutexHandle staticInit() {
     return PTHREAD_MUTEX_INITIALIZER;
   };
   static void init(MutexHandle &mutex, bool checked = false);
@@ -69,7 +69,7 @@ struct MutexPlatformHelper {
 ///
 /// See ReadWriteLock
 struct ReadWriteLockPlatformHelper {
-  static ReadWriteLockHandle staticInit() {
+  static constexpr ReadWriteLockHandle staticInit() {
     return PTHREAD_RWLOCK_INITIALIZER;
   };
   static void init(ReadWriteLockHandle &rwlock);
