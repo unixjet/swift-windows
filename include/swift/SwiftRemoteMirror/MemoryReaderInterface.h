@@ -26,17 +26,15 @@
 extern "C" {
 #endif
 
-#if defined(__CYGWIN__)
-#define addr_t intptr_t
-#else
-typedef uint64_t addr_t;
-#endif
+typedef uint64_t swift_addr_t;
 
 typedef uint8_t (*PointerSizeFunction)();
 typedef uint8_t (*SizeSizeFunction)();
-typedef bool (*ReadBytesFunction)(addr_t address, uint8_t *dest, uint64_t size);
-typedef uint64_t (*GetStringLengthFunction)(addr_t address);
-typedef addr_t (*GetSymbolAddressFunction)(const char *name, uint64_t name_length);
+typedef bool (*ReadBytesFunction)(swift_addr_t address, uint8_t *dest,
+                                  uint64_t size);
+typedef uint64_t (*GetStringLengthFunction)(swift_addr_t address);
+typedef swift_addr_t (*GetSymbolAddressFunction)(const char *name,
+                                                 uint64_t name_length);
 
 typedef struct MemoryReaderImpl {
   /// Get the size in bytes of the target's pointer type.

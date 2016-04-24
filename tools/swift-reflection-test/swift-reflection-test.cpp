@@ -142,7 +142,7 @@ public:
     }
   }
 
-  bool readBytes(addr_t Address, uint8_t *Dest, uint64_t Size) override {
+  bool readBytes(swift_addr_t Address, uint8_t *Dest, uint64_t Size) override {
 
     StoredPointer TargetAddress = (StoredPointer)Address;
     write(getParentWriteFD(), REQUEST_READ_BYTES, 2);
@@ -160,7 +160,7 @@ public:
     return static_cast<uint64_t>(Length);
   }
 
-  addr_t getSymbolAddress(const std::string &SymbolName) override {
+  swift_addr_t getSymbolAddress(const std::string &SymbolName) override {
     StoredPointer Address = 0;
     write(getParentWriteFD(), REQUEST_SYMBOL_ADDRESS, 2);
     write(getParentWriteFD(), SymbolName.c_str(), SymbolName.size());
@@ -273,7 +273,7 @@ public:
     return static_cast<uint64_t>(Length);
   }
 
-  std::string readString(addr_t Address) override {
+  std::string readString(swift_addr_t Address) override {
     auto NameSize = getStringLength(Address);
     if (!NameSize)
       return "";
