@@ -1,4 +1,7 @@
 cmake_minimum_required(VERSION 2.8.12)
+if(WIN32)
+  cmake_policy(SET CMP0054 NEW)
+endif()
 
 # Add path for custom CMake modules.
 list(APPEND CMAKE_MODULE_PATH
@@ -527,6 +530,15 @@ elseif("${CMAKE_SYSTEM_NAME}" STREQUAL "CYGWIN")
   
   set(SWIFT_PRIMARY_VARIANT_SDK_default "CYGWIN")
   set(SWIFT_PRIMARY_VARIANT_ARCH_default "x86_64")
+elseif("${CMAKE_SYSTEM_NAME}" STREQUAL "Windows")
+  configure_sdk_unix(WINDOWS "Windows" "windows" "windows" "i686" "i686-pc-windows-msvc")
+  set(SWIFT_HOST_VARIANT "windows" CACHE STRING
+      "Deployment OS for Swift host tools (the compiler) [windows].")
+  set(SWIFT_HOST_VARIANT_SDK "MSVC")
+  set(SWIFT_HOST_VARIANT_ARCH "i686")
+  
+  set(SWIFT_PRIMARY_VARIANT_SDK_default "MSVC")
+  set(SWIFT_PRIMARY_VARIANT_ARCH_default "i686")
 elseif("${CMAKE_SYSTEM_NAME}" STREQUAL "Darwin")
   # Set defaults.
 

@@ -66,9 +66,13 @@ function(_add_variant_c_compile_link_flags)
     ""
     ${ARGN})
   
-  set(result
-    ${${CFLAGS_RESULT_VAR_NAME}}
-    "-target" "${SWIFT_SDK_${CFLAGS_SDK}_ARCH_${CFLAGS_ARCH}_TRIPLE}")
+  if("${CMAKE_SYSTEM_NAME}" STREQUAL "Windows")
+    set(result, ${${CFLAGS_RESULT_VAR_NAME}})
+  else()
+    set(result
+      ${${CFLAGS_RESULT_VAR_NAME}}
+      "-target" "${SWIFT_SDK_${CFLAGS_SDK}_ARCH_${CFLAGS_ARCH}_TRIPLE}")
+  endif()
 
   list(APPEND result
     "-isysroot" "${SWIFT_SDK_${CFLAGS_SDK}_PATH}")
@@ -540,7 +544,27 @@ function(_compile_swift_files dependency_target_out_var_name)
     set(main_command "-emit-sib")
   endif()
 
+if("${CMAKE_SYSTEM_NAME}" STREQUAL "Windows")
   add_custom_command_target(
+      dependency_target
+      ${command_create_dirs}
+      # Create API notes before compiling, because this will affect the APIs
+      # the overlay sees.
+      ${command_create_apinotes} 
+      COMMAND
+        "${swift_compiler_tool}" "${main_command}" ${swift_flags}
+        ${output_option} "${source_files}"
+      OUTPUT
+        ${SWIFTFILE_OUTPUT} "${module_file}" "${module_doc_file}"
+        ${apinote_files}
+      DEPENDS
+        ${swift_compiler_tool_dep}
+        ${source_files} ${SWIFTFILE_DEPENDS}
+        ${swift_ide_test_dependency} ${depends_create_apinotes}
+      COMMENT "Compiling ${first_output}")
+    set("${dependency_target_out_var_name}" "${dependency_target}" PARENT_SCOPE)
+  else()
+    add_custom_command_target(
       dependency_target
       ${command_create_dirs}
       # Create API notes before compiling, because this will affect the APIs
@@ -559,6 +583,7 @@ function(_compile_swift_files dependency_target_out_var_name)
         ${swift_ide_test_dependency} ${depends_create_apinotes}
       COMMENT "Compiling ${first_output}")
   set("${dependency_target_out_var_name}" "${dependency_target}" PARENT_SCOPE)
+endif()
 
   # Make sure the build system knows the file is a generated object file.
   set_source_files_properties(${SWIFTFILE_OUTPUT}
@@ -1110,10 +1135,20 @@ function(_add_swift_library_single target name)
   set(prefixed_link_libraries)
   foreach(dep ${SWIFTLIB_SINGLE_LINK_LIBRARIES})
     if("${dep}" MATCHES "^clang")
-      set(dep "${LLVM_LIBRARY_OUTPUT_INTDIR}/lib${dep}.a")
+        if("${CMAKE_SYSTEM_NAME}" STREQUAL "Windows")
+	        # The library name on windows should be xxx.lib instead
+	        set(dep "${LLVM_LIBRARY_OUTPUT_INTDIR}/${dep}.lib")
+        else()
+            set(dep "${LLVM_LIBRARY_OUTPUT_INTDIR}/lib${dep}.a")
+        endif()
     endif()
     if("${dep}" STREQUAL "cmark")
-      set(dep "${CMARK_LIBRARY_DIR}/lib${dep}.a")
+        if("${CMAKE_SYSTEM_NAME}" STREQUAL "Windows")
+	        # The library name on windows should be xxx.lib instead
+	        set(dep "${CMARK_LIBRARY_DIR}/${dep}.lib")
+        else()
+            set(dep "${CMARK_LIBRARY_DIR}/lib${dep}.a")
+        endif()
     endif()
     list(APPEND prefixed_link_libraries "${dep}")
   endforeach()

@@ -136,6 +136,9 @@ if(CMAKE_SYSTEM_NAME STREQUAL "Darwin")
   list(APPEND swift_core_private_link_libraries swiftRuntime swiftStdlibStubs)
   list(APPEND swift_core_framework_depends Foundation)
   list(APPEND swift_core_framework_depends CoreFoundation)
+elseif(CMAKE_SYSTEM_NAME STREQUAL "Windows")
+  # Do not look for ICU library on Windows
+  list(APPEND swift_core_private_link_libraries swiftRuntime swiftStdlibStubs)
 else()
   # With the GNU linker the equivalent of -all_load is to tell the linker
   # --whole-archive before the archive and --no-whole-archive after (without

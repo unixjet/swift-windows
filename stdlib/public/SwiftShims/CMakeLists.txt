@@ -67,7 +67,34 @@ if(SWIFT_BUILT_STANDALONE)
 else() # NOT SWIFT_BUILT_STANDALONE
   set(clang_headers_location "${LLVM_LIBRARY_DIR}/clang/${CLANG_VERSION}")
 endif()
+ 
+if ("${CMAKE_SYSTEM_NAME}" STREQUAL "Windows") 
+  set(SWIFTLIB_NATIVE_DIR ${SWIFTLIB_DIR})
+  file(TO_NATIVE_PATH ${SWIFTLIB_DIR} SWIFTLIB_NATIVE_DIR)
+  file(TO_NATIVE_PATH ${clang_headers_location} clang_headers_location)
+  add_custom_command_target(unused_var
+    COMMAND
+      "${CMAKE_COMMAND}" "-E" "make_directory" "${SWIFTLIB_DIR}"
+    COMMAND
+      COMMAND "rmdir" "/s" "/q" "${SWIFTLIB_NATIVE_DIR}\\clang" 
+      COMMAND "mklink" "/J" "${SWIFTLIB_NATIVE_DIR}\\clang" "${clang_headers_location}"
 
+    # Create a broken symlink that points to '../clang/$VERSION'.  It is not
+    # used when running Swift tools from the build tree directly, but we will
+    # install it in such a way that it points to Clang installation.  If the 
+    # link can be resolved, CMake would try to follow it when installing the
+    # project under certain conditions.
+    COMMAND
+      "${CMAKE_COMMAND}" "-E" "make_directory" "${SWIFTLIB_DIR}/install-tmp/install-tmp"
+    COMMAND
+      "${CMAKE_COMMAND}" "-E" "remove"
+      "${SWIFTLIB_DIR}/install-tmp/install-tmp/clang"
+    COMMAND
+      COMMAND "mklink" "/J" "${SWIFTLIB_NATIVE_DIR}\\install-tmp\\install-tmp\\clang" "..\\clang\\${CLANG_VERSION}"
+    CUSTOM_TARGET_NAME "symlink_clang_headers"
+    OUTPUT "${SWIFTLIB_DIR}/clang" "${SWIFTLIB_DIR}/install-tmp/install-tmp/clang"
+    COMMENT "Symlinking Clang resource headers into ${SWIFTLIB_DIR}/clang")
+else()
 add_custom_command_target(unused_var
     COMMAND
       "${CMAKE_COMMAND}" "-E" "make_directory" "${SWIFTLIB_DIR}"
@@ -93,6 +120,7 @@ add_custom_command_target(unused_var
     CUSTOM_TARGET_NAME "symlink_clang_headers"
     OUTPUT "${SWIFTLIB_DIR}/clang" "${SWIFTLIB_DIR}/install-tmp/install-tmp/clang"
     COMMENT "Symlinking Clang resource headers into ${SWIFTLIB_DIR}/clang")
+endif()
 add_dependencies(copy_shim_headers symlink_clang_headers)
 
 swift_install_in_component(compiler

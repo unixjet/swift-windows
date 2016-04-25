@@ -21,9 +21,18 @@ swift_install_in_component(tools
 
 
 # Create a symlink for swift-api-dump.py in the bin directory
+if ("${CMAKE_SYSTEM_NAME}" STREQUAL "Windows")
+  add_custom_command(TARGET swift-ide-test POST_BUILD
+    COMMAND
+      # Create_symlink doesn't work on windows. Use mklink instead.
+	    COMMAND "del" "${SWIFT_RUNTIME_OUTPUT_INTDIR}/swift-api-dump.py"
+	    COMMAND "mklink" "${SWIFT_RUNTIME_OUTPUT_INTDIR}/swift-api-dump.py" "${SWIFT_SOURCE_DIR}/utils/swift-api-dump.py"
+    COMMENT "Creating compatibility symlink for swift-api-dump.py")
+else()
 add_custom_command(TARGET swift-ide-test POST_BUILD
     COMMAND
       "${CMAKE_COMMAND}" "-E" "create_symlink"
       "${SWIFT_SOURCE_DIR}/utils/swift-api-dump.py"
       "${SWIFT_RUNTIME_OUTPUT_INTDIR}/swift-api-dump.py"
     COMMENT "Creating development symlink for swift-api-dump.py")
+endif()

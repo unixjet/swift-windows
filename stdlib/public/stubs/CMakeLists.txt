@@ -9,6 +9,9 @@ if(SWIFT_HOST_VARIANT MATCHES "${SWIFT_DARWIN_VARIANTS}")
       SwiftNativeNSXXXBase.mm.gyb)
   set(LLVM_OPTIONAL_SOURCES
       UnicodeNormalization.cpp)
+elseif(CMAKE_SYSTEM_NAME STREQUAL "Windows")
+  set(swift_stubs_unicode_normalization_sources
+      UnicodeNormalization.cpp)
 else()
   find_package(ICU REQUIRED COMPONENTS uc i18n)
   set(swift_stubs_unicode_normalization_sources

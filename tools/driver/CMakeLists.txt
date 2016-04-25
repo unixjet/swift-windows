@@ -8,15 +8,36 @@ add_swift_executable(swift
     swiftFrontendTool
 )
 
-target_link_libraries(swift edit)
+if("${CMAKE_SYSTEM_NAME}" STREQUAL "Windows")
+  # edit.lib not available on windows
+  target_link_libraries(swift)
+else()
+  target_link_libraries(swift edit)
+endif()
 
-add_custom_command(TARGET swift POST_BUILD
-    COMMAND "${CMAKE_COMMAND}" "-E" "create_symlink" "swift" "swiftc"
+if("${CMAKE_SYSTEM_NAME}" STREQUAL "Windows")
+    add_custom_command(TARGET swift POST_BUILD
+        # Create_symlink doesn't work on windows. Use mklink instead.
+        COMMAND "del" "swiftc.exe"
+	    COMMAND "mklink" "swiftc.exe" "swift.exe" 
     WORKING_DIRECTORY "${SWIFT_RUNTIME_OUTPUT_INTDIR}")
+else()
+    add_custom_command(TARGET swift POST_BUILD
+        COMMAND "${CMAKE_COMMAND}" "-E" "create_symlink" "swift" "swiftc"
+     WORKING_DIRECTORY "${SWIFT_RUNTIME_OUTPUT_INTDIR}")
+endif() 
 
-add_custom_command(TARGET swift POST_BUILD
-    COMMAND "${CMAKE_COMMAND}" "-E" "create_symlink" "swift" "swift-autolink-extract"
+if("${CMAKE_SYSTEM_NAME}" STREQUAL "Windows")
+    add_custom_command(TARGET swift POST_BUILD
+        # Create_symlink doesn't work on windows. Use mklink instead.
+	    COMMAND "del" "swift-autolink-extract.exe"
+	    COMMAND "mklink" "swift-autolink-extract.exe" "swift.exe"
+     WORKING_DIRECTORY "${SWIFT_RUNTIME_OUTPUT_INTDIR}")
+else()
+    add_custom_command(TARGET swift POST_BUILD
+        COMMAND "${CMAKE_COMMAND}" "-E" "create_symlink" "swift" "swift-autolink-extract"
     WORKING_DIRECTORY "${SWIFT_RUNTIME_OUTPUT_INTDIR}")
+endif()
 
 # If building as part of clang, make sure the headers are installed.
 if(NOT SWIFT_BUILT_STANDALONE)

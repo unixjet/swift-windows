@@ -32,11 +32,16 @@ function(handle_gyb_sources dependency_out_var_name sources_var_name arch)
     set(extra_gyb_flags "-DCMAKE_SIZEOF_VOID_P=${ptr_size}")
   endif()
 
-  set(gyb_flags
-      "--test" # Run gyb's self-tests whenever we use it.  They're cheap
+  if("${CMAKE_SYSTEM_NAME}" STREQUAL "Windows")
+      #  skip testing for windows as the expected results are different on Windows
+    set(gyb_flags ${SWIFT_GYB_FLAGS} ${extra_gyb_flags})
+  else()
+    set(gyb_flags
+	  "--test" # Run gyb's self-tests whenever we use it.  They're cheap
                # enough and it keeps us honest.
       ${SWIFT_GYB_FLAGS}
       ${extra_gyb_flags})
+  endif()
 
   set(dependency_targets)
   set(de_gybbed_sources)

@@ -128,8 +128,15 @@ function(add_custom_command_target dependency_out_var_name)
     string(MD5 target_md5
         "add_custom_command_target${CMAKE_CURRENT_BINARY_DIR}/${output_filename}")
     get_filename_component(output_filename_basename "${output_filename}" NAME)
-    set(target_name
-        "add_custom_command_target-${target_md5}-${output_filename_basename}")
+
+    if("${CMAKE_SYSTEM_NAME}" STREQUAL "Windows")
+	    # On windows, the path length can't > 260 chars. Remove prefix to comply.
+        set(target_name
+            "custom-${output_filename_basename}-${target_md5}")
+    else()
+        set(target_name
+            "add_custom_command_target-${target_md5}-${output_filename_basename}")
+    endif()
   else()
     set(target_name "${ACCT_CUSTOM_TARGET_NAME}")
   endif()
