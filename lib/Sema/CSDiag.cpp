@@ -867,7 +867,7 @@ namespace {
       
     void filterList(ArrayRef<CallArgParam> actualArgs);
     void filterList(Type actualArgsType) {
-      return filterList(decomposeArgParamType(actualArgsType));
+      return filterList((ArrayRef<CallArgParam>)decomposeArgParamType(actualArgsType));
     }
     void filterList(ClosenessPredicate predicate);
     void filterContextualMemberList(Expr *argExpr);
@@ -1500,7 +1500,7 @@ void CalleeCandidateInfo::filterContextualMemberList(Expr *argExpr) {
     
     CallArgParam param;
     param.Ty = argType;
-    return filterList(param);
+    return filterList((ArrayRef<CallArgParam>)param);
   }
   
   // If we have a tuple expression, form a tuple type.
@@ -1517,7 +1517,7 @@ void CalleeCandidateInfo::filterContextualMemberList(Expr *argExpr) {
     ArgElts.push_back(param);
   }
 
-  return filterList(ArgElts);
+  return filterList((ArrayRef<CallArgParam>)ArgElts);
 }
 
 CalleeCandidateInfo::CalleeCandidateInfo(Type baseType,

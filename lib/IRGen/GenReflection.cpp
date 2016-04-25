@@ -695,6 +695,7 @@ static std::string getReflectionSectionName(IRGenModule &IGM,
       OS << "__DATA, __swift3_" << Base << ", regular, no_dead_strip";
       break;
     case llvm::Triple::ELF:
+    case llvm::Triple::COFF:
       OS << ".swift3_" << Base;
       break;
     default:

@@ -135,7 +135,7 @@ struct SameType;
 
 // Only used for better diagnostics of missing traits
 template <typename T>
-struct MissingTrait;
+struct MissingTrait {};
 
 // Test if ScalarEnumerationTraits<T> is defined on type T.
 template <class T>

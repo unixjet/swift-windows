@@ -38,7 +38,11 @@
 #include "llvm/Transforms/IPO/PassManagerBuilder.h"
 #include "llvm/Support/Path.h"
 
+#if WIN32
+#include <Windows.h>
+#else
 #include <dlfcn.h>
+#endif
 
 using namespace swift;
 using namespace swift::immediate;
@@ -47,7 +51,11 @@ static bool loadRuntimeLib(StringRef sharedLibName, StringRef runtimeLibPath) {
   // FIXME: Need error-checking.
   llvm::SmallString<128> Path = runtimeLibPath;
   llvm::sys::path::append(Path, sharedLibName);
+#if WIN32
+  return LoadLibrary(Path.c_str());
+#else
   return dlopen(Path.c_str(), RTLD_LAZY | RTLD_GLOBAL);
+#endif
 }
 
 bool swift::immediate::loadSwiftRuntime(StringRef runtimeLibPath) {
@@ -60,7 +68,11 @@ static bool tryLoadLibrary(LinkLibrary linkLib,
 
   // If we have an absolute or relative path, just try to load it now.
   if (llvm::sys::path::has_parent_path(path.str())) {
+#if WIN32
+	  return LoadLibrary(path.c_str());
+#else
     return dlopen(path.c_str(), RTLD_LAZY | RTLD_GLOBAL);
+#endif
   }
 
   bool success = false;
@@ -80,14 +92,22 @@ static bool tryLoadLibrary(LinkLibrary linkLib,
     for (auto &libDir : searchPathOpts.LibrarySearchPaths) {
       path = libDir;
       llvm::sys::path::append(path, stem.str());
+#if WIN32
+	  success = LoadLibrary(path.c_str());
+#else
       success = dlopen(path.c_str(), RTLD_LAZY | RTLD_GLOBAL);
+#endif
       if (success)
         break;
     }
 
     // Let dlopen determine the best search paths.
     if (!success)
+#if WIN32
+	  success = LoadLibrary(stem.c_str());
+#else
       success = dlopen(stem.c_str(), RTLD_LAZY | RTLD_GLOBAL);
+#endif
 
     // If that fails, try our runtime library path.
     if (!success)
@@ -106,14 +126,22 @@ static bool tryLoadLibrary(LinkLibrary linkLib,
     for (auto &frameworkDir : searchPathOpts.FrameworkSearchPaths) {
       path = frameworkDir;
       llvm::sys::path::append(path, frameworkPart.str());
+#if WIN32
+	  success = LoadLibrary(path.c_str());
+#else
       success = dlopen(path.c_str(), RTLD_LAZY | RTLD_GLOBAL);
+#endif
       if (success)
         break;
     }
 
     // If that fails, let dlopen search for system frameworks.
     if (!success)
+#if WIN32
+	  success = LoadLibrary(frameworkPart.c_str());
+#else
       success = dlopen(frameworkPart.c_str(), RTLD_LAZY | RTLD_GLOBAL);
+#endif
     break;
   }
   }

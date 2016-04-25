@@ -30,8 +30,9 @@
 #elif __CYGWIN__
 # define SWIFT_RUNTIME_EXPORT 
 #else
+#define SWIFT_RUNTIME_EXPORT
 // __dllexport/__dllimport for Windows?
-# error "Unimplemented object format"
+//# error "Unimplemented object format"
 #endif
 
 /// Attribute for runtime-stdlib SPI interfaces.

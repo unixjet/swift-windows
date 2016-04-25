@@ -632,7 +632,11 @@ int Compilation::performSingleCommand(const Job *Cmd) {
   const char **argv = Argv.data();
 
   for (auto &envPair : Cmd->getExtraEnvironment())
+#if WIN32
+    _putenv_s(envPair.first, envPair.second);
+#else
     setenv(envPair.first, envPair.second, /*replacing=*/true);
+#endif
 
   return ExecuteInPlace(ExecPath, argv);
 }

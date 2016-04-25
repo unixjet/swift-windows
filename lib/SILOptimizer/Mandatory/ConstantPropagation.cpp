@@ -877,6 +877,10 @@ processFunction(SILFunction &F, bool EnableDiagnostics,
 
         WorkList.remove(I);
         I->eraseFromParent();
+      },
+      [&]() { /* WillSucceedAction */
+      },
+      [&]() { /* WillFailAction */
       });
 
   while (!WorkList.empty()) {
@@ -1047,17 +1051,19 @@ processFunction(SILFunction &F, bool EnableDiagnostics,
 
     // Eagerly DCE. We do this after visiting all users to ensure we don't
     // invalidate the uses iterator.
-    auto UserArray = ArrayRef<SILInstruction *>(&*FoldedUsers.begin(),
-                                                FoldedUsers.size());
-    if (!UserArray.empty()) {
-      InvalidateInstructions = true;
-    }
+    if (FoldedUsers.size() != 0) {
+      auto UserArray = ArrayRef<SILInstruction *>(&*FoldedUsers.begin(),
+        FoldedUsers.size());
+      if (!UserArray.empty()) {
+        InvalidateInstructions = true;
+      }
 
-    recursivelyDeleteTriviallyDeadInstructions(UserArray, false,
-                                               [&](SILInstruction *DeadI) {
-                                                 WorkList.remove(DeadI);
-                                               });
-  }
+      recursivelyDeleteTriviallyDeadInstructions(UserArray, false,
+        [&](SILInstruction *DeadI) {
+        WorkList.remove(DeadI);
+      });
+    }
+   }
 
   // TODO: refactor this code outside of the method. Passes should not merge
   // invalidation kinds themselves.

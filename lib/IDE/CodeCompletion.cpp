@@ -4669,7 +4669,7 @@ void CodeCompletionCallbacksImpl::doneParsing() {
       Lookup.setIsDynamicLookup();
     Lookup.initializeArchetypeTransformer(CurDeclContext, ExprType);
 
-    CodeCompletionTypeContextAnalyzer TypeAnalyzer(CurDeclContext, ParsedExpr);
+    ::CodeCompletionTypeContextAnalyzer TypeAnalyzer(CurDeclContext, ParsedExpr);
     llvm::SmallVector<Type, 2> PossibleTypes;
     if (TypeAnalyzer.Analyze(PossibleTypes)) {
       Lookup.setExpectedTypes(PossibleTypes);
@@ -4683,7 +4683,7 @@ void CodeCompletionCallbacksImpl::doneParsing() {
     break;
 
   case CompletionKind::PostfixExprBeginning: {
-    CodeCompletionTypeContextAnalyzer Analyzer(CurDeclContext,
+    ::CodeCompletionTypeContextAnalyzer Analyzer(CurDeclContext,
                                                CodeCompleteTokenExpr);
     llvm::SmallVector<Type, 1> Types;
     if (Analyzer.Analyze(Types)) {
@@ -4705,7 +4705,7 @@ void CodeCompletionCallbacksImpl::doneParsing() {
   case CompletionKind::PostfixExprParen: {
     Lookup.setHaveLParen(true);
 
-    CodeCompletionTypeContextAnalyzer TypeAnalyzer(CurDeclContext,
+    ::CodeCompletionTypeContextAnalyzer TypeAnalyzer(CurDeclContext,
                                                    CodeCompleteTokenExpr);
     SmallVector<Type, 2> PossibleTypes;
     SmallVector<StringRef, 2> PossibleNames;

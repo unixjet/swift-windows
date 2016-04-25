@@ -2673,12 +2673,20 @@ public:
   void checkBranchInst(BranchInst *BI) {
     require(BI->getArgs().size() == BI->getDestBB()->bbarg_size(),
             "branch has wrong number of arguments for dest bb");
+    #if WIN32
+       std::vector<SILArgument *>::iterator iter2 = BI->getDestBB()->bbarg_begin();
+    for (auto iter1 = BI->getArgs().begin(); iter1 != BI->getArgs().end(); iter1++, iter2++) {
+      _require(((SILValue)(*iter1))->getType() == (*iter2)->getType(),
+        "branch argument types do not match arguments for dest bb"); 
+    }
+    #else
     require(std::equal(BI->getArgs().begin(), BI->getArgs().end(),
                       BI->getDestBB()->bbarg_begin(),
                       [](SILValue branchArg, SILArgument *bbArg) {
                         return branchArg->getType() == bbArg->getType();
                       }),
             "branch argument types do not match arguments for dest bb");
+    #endif
   }
 
   void checkCondBranchInst(CondBranchInst *CBI) {
@@ -2697,13 +2705,28 @@ public:
             "true branch has wrong number of arguments for dest bb");
     require(CBI->getTrueBB() != CBI->getFalseBB(),
             "identical destinations");
+#if WIN32
+    std::vector<SILArgument *>::iterator iter2 = CBI->getTrueBB()->bbarg_begin();
+    for (auto iter1 = CBI->getTrueArgs().begin(); iter1 != CBI->getTrueArgs().end(); iter1++, iter2++) {
+      _require(((SILValue)(*iter1))->getType() == (*iter2)->getType(),
+        "true branch argument types do not match arguments for dest bb"); 
+    }
+#else
     require(std::equal(CBI->getTrueArgs().begin(), CBI->getTrueArgs().end(),
                       CBI->getTrueBB()->bbarg_begin(),
                       [](SILValue branchArg, SILArgument *bbArg) {
                         return branchArg->getType() == bbArg->getType();
                       }),
             "true branch argument types do not match arguments for dest bb");
+#endif
 
+#if WIN32
+    std::vector<SILArgument *>::iterator iter4 = CBI->getFalseBB()->bbarg_begin();
+    for (auto iter3 = CBI->getFalseArgs().begin(); iter3 != CBI->getFalseArgs().end(); iter3++, iter4++) {
+      _require(((SILValue)(*iter3))->getType() == (*iter4)->getType(),
+        "false branch argument types do not match arguments for dest bb"); 
+    }
+#else
     require(CBI->getFalseArgs().size() == CBI->getFalseBB()->bbarg_size(),
             "false branch has wrong number of arguments for dest bb");
     require(std::equal(CBI->getFalseArgs().begin(), CBI->getFalseArgs().end(),
@@ -2712,6 +2735,7 @@ public:
                         return branchArg->getType() == bbArg->getType();
                       }),
             "false branch argument types do not match arguments for dest bb");
+#endif
   }
 
   void checkDynamicMethodBranchInst(DynamicMethodBranchInst *DMBI) {

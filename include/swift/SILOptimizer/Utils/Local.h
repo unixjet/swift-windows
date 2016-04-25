@@ -209,14 +209,24 @@ struct InstModCallbacks {
 /// In the future this should be extended to be less conservative with users.
 bool
 tryDeleteDeadClosure(SILInstruction *Closure,
-                     InstModCallbacks Callbacks = InstModCallbacks());
+                     InstModCallbacks Callbacks = InstModCallbacks(
+      [](SILInstruction *I) {   //DeleteInst
+        I->eraseFromParent();
+      }, 
+      [](SILInstruction *) {   //CreatedNewInst       
+      }));
 
 /// Given a SILValue argument to a partial apply \p Arg and the associated
 /// parameter info for that argument, perform the necessary cleanups to Arg when
 /// one is attempting to delete the partial apply.
 void releasePartialApplyCapturedArg(
     SILBuilder &Builder, SILLocation Loc, SILValue Arg, SILParameterInfo PInfo,
-    InstModCallbacks Callbacks = InstModCallbacks());
+    InstModCallbacks Callbacks = InstModCallbacks(
+      [](SILInstruction *I) {   //DeleteInst
+        I->eraseFromParent();
+      }, 
+      [](SILInstruction *) {   //CreatedNewInst       
+      }));
 
 /// This computes the lifetime of a single SILValue.
 ///

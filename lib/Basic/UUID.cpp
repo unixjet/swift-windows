@@ -14,46 +14,75 @@
 // sane value semantics and operators.
 //
 //===----------------------------------------------------------------------===//
-
+#if WIN32
+#include <Rpc.h>
+#else
 #include <uuid/uuid.h>
+#endif
 #include "swift/Basic/UUID.h"
 
 using namespace swift;
 
-UUID::UUID(FromRandom_t) {
-  uuid_generate_random(Value);
+swift::UUID::UUID(FromRandom_t) {
+#if WIN32
+	UuidCreate((_GUID*)&Value);
+#else
+	uuid_generate_random(Value);
+#endif
 }
 
-UUID::UUID(FromTime_t) {
-  uuid_generate_time(Value);
+swift::UUID::UUID(FromTime_t) {
+#if WIN32
+	UuidCreate((_GUID*)&Value);
+#else
+	uuid_generate_time(Value);
+#endif
 }
 
-UUID::UUID() {
-  uuid_clear(Value);
+swift::UUID::UUID() {
+#if WIN32
+	UuidCreateNil((_GUID*)&Value);
+#else
+	uuid_clear(Value);
+#endif
 }
 
-Optional<UUID> UUID::fromString(const char *s) {
-  UUID result;
-  if (uuid_parse(s, result.Value))
-    return None;
-  return result;
+Optional<swift::UUID> swift::UUID::fromString(const char *s) {
+	swift::UUID result;
+#if WIN32
+	if (UuidFromString(RPC_CSTR(s), (_GUID*)&result) == RPC_S_OK)
+#else
+	if (uuid_parse(s, result.Value))
+#endif
+		return None;
+	return result;
 }
 
-void UUID::toString(llvm::SmallVectorImpl<char> &out) const {
-  out.resize(UUID::StringBufferSize);
-  uuid_unparse_upper(Value, out.data());
-  // Pop off the null terminator.
-  assert(out.back() == '\0' && "did not null-terminate?!");
-  out.pop_back();
+void swift::UUID::toString(llvm::SmallVectorImpl<char> &out) const {
+	out.resize(UUID::StringBufferSize);
+#if WIN32
+	UuidToString((const GUID*)Value, (RPC_CSTR*)(out.data()));
+#else
+	uuid_unparse_upper(Value, out.data());
+#endif
+	// Pop off the null terminator.
+	assert(out.back() == '\0' && "did not null-terminate?!");
+	out.pop_back();
 }
 
-int UUID::compare(UUID y) const {
-  return uuid_compare(Value, y.Value);
+int swift::UUID::compare(swift::UUID y) const {
+#if WIN32
+	RPC_STATUS status;
+	return UuidCompare((GUID*)Value, (GUID*)&y, &status);
+#else
+	return uuid_compare(Value, y.Value);
+#endif
 }
 
-llvm::raw_ostream &swift::operator<<(llvm::raw_ostream &os, UUID uuid) {
-  llvm::SmallString<UUID::StringBufferSize> buf;
-  uuid.toString(buf);
-  os << buf;
-  return os;
+llvm::raw_ostream &swift::operator<<(llvm::raw_ostream &os, swift::UUID uuid) {
+	llvm::SmallString<UUID::StringBufferSize> buf;
+	uuid.toString(buf);
+	os << buf;
+	return os;
 }
+

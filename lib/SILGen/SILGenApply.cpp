@@ -3270,7 +3270,9 @@ void ArgEmitter::emitShuffle(Expr *inner,
     // fill out varargsAddrs if necessary.
     for (auto &extent : innerExtents) {
       assert(extent.Used && "didn't use all the inner tuple elements!");
-      innerParams.append(extent.Params.begin(), extent.Params.end());
+      for (auto param : extent.Params) {
+        innerParams.push_back(param);
+      }
 
       // Fill in the special destinations array.
       if (innerSpecialDests) {
