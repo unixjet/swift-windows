@@ -303,3 +303,6 @@ if(PYTHONINTERP_FOUND)
 
 endif()
 
+set_property(TARGET swift-remoteast-test APPEND_STRING PROPERTY
+  LINK_FLAGS " -Wl,--allow-multiple-definition")
+
