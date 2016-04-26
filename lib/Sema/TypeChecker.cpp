@@ -155,18 +155,11 @@ ProtocolDecl *TypeChecker::getLiteralProtocol(Expr *expr) {
   }
 
   if (auto E = dyn_cast<ObjectLiteralExpr>(expr)) {
-    Identifier name = E->getName();
-    if (name.str().equals("Color")) {
-      return getProtocol(expr->getLoc(),
-                         KnownProtocolKind::ColorLiteralConvertible);
-    } else if (name.str().equals("Image")) {
-      return getProtocol(expr->getLoc(),
-                         KnownProtocolKind::ImageLiteralConvertible);
-    } else if (name.str().equals("FileReference")) {
-      return getProtocol(expr->getLoc(),
-                         KnownProtocolKind::FileReferenceLiteralConvertible);
-    } else {
-      return nullptr;
+    switch (E->getLiteralKind()) {
+#define POUND_OBJECT_LITERAL(Name, Desc, Protocol)\
+    case ObjectLiteralExpr::Name:\
+      return getProtocol(expr->getLoc(), KnownProtocolKind::Protocol);
+#include "swift/Parse/Tokens.def"
     }
   }
 
@@ -174,22 +167,21 @@ ProtocolDecl *TypeChecker::getLiteralProtocol(Expr *expr) {
 }
 
 DeclName TypeChecker::getObjectLiteralConstructorName(ObjectLiteralExpr *expr) {
-  Identifier name = expr->getName();
-  if (name.str().equals("Color")) {
-    return DeclName(Context, Context.Id_init,
-                    { Context.getIdentifier("colorLiteralRed"),
-                      Context.getIdentifier("green"),
-                      Context.getIdentifier("blue"),
-                      Context.getIdentifier("alpha") });
-  } else if (name.str().equals("Image")) {
-    return DeclName(Context, Context.Id_init,
-                    { Context.getIdentifier("imageLiteral") });
-  } else if (name.str().equals("FileReference")) {
-    return DeclName(Context, Context.Id_init,
-                    { Context.getIdentifier("fileReferenceLiteral") });
-  } else {
-    return DeclName();
+  switch (expr->getLiteralKind()) {
+    case ObjectLiteralExpr::colorLiteral: {
+      return DeclName(Context, Context.Id_init,
+                      { Context.getIdentifier("red"),
+                        Context.getIdentifier("green"),
+                        Context.getIdentifier("blue"),
+                        Context.getIdentifier("alpha") });
+    }
+    case ObjectLiteralExpr::imageLiteral:
+    case ObjectLiteralExpr::fileLiteral: {
+      return DeclName(Context, Context.Id_init,
+                      { Context.getIdentifier("resourceName") });
+    }
   }
+  llvm_unreachable("unknown literal constructor");
 }
 
 Module *TypeChecker::getStdlibModule(const DeclContext *dc) {
@@ -2244,8 +2236,7 @@ static bool isInsideDeprecatedDeclaration(SourceRange ReferenceRange,
 void TypeChecker::diagnoseDeprecated(SourceRange ReferenceRange,
                                      const DeclContext *ReferenceDC,
                                      const AvailableAttr *Attr,
-                                     DeclName Name,
-                   std::function<void(InFlightDiagnostic&)> extraInfoHandler) {
+                                     DeclName Name) {
   // We match the behavior of clang to not report deprecation warnings
   // inside declarations that are themselves deprecated on all deployment
   // targets.
@@ -2270,30 +2261,24 @@ void TypeChecker::diagnoseDeprecated(SourceRange ReferenceRange,
     DeprecatedVersion = Attr->Deprecated.getValue();
 
   if (Attr->Message.empty() && Attr->Rename.empty()) {
-    auto diagValue = std::move(
-      diagnose(ReferenceRange.Start, diag::availability_deprecated, Name,
-               Attr->hasPlatform(), Platform, Attr->Deprecated.hasValue(),
-               DeprecatedVersion)
-        .highlight(Attr->getRange()));
-    extraInfoHandler(diagValue);
+    diagnose(ReferenceRange.Start, diag::availability_deprecated, Name,
+             Attr->hasPlatform(), Platform, Attr->Deprecated.hasValue(),
+             DeprecatedVersion)
+      .highlight(Attr->getRange());
     return;
   }
 
   if (Attr->Message.empty()) {
-    auto diagValue = std::move(
-      diagnose(ReferenceRange.Start, diag::availability_deprecated_rename, Name,
-               Attr->hasPlatform(), Platform, Attr->Deprecated.hasValue(),
-               DeprecatedVersion, Attr->Rename)
-        .highlight(Attr->getRange()));
-    extraInfoHandler(diagValue);
+    diagnose(ReferenceRange.Start, diag::availability_deprecated_rename, Name,
+             Attr->hasPlatform(), Platform, Attr->Deprecated.hasValue(),
+             DeprecatedVersion, Attr->Rename)
+      .highlight(Attr->getRange());
   } else {
     EncodedDiagnosticMessage EncodedMessage(Attr->Message);
-    auto diagValue = std::move(
-      diagnose(ReferenceRange.Start, diag::availability_deprecated_msg, Name,
-               Attr->hasPlatform(), Platform, Attr->Deprecated.hasValue(),
-               DeprecatedVersion, EncodedMessage.Message)
-        .highlight(Attr->getRange()));
-    extraInfoHandler(diagValue);
+    diagnose(ReferenceRange.Start, diag::availability_deprecated_msg, Name,
+             Attr->hasPlatform(), Platform, Attr->Deprecated.hasValue(),
+             DeprecatedVersion, EncodedMessage.Message)
+      .highlight(Attr->getRange());
   }
 
   if (!Attr->Rename.empty()) {

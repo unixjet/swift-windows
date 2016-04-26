@@ -207,29 +207,30 @@ void swift::eraseUsesOfInstruction(SILInstruction *Inst,
   }
 }
 
-void swift::eraseUsesOfValue(SILValue V) {
-  for (auto UI = V->use_begin(), E = V->use_end(); UI != E;) {
+void swift::
+collectUsesOfValue(SILValue V, llvm::SmallPtrSetImpl<SILInstruction *> &Insts) {
+  for (auto UI = V->use_begin(), E = V->use_end(); UI != E; UI++) {
     auto *User = UI->getUser();
-    UI++;
+    // Instruction has been processed.
+    if (!Insts.insert(User).second)
+      continue;
 
-    // If the instruction itself has any uses, recursively zap them so that
-    // nothing uses this instruction.
-    eraseUsesOfValue(User);
+    // Collect the users of this instruction.
+    collectUsesOfValue(User, Insts);
+  }
+}
 
-    // Walk through the operand list and delete any random instructions that
-    // will become trivially dead when this instruction is removed.
-    for (auto &Op : User->getAllOperands()) {
-      if (auto *OpI = dyn_cast<SILInstruction>(Op.get())) {
-        // Don't recursively delete the pointer we're getting in.
-        if (Op.get() != V) {
-          Op.drop();
-          recursivelyDeleteTriviallyDeadInstructions(OpI, false,
-                                                     [](SILInstruction *){});
-        }
-      }
-    }
-
-    User->eraseFromParent();
+void swift::eraseUsesOfValue(SILValue V) {
+  llvm::SmallPtrSet<SILInstruction *, 4> Insts;
+  // Collect the uses.
+  collectUsesOfValue(V, Insts);
+  // Erase the uses, we can have instructions that become dead because
+  // of the removal of these instructions, leave to DCE to cleanup.
+  // Its not safe to do recursively delete here as some of the SILInstruction
+  // maybe tracked by this set.
+  for (auto I : Insts) {
+    I->replaceAllUsesWithUndef();
+    I->eraseFromParent();
   }
 }
 
@@ -1157,9 +1158,16 @@ bool ValueLifetimeAnalysis::computeFrontier(Frontier &Fr, Mode mode) {
       // The value is not live in any of the successor blocks. This means the
       // block contains a last use of the value. The next instruction after
       // the last use is part of the frontier.
-      SILBasicBlock::iterator Iter(findLastUserInBlock(BB));
-      Fr.push_back(&*next(Iter));
-    } else if (DeadInSucc && mode != IgnoreExitEdges) {
+      SILInstruction *LastUser = findLastUserInBlock(BB);
+      if (!isa<TermInst>(LastUser)) {
+        Fr.push_back(&*next(LastUser->getIterator()));
+        continue;
+      }
+      // In case the last user is a TermInst we add all successor blocks to the
+      // frontier (see below).
+      assert(DeadInSucc && "The final using TermInst must have successors");
+    }
+    if (DeadInSucc && mode != IgnoreExitEdges) {
       // The value is not live in some of the successor blocks.
       LiveOutBlocks.insert(BB);
       for (const SILSuccessor &Succ : BB->getSuccessors()) {
@@ -1238,6 +1246,18 @@ bool ValueLifetimeAnalysis::isWithinLifetime(SILInstruction *Inst) {
       return false;
   }
   llvm_unreachable("Expected to find use of value in block!");
+}
+
+void ValueLifetimeAnalysis::dump() const {
+  llvm::errs() << "lifetime of def: " << *DefValue;
+  for (SILInstruction *Use : UserSet) {
+    llvm::errs() << "  use: " << *Use;
+  }
+  llvm::errs() << "  live blocks:";
+  for (SILBasicBlock *BB : LiveBlocks) {
+    llvm::errs() << ' ' << BB->getDebugID();
+  }
+  llvm::errs() << '\n';
 }
 
 //===----------------------------------------------------------------------===//

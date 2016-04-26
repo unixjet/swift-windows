@@ -52,6 +52,8 @@ enum CodeCompletionCommandKind {
   keyword,
   recommended,
   recommendedover,
+  mutatingvariant,
+  nonmutatingvariant,
 };
 
 CodeCompletionCommandKind getCommandKind(StringRef Command) {
@@ -61,6 +63,8 @@ CodeCompletionCommandKind getCommandKind(StringRef Command) {
   CHECK_CASE(keyword);
   CHECK_CASE(recommended);
   CHECK_CASE(recommendedover);
+  CHECK_CASE(mutatingvariant);
+  CHECK_CASE(nonmutatingvariant);
 #undef CHECK_CASE
   return CodeCompletionCommandKind::none;
 }
@@ -74,6 +78,8 @@ StringRef getCommandName(CodeCompletionCommandKind Kind) {
   CHECK_CASE(keyword)
   CHECK_CASE(recommended)
   CHECK_CASE(recommendedover)
+  CHECK_CASE(mutatingvariant);
+  CHECK_CASE(nonmutatingvariant);
 #undef CHECK_CASE
   llvm_unreachable("Cannot handle this Kind.");
 }
@@ -89,6 +95,8 @@ return true;
     CHECK_CASE(keyword)
     CHECK_CASE(recommended)
     CHECK_CASE(recommendedover)
+    CHECK_CASE(mutatingvariant);
+    CHECK_CASE(nonmutatingvariant);
 #undef CHECK_CASE
   } while (!Content.empty());
   return false;
@@ -221,6 +229,12 @@ public:
   void visitRecommendedoverField(const RecommendedoverField *Field) override {
     Kind = CodeCompletionCommandKind::recommendedover;
   }
+  void visitMutatingvariantField(const MutatingvariantField *Field) override {
+    Kind = CodeCompletionCommandKind::mutatingvariant;
+  }
+  void visitNonmutatingvariantField(const NonmutatingvariantField *Field) override {
+    Kind = CodeCompletionCommandKind::nonmutatingvariant;
+  }
   void visitText(const Text *Text) override {
     if (Kind == CodeCompletionCommandKind::none)
       return;
@@ -252,6 +266,8 @@ void getSwiftDocKeyword(const Decl* D, CommandWordsPairs &Words) {
       case ASTNodeKind::KeywordField:
       case ASTNodeKind::RecommendedField:
       case ASTNodeKind::RecommendedoverField:
+      case ASTNodeKind::MutatingvariantField:
+      case ASTNodeKind::NonmutatingvariantField:
         Extractor.walk(Part);
         break;
       default:
@@ -3212,10 +3228,9 @@ public:
 
     auto floatType = context.getFloatDecl()->getDeclaredType();
     addFromProto(LK::ColorLiteral, "", [&](Builder &builder) {
-      builder.addLeftBracket();
-      builder.addTextChunk("#Color");
+      builder.addTextChunk("#colorLiteral");
       builder.addLeftParen();
-      builder.addCallParameter(context.getIdentifier("colorLiteralRed"),
+      builder.addCallParameter(context.getIdentifier("red"),
                                floatType, false, true);
       builder.addComma();
       builder.addCallParameter(context.getIdentifier("green"), floatType,
@@ -3227,20 +3242,15 @@ public:
       builder.addCallParameter(context.getIdentifier("alpha"), floatType,
                                false, true);
       builder.addRightParen();
-      builder.addTextChunk("#");
-      builder.addRightBracket();
     });
 
     auto stringType = context.getStringDecl()->getDeclaredType();
     addFromProto(LK::ImageLiteral, "", [&](Builder &builder) {
-      builder.addLeftBracket();
-      builder.addTextChunk("#Image");
+      builder.addTextChunk("#imageLiteral");
       builder.addLeftParen();
-      builder.addCallParameter(context.getIdentifier("imageLiteral"),
+      builder.addCallParameter(context.getIdentifier("resourceName"),
                                stringType, false, true);
       builder.addRightParen();
-      builder.addTextChunk("#");
-      builder.addRightBracket();
     });
 
     // Add tuple completion (item, item).

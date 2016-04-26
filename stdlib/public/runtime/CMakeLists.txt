@@ -54,6 +54,7 @@ set(swift_runtime_sources
     Metadata.cpp
     MetadataLookup.cpp
     Once.cpp
+    Portability.cpp
     ProtocolConformance.cpp
     Reflection.cpp
     RuntimeEntrySymbols.cpp
@@ -76,7 +77,7 @@ add_swift_library(swiftRuntime IS_STDLIB IS_STDLIB_CORE
   ${swift_runtime_leaks_sources}
   ${swift_runtime_port_sources}
   C_COMPILE_FLAGS ${swift_runtime_compile_flags}
-  INSTALL_IN_COMPONENT stdlib)
+  INSTALL_IN_COMPONENT never_install)
 
 if(CMAKE_SYSTEM_NAME STREQUAL "Linux" OR CMAKE_SYSTEM_NAME STREQUAL "FreeBSD")
   add_swift_library(section_magic_begin IS_STDLIB IS_STDLIB_CORE
@@ -91,7 +92,7 @@ endif()
 
 set(object_target_list)
 foreach(sdk ${SWIFT_CONFIGURED_SDKS})
-  if("${sdk}" STREQUAL "LINUX" OR "${sdk}" STREQUAL "FREEBSD")
+  if("${sdk}" STREQUAL "LINUX" OR "${sdk}" STREQUAL "FREEBSD" OR "${sdk}" STREQUAL "ANDROID")
     foreach(arch ${SWIFT_SDK_${sdk}_ARCHITECTURES})
       set(arch_subdir "${SWIFT_SDK_${sdk}_LIB_SUBDIR}/${arch}")
 
@@ -118,4 +119,3 @@ foreach(sdk ${SWIFT_CONFIGURED_SDKS})
 endforeach()
 
 add_custom_target(section_magic ALL DEPENDS ${object_target_list})
-

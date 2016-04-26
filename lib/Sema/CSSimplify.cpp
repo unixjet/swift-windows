@@ -379,7 +379,7 @@ matchCallArguments(ArrayRef<CallArgParam> args,
       // Find all of the named, unfulfilled parameters.
       llvm::SmallVector<unsigned, 4> unfulfilledNamedParams;
       bool hasUnfulfilledUnnamedParams = false;
-      for (paramIdx = 0; paramIdx != numParams; ++paramIdx ) {
+      for (paramIdx = 0; paramIdx != numParams; ++paramIdx) {
         if (parameterBindings[paramIdx].empty()) {
           if (params[paramIdx].hasLabel())
             unfulfilledNamedParams.push_back(paramIdx);
@@ -3173,10 +3173,10 @@ ConstraintSystem::simplifyMemberConstraint(const Constraint &constraint) {
       // Determine whether or not we want to provide an optional chaining fixit or
       // a force unwrap fixit.
       bool optionalChain;
-      if (!contextualType)
+      if (!getContextualType())
         optionalChain = !(Options & ConstraintSystemFlags::PreferForceUnwrapToOptional);
       else
-        optionalChain = !contextualType->getOptionalObjectType().isNull();
+        optionalChain = !getContextualType()->getOptionalObjectType().isNull();
       auto fixKind = optionalChain ? FixKind::OptionalChaining : FixKind::ForceOptional;
 
       // Note the fix.
@@ -3206,10 +3206,10 @@ ConstraintSystem::simplifyMemberConstraint(const Constraint &constraint) {
     // Determine whether or not we want to provide an optional chaining fixit or
     // a force unwrap fixit.
     bool optionalChain;
-    if (!contextualType)
+    if (!getContextualType())
       optionalChain = !(Options & ConstraintSystemFlags::PreferForceUnwrapToOptional);
     else
-      optionalChain = !contextualType->getOptionalObjectType().isNull();
+      optionalChain = !getContextualType()->getOptionalObjectType().isNull();
     auto fixKind = optionalChain ? FixKind::OptionalChaining : FixKind::ForceOptional;
 
     // Note the fix.

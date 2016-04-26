@@ -51,13 +51,11 @@ void
 swift_reflection_addReflectionInfo(SwiftReflectionContextRef ContextRef,
                                    const char *ImageName,
                                    swift_reflection_section_t fieldmd,
+                                   swift_reflection_section_t builtin,
+                                   swift_reflection_section_t assocty,
                                    swift_reflection_section_t typeref,
-                                   swift_reflection_section_t reflstr,
-                                   swift_reflection_section_t assocty);
+                                   swift_reflection_section_t reflstr);
 
-
-/// Clear any caching of field type information for all known heap instances.
-void swift_reflection_clearCaches(SwiftReflectionContextRef Context);
 
 /// Returns an opaque type reference for a metadata pointer, or
 /// NULL if one can't be constructed.
@@ -70,11 +68,15 @@ swift_typeinfo_t
 swift_reflection_infoForTypeRef(SwiftReflectionContextRef ContextRef,
                                 swift_typeref_t OpaqueTypeRef);
 
-/// Returns the information about a stored property by index.
-swift_fieldinfo_t
+/// Returns the information about a child by index.
+swift_childinfo_t
 swift_reflection_infoForField(SwiftReflectionContextRef ContextRef,
                               swift_typeref_t OpaqueTypeRef,
                               unsigned Index);
+
+/// Returns a fully instantiated typeref for a generic argument by index.
+unsigned
+swift_reflection_genericArgumentCountOfTypeRef(swift_typeref_t OpaqueTypeRef);
 
 /// Returns a fully instantiated typeref for a generic argument by index.
 swift_typeref_t

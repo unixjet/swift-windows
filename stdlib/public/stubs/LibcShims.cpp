@@ -24,7 +24,7 @@
 #include "../SwiftShims/LibcShims.h"
 
 static_assert(std::is_same<ssize_t, swift::__swift_ssize_t>::value,
-              "__swift_ssize_t is wrong");
+              "__swift_ssize_t must be defined as equivalent to ssize_t");
 
 namespace swift {
 
@@ -63,7 +63,7 @@ int _swift_stdlib_close(int fd) { return close(fd); }
 #if defined(__APPLE__)
 #include <malloc/malloc.h>
 size_t _swift_stdlib_malloc_size(const void *ptr) { return malloc_size(ptr); }
-#elif defined(__GNU_LIBRARY__) || defined(__CYGWIN__)
+#elif defined(__GNU_LIBRARY__) || defined(__CYGWIN__) || defined(__ANDROID__)
 #include <malloc.h>
 size_t _swift_stdlib_malloc_size(const void *ptr) {
   return malloc_usable_size(const_cast<void *>(ptr));

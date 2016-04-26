@@ -77,6 +77,14 @@ function(_add_variant_c_compile_link_flags)
   list(APPEND result
     "-isysroot" "${SWIFT_SDK_${CFLAGS_SDK}_PATH}")
 
+  if("${CFLAGS_SDK}" STREQUAL "ANDROID")
+    list(APPEND result
+      "--sysroot=${SWIFT_ANDROID_SDK_PATH}"
+      # Use the linker included in the Android NDK.
+      "-B" "${SWIFT_ANDROID_NDK_PATH}/toolchains/arm-linux-androideabi-${SWIFT_ANDROID_NDK_GCC_VERSION}/prebuilt/linux-x86_64/arm-linux-androideabi/bin/")
+  endif()
+
+
   if("${CMAKE_SYSTEM_NAME}" STREQUAL "Darwin")
     
     # Check if there's a specific iOS deployment version needed for this invocation
@@ -160,6 +168,13 @@ function(_add_variant_c_compile_flags)
                        "-fcoverage-mapping")
   endif()
 
+  if("${CFLAGS_SDK}" STREQUAL "ANDROID")
+    list(APPEND result
+        "-I${SWIFT_ANDROID_NDK_PATH}/sources/cxx-stl/llvm-libc++/libcxx/include"
+        "-I${SWIFT_ANDROID_NDK_PATH}/sources/cxx-stl/llvm-libc++abi/libcxxabi/include"
+        "-I${SWIFT_ANDROID_NDK_PATH}/sources/android/support/include")
+  endif()
+
   set("${CFLAGS_RESULT_VAR_NAME}" "${result}" PARENT_SCOPE)
 endfunction()
 
@@ -231,6 +246,12 @@ function(_add_variant_link_flags)
     # NO extra libraries required.
   elseif("${LFLAGS_SDK}" STREQUAL "WINDOWS")
     # No extra libraries required.
+  elseif("${LFLAGS_SDK}" STREQUAL "ANDROID")
+    list(APPEND result
+        "-ldl"
+        "-L${SWIFT_ANDROID_NDK_PATH}/toolchains/arm-linux-androideabi-${SWIFT_ANDROID_NDK_GCC_VERSION}/prebuilt/linux-x86_64/lib/gcc/arm-linux-androideabi/${SWIFT_ANDROID_NDK_GCC_VERSION}"
+        "${SWIFT_ANDROID_NDK_PATH}/sources/cxx-stl/llvm-libc++/libs/armeabi-v7a/libc++_shared.so"
+        "-L${SWIFT_ANDROID_ICU_UC}" "-L${SWIFT_ANDROID_ICU_I18N}")
   else()
     list(APPEND result "-lobjc")
   endif()
@@ -375,6 +396,14 @@ function(_compile_swift_files dependency_target_out_var_name)
     list(APPEND swift_flags "-Xfrontend" "-enable-resilience")
   endif()
 
+  if(SWIFT_STDLIB_ENABLE_REFLECTION_METADATA AND SWIFTFILE_IS_STDLIB)
+    list(APPEND swift_flags "-Xfrontend" "-enable-reflection-metadata")
+  endif()
+
+  if(SWIFT_STDLIB_ENABLE_REFLECTION_NAMES AND SWIFTFILE_IS_STDLIB)
+    list(APPEND swift_flags "-Xfrontend" "-enable-reflection-names")
+  endif()
+
   if(SWIFT_EMIT_SORTED_SIL_OUTPUT)
     list(APPEND swift_flags "-Xfrontend" "-emit-sorted-sil")
   endif()
@@ -383,6 +412,8 @@ function(_compile_swift_files dependency_target_out_var_name)
   if(SWIFTFILE_IS_STDLIB_CORE)
     list(APPEND swift_flags
         "-nostdimport" "-parse-stdlib" "-module-name" "Swift")
+    list(APPEND swift_flags
+        "-Xfrontend" "-enable-reflection-builtins")
     list(APPEND swift_flags "-Xfrontend" "-group-info-path"
                             "-Xfrontend" "${GROUP_INFO_JSON_FILE}")
     if (NOT SWIFT_STDLIB_ENABLE_RESILIENCE)
@@ -1003,7 +1034,7 @@ function(_add_swift_library_single target name)
     set_target_properties("${target}"
       PROPERTIES
       INSTALL_NAME_DIR "${install_name_dir}")
-  elseif("${CMAKE_SYSTEM_NAME}" STREQUAL "Linux")
+  elseif("${CMAKE_SYSTEM_NAME}" STREQUAL "Linux" AND NOT "${SWIFTLIB_SINGLE_SDK}" STREQUAL "ANDROID")
     set_target_properties("${target}"
       PROPERTIES
       INSTALL_RPATH "$ORIGIN:/usr/lib/swift/linux")
@@ -1848,7 +1879,8 @@ function(_add_swift_executable_single name)
       PROPERTIES FOLDER "Swift executables")
 endfunction()
 
-# Add an executable for the target machine.
+# Add an executable for each target variant. Executables are given suffixes
+# with the variant SDK and ARCH.
 #
 # See add_swift_executable for detailed documentation.
 #
@@ -1962,6 +1994,10 @@ endfunction()
 #
 #   source1 ...
 #     Sources to add into this executable.
+#
+# Note:
+#   Host executables are not given a variant suffix. To build an executable for
+#   each SDK and ARCH variant, use add_swift_target_executable.
 function(add_swift_executable name)
   # Parse the arguments we were given.
   cmake_parse_arguments(SWIFTEXE
@@ -1982,7 +2018,6 @@ function(add_swift_executable name)
 
   set(SWIFTEXE_SOURCES ${SWIFTEXE_UNPARSED_ARGUMENTS})
 
-  # Note: host tools don't get a variant suffix.
   _add_swift_executable_single(
       ${name}
       ${SWIFTEXE_SOURCES}

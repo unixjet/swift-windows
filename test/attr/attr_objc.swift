@@ -1164,7 +1164,7 @@ class infer_instanceVar1 {
   // CHECK-LABEL: @objc var var_CFunctionPointer_1: @convention(c) () -> ()
   var var_CFunctionPointer_1: @convention(c) () -> ()
   // CHECK-LABEL: @objc var var_CFunctionPointer_invalid_1: Int
-  var var_CFunctionPointer_invalid_1: @convention(c) Int // expected-error {{attribute only applies to syntactic function types}}
+  var var_CFunctionPointer_invalid_1: @convention(c) Int // expected-error {{@convention attribute only applies to function types}}
   // CHECK-LABEL: {{^}} var var_CFunctionPointer_invalid_2: @convention(c) PlainStruct -> Int
   var var_CFunctionPointer_invalid_2: @convention(c) PlainStruct -> Int // expected-error {{'PlainStruct -> Int' is not representable in Objective-C, so it cannot be used with '@convention(c)'}}
   
@@ -2028,8 +2028,12 @@ class ConformsToProtocolThrowsObjCName1 : ProtocolThrowsObjCName {
   @objc func doThing(_ x: String) throws -> String { return x } // okay
 }
 
-class ConformsToProtocolThrowsObjCName2 : ProtocolThrowsObjCName { // expected-note{{class 'ConformsToProtocolThrowsObjCName2' declares conformance to protocol 'ProtocolThrowsObjCName' here}}
-  @objc func doThing(_ x: Int) throws -> String { return "" } // expected-error{{Objective-C method 'doThing:error:' provided by method 'doThing' conflicts with optional requirement method 'doThing' in protocol 'ProtocolThrowsObjCName'}}
+class ConformsToProtocolThrowsObjCName2 : ProtocolThrowsObjCName {
+  @objc func doThing(_ x: Int) throws -> String { return "" }
+  // expected-warning@-1{{instance method 'doThing' nearly matches optional requirement 'doThing' of protocol 'ProtocolThrowsObjCName'}}
+  // expected-note@-2{{move 'doThing' to an extension to silence this warning}}
+  // expected-note@-3{{make 'doThing' private to silence this warning}}{{9-9=private }}
+  // expected-note@-4{{candidate has non-matching type '(Int) throws -> String'}}
 }
 
 @objc class DictionaryTest {

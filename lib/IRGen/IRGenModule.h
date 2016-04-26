@@ -114,6 +114,7 @@ namespace irgen {
   class FixedTypeInfo;
   class ForeignFunctionInfo;
   class FormalType;
+  class HeapLayout;
   class IRGenDebugInfo;
   class IRGenFunction;
   class LinkEntity;
@@ -125,8 +126,6 @@ namespace irgen {
   enum class ReferenceCounting : unsigned char;
 
 class IRGenModule;
-
-const uint32_t REFLECTION_VERSION = 1;
 
 /// A type descriptor for a field type accessor.
 class FieldTypeInfo {
@@ -214,14 +213,8 @@ public:
   /// Emit type metadata records for types without explicit protocol conformance.
   void emitTypeMetadataRecords();
 
-  /// Emit field type records for nominal types for reflection purposes.
-  void emitFieldTypeMetadataRecords();
-
-  /// Emit associated type references for nominal types for reflection purposes.
-  void emitAssociatedTypeMetadataRecords();
-
-  // Stamp the binary with the major and minor language version.
-  void emitSwiftReflectionVersion();
+  /// Emit reflection metadata records for nominal types.
+  void emitReflectionMetadataRecords();
 
   /// Emit everything which is reachable from already emitted IR.
   void emitLazyDefinitions();
@@ -394,6 +387,7 @@ public:
     llvm::PointerType *WitnessTableTy;
     llvm::PointerType *ObjCSELTy;
     llvm::PointerType *FunctionPtrTy;
+    llvm::PointerType *CaptureDescriptorPtrTy;
   };
   union {
     llvm::PointerType *Int8PtrPtrTy;   /// i8**
@@ -617,11 +611,12 @@ public:
                                 llvm::Function *fn);
   llvm::Constant *emitProtocolConformances();
   llvm::Constant *emitTypeMetadataRecords();
-  llvm::Constant *emitFieldTypeMetadataRecords();
-  llvm::Constant *emitAssociatedTypeMetadataRecords();
-  llvm::Constant *emitSwiftReflectionVersion();
+  void emitReflectionMetadataRecords();
   llvm::Constant *getAddrOfStringForTypeRef(StringRef Str);
   llvm::Constant *getAddrOfFieldName(StringRef Name);
+  llvm::Constant *getAddrOfCaptureDescriptor(SILFunction &SILFn,
+                                             HeapLayout &Layout);
+  std::string getBuiltinTypeMetadataSectionName();
   std::string getFieldTypeMetadataSectionName();
   std::string getAssociatedTypeMetadataSectionName();
   std::string getReflectionStringsSectionName();
@@ -680,6 +675,9 @@ private:
   SmallVector<CanType, 4> RuntimeResolvableTypes;
   /// Collection of nominal types to generate field metadata records.
   SmallVector<const NominalTypeDecl *, 4> NominalTypeDecls;
+  /// Collection of extensions to generate associated type metadata records
+  /// if they added conformance to a protocol with associated type requirements.
+  SmallVector<const ExtensionDecl *, 4> ExtensionDecls;
   /// List of ExtensionDecls corresponding to the generated
   /// categories.
   SmallVector<ExtensionDecl*, 4> ObjCCategoryDecls;

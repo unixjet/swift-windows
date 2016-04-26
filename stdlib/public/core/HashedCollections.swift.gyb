@@ -261,12 +261,8 @@ internal func _stdlib_NSObject_isEqual(_ lhs: AnyObject, _ rhs: AnyObject) -> Bo
 /// Like `UnsafeMutablePointer<Unmanaged<AnyObject>>`, or `id
 /// __unsafe_unretained *` in Objective-C ARC.
 internal struct _UnmanagedAnyObjectArray {
-  // `UnsafeMutablePointer<Unmanaged<AnyObject>>` fails because of:
-  // <rdar://problem/16836348> IRGen: Couldn't find conformance
-
-  /// Underlying pointer, typed as an integer to escape from reference
-  /// counting.
-  internal var value: UnsafeMutablePointer<Int>
+  /// Underlying pointer, Unmanaged to escape reference counting.
+  internal var value: UnsafeMutablePointer<Unmanaged<AnyObject>>
 
   internal init(_ up: UnsafeMutablePointer<AnyObject>) {
     self.value = UnsafeMutablePointer(up)
@@ -279,10 +275,10 @@ internal struct _UnmanagedAnyObjectArray {
 
   internal subscript(i: Int) -> AnyObject {
     get {
-      return _reinterpretCastToAnyObject(value[i])
+      return value[i].takeUnretainedValue()
     }
     nonmutating set(newValue) {
-      value[i] = unsafeBitCast(newValue, to: Int.self)
+      value[i] = Unmanaged.passUnretained(newValue)
     }
   }
 }
@@ -3383,7 +3379,7 @@ internal enum _Variant${Self}Storage<${TypeParametersDecl}> : _HashStorage {
         let idealBucket = nativeStorage._bucket(nativeStorage.key(at: b))
 
         // Does this element belong between start and hole?  We need
-        // two separate tests depending on whether [start,hole] wraps
+        // two separate tests depending on whether [start, hole] wraps
         // around the end of the buffer
         let c0 = idealBucket >= start
         let c1 = idealBucket <= hole
@@ -3772,7 +3768,7 @@ elif Self == 'Dictionary':
 ///
 /// 2. Subscripting with an index, yielding a key-value pair:
 ///
-///        (k,v) = d[i]"""
+///        (k, v) = d[i]"""
 }%
 
 ${SubscriptingWithIndexDoc}

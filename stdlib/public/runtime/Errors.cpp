@@ -32,8 +32,9 @@
 #include "swift/Basic/Demangle.h"
 #if !defined(_MSC_VER)
 #include <cxxabi.h>
-#endif
-#if !defined(__CYGWIN__) && !defined(_MSC_VER)
+#if !defined(__CYGWIN__) && !defined(__ANDROID__) && !defined(_MSC_VER)
+// execinfo.h is not available on Android. Checks in this file ensure that
+// fatalError behaves as expected, but without stack traces.
 #include <execinfo.h>
 #endif
 
@@ -47,7 +48,7 @@ enum: uint32_t {
 };
 } // end namespace FatalErrorFlags
 
-#if !defined(__CYGWIN__) && !defined(_MSC_VER)
+#if !defined(__CYGWIN__) && !defined(__ANDROID__) && !defined(_MSC_VER)
 LLVM_ATTRIBUTE_ALWAYS_INLINE
 static bool
 isIdentifier(char c)
@@ -216,7 +217,7 @@ reportNow(uint32_t flags, const char *message)
 #ifdef __APPLE__
   asl_log(NULL, NULL, ASL_LEVEL_ERR, "%s", message);
 #endif
-#if !defined(__CYGWIN__) && !defined(_MSC_VER)
+#if !defined(__CYGWIN__) && !defined(__ANDROID__) && !defined(_MSC_VER)
   if (flags & FatalErrorFlags::ReportBacktrace) {
     fputs("Current stack trace:\n", stderr);
     int count = 0;
