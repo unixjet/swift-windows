@@ -1246,7 +1246,11 @@ extern "C" char *swift_demangle(const char *mangledName,
 
   // If the output buffer is not provided, malloc memory ourselves.
   if (outputBuffer == nullptr || *outputBufferSize == 0) {
+#if defined(_MSC_VER)
+    return _strdup(result.c_str());
+#else
     return strdup(result.c_str());
+#endif
   }
 
   // Indicate a failure if the result does not fit and will be truncated

@@ -50,15 +50,27 @@ int _swift_stdlib_memcmp(const void *s1, const void *s2, __swift_size_t n) {
 }
 
 __swift_ssize_t _swift_stdlib_read(int fd, void *buf, __swift_size_t nbyte) {
+#if defined(_MSC_VER)
+  return _read(fd, buf, nbyte);
+#else
   return read(fd, buf, nbyte);
+#endif
 }
 
 __swift_ssize_t _swift_stdlib_write(int fd, const void *buf,
                                     __swift_size_t nbyte) {
+#if defined(_MSC_VER)
+  return _write(fd, buf, nbyte);
+#else
   return write(fd, buf, nbyte);
+#endif
 }
 
+#if defined(_MSC_VER)
+int _swift_stdlib_close(int fd) { return _close(fd); }
+#else
 int _swift_stdlib_close(int fd) { return close(fd); }
+#endif
 
 #if defined(__APPLE__)
 #include <malloc/malloc.h>

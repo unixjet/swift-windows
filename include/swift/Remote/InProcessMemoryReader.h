@@ -20,7 +20,9 @@
 #include "swift/Remote/MemoryReader.h"
 
 #include <memory>
+#if !defined(_MSC_VER)
 #include <dlfcn.h>
+#endif
 
 namespace swift {
 namespace remote {
@@ -37,8 +39,12 @@ class InProcessMemoryReader final : public MemoryReader {
   }
 
   RemoteAddress getSymbolAddress(const std::string &name) override {
+#if defined(_MSC_VER)
+    return RemoteAddress(nullptr);
+#else
     auto pointer = dlsym(RTLD_DEFAULT, name.c_str());
     return RemoteAddress(pointer);
+#endif
   }
 
   bool readString(RemoteAddress address, std::string &dest) override {
