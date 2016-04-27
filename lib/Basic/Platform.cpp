@@ -97,8 +97,11 @@ StringRef swift::getPlatformNameForTriple(const llvm::Triple &triple) {
   if (triple.isOSFreeBSD())
     return "freebsd";
 
-  if (triple.isOSWindows())
+  if (triple.isKnownWindowsMSVCEnvironment())
     return  "windows";
+
+  if (triple.isWindowsCygwinEnvironment())
+    return  "cygwin";
 
   return "";
 }
