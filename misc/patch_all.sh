@@ -61,8 +61,7 @@ do
   grep 'target x86_64' $f > /dev/null
   if [ $? -eq 0 ]
   then
-#    sed -e 's/>-target/>-Wno-macro-redefined -target/' $f  > tmp.out
-    sed -e 's/-fms-extensions /-fms-extensions -Wno-macro-redefined /' $f  > tmp.out
+    sed -e 's/windows-msvc -isysroot/windows-msvc -Wno-macro-redefined -isysroot/' $f  > tmp.out
     mv tmp.out $f
   fi
 
