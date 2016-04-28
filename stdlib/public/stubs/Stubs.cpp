@@ -252,7 +252,8 @@ extern "C" uint64_t swift_float80ToString(char *Buffer, size_t BufferLength,
 }
 
 /// \param[out] LinePtr Replaced with the pointer to the malloc()-allocated
-/// line.  Can be NULL if no characters were read.
+/// line.  Can be NULL if no characters were read. This buffer should be
+/// freed by the caller if this function returns a positive value.
 ///
 /// \returns Size of character data returned in \c LinePtr, or -1
 /// if an error occurred, or EOF was reached.
@@ -264,22 +265,31 @@ extern "C" ssize_t swift_stdlib_readLine_stdin(char **LinePtr) {
 
   int Capacity = 0;
   ssize_t Pos = 0;
-  char *ReadBuf = *LinePtr;
+  char *ReadBuf = nullptr;
+
+  _lock_file(stdin);
 
   for (;;) {
-    int ch = getc(stdin);
-    if (ferror(stdin))
+    int ch = _fgetc_nolock(stdin);
+
+    if (ferror(stdin) || (ch == EOF && Pos == 0)) {
+      if (ReadBuf)
+        free(ReadBuf);
+      _unlock_file(stdin);
       return -1;
-    if (ch == EOF && Pos == 0)
-      return -1;
+    }
 
     if (Capacity - Pos <= 1) {
       // Capacity changes to 128, 128*2, 128*4, 128*8, ...
       Capacity = Capacity ? Capacity * 2 : 128;
-      ReadBuf = static_cast<char *>(realloc(ReadBuf, Capacity));
-      if (ReadBuf == nullptr)
+      char *NextReadBuf = static_cast<char *>(realloc(ReadBuf, Capacity));
+      if (NextReadBuf == nullptr) {
+        if (ReadBuf)
+          free(ReadBuf);
+        _unlock_file(stdin);
         return -1;
-      *LinePtr = ReadBuf;
+      }
+      ReadBuf = NextReadBuf;
     }
 
     if (ch == EOF)
@@ -290,6 +300,8 @@ extern "C" ssize_t swift_stdlib_readLine_stdin(char **LinePtr) {
   }
 
   ReadBuf[Pos] = '\0';
+  *LinePtr = ReadBuf;
+  _unlock_file(stdin);
   return Pos;
 #else
   size_t Capacity = 0;
