@@ -583,7 +583,7 @@ public protocol BinaryFloatingPoint: FloatingPoint, FloatLiteralConvertible {
   /// `value` rounded to the closest representable `Self`.
   init(_ value: Double)
 
-#if !os(Windows) && (arch(i386) || arch(x86_64))
+#if !os(Windows) && !os(Cygwin) && (arch(i386) || arch(x86_64))
   /// `value` rounded to the closest representable `Self`.
   init(_ value: Float80)
 #endif
