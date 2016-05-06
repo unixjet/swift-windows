@@ -1561,6 +1561,10 @@ struct TargetClassMetadata : public TargetHeapMetadata<Runtime> {
   /// that the type metadata header is present.
   StoredPointer Data;
 
+  static constexpr StoredPointer offsetToData() {
+    return offsetof(TargetClassMetadata, Data);
+  }
+
   /// Is this object a valid swift type metadata?
   bool isTypeMetadata() const {
     return (Data & 1);
@@ -1655,7 +1659,7 @@ public:
     Flags = flags;
   }
 
-  StoredPointer getInstanceSize() const {
+  StoredSize getInstanceSize() const {
     assert(isTypeMetadata());
     return InstanceSize;
   }
@@ -1769,7 +1773,7 @@ using ClassMetadata = TargetClassMetadata<InProcess>;
 ///   captures (these aren't in the DATA segment, however).
 /// - a list of GenericMetadataSource objects - each element is a pair of:
 ///   - MangledTypeName (for a GenericTypeParameterTypeRef)
-///   - EncodededMetadataSource (an encoded string like TypeRefs, but describe
+///   - EncodedMetadataSource (an encoded string like TypeRefs, but describe
 ///     the method of crawling to the metadata for that generic type parameter.
 struct CaptureDescriptor {
 public:
@@ -2170,12 +2174,12 @@ struct TargetTupleTypeMetadata : public TargetMetadata<Runtime> {
     }
   };
 
-  TargetPointer<Runtime, Element> getElements() {
-    return reinterpret_cast<TargetPointer<Runtime, Element>>(this + 1);
+  Element *getElements() {
+    return reinterpret_cast<Element*>(this + 1);
   }
 
-  TargetPointer<Runtime, const Element> getElements() const {
-    return reinterpret_cast<TargetPointer<Runtime, const Element>>(this + 1);
+  const Element *getElements() const {
+    return reinterpret_cast<const Element*>(this + 1);
   }
 
   const Element &getElement(unsigned i) const {

@@ -120,7 +120,17 @@ class TypeDecoder {
     case NodeKind::Protocol: {
       auto moduleName = Node->getChild(0)->getText();
       auto name = Node->getChild(1)->getText();
-      return Builder.createProtocolType(moduleName, name);
+
+      // Consistent handling of protocols and protocol compositions
+      auto protocolList = Demangle::NodeFactory::create(NodeKind::ProtocolList);
+      auto typeList = Demangle::NodeFactory::create(NodeKind::TypeList);
+      auto type = Demangle::NodeFactory::create(NodeKind::Type);
+      type->addChild(Node);
+      typeList->addChild(type);
+      protocolList->addChild(typeList);
+
+      auto mangledName = Demangle::mangleNode(protocolList);
+      return Builder.createProtocolType(mangledName, moduleName, name);
     }
     case NodeKind::DependentGenericParamType: {
       auto depth = Node->getChild(0)->getIndex();
@@ -162,15 +172,39 @@ class TypeDecoder {
       return decodeMangledType(Node->getChild(0));
     case NodeKind::NonVariadicTuple:
     case NodeKind::VariadicTuple: {
-      std::vector<BuiltType> Elements;
-      for (auto element : *Node) {
-        auto elementType = decodeMangledType(element);
+      std::vector<BuiltType> elements;
+      std::string labels;
+      for (auto &element : *Node) {
+        if (element->getKind() != NodeKind::TupleElement)
+          return BuiltType();
+
+        // If the tuple element is labelled, add its label to 'labels'.
+        unsigned typeChildIndex = 0;
+        if (element->getChild(0)->getKind() == NodeKind::TupleElementName) {
+          // Add spaces to terminate all the previous labels if this
+          // is the first we've seen.
+          if (labels.empty()) labels.append(elements.size(), ' ');
+
+          // Add the label and its terminator.
+          labels += element->getChild(0)->getText();
+          labels += ' ';
+          typeChildIndex = 1;
+
+        // Otherwise, add a space if a previous element had a label.
+        } else if (!labels.empty()) {
+          labels += ' ';
+        }
+
+        // Decode the element type.
+        BuiltType elementType =
+          decodeMangledType(element->getChild(typeChildIndex));
         if (!elementType)
           return BuiltType();
-        Elements.push_back(elementType);
+
+        elements.push_back(elementType);
       }
-      bool Variadic = (Node->getKind() == NodeKind::VariadicTuple);
-      return Builder.createTupleType(Elements, Variadic);
+      bool variadic = (Node->getKind() == NodeKind::VariadicTuple);
+      return Builder.createTupleType(elements, std::move(labels), variadic);
     }
     case NodeKind::TupleElement:
       if (Node->getChild(0)->getKind() == NodeKind::TupleElementName)
@@ -208,6 +242,12 @@ class TypeDecoder {
       if (!base)
         return BuiltType();
       return Builder.createWeakStorageType(base);
+    }
+    case NodeKind::SILBoxType: {
+      auto base = decodeMangledType(Node->getChild(0));
+      if (!base)
+        return BuiltType();
+      return Builder.createSILBoxType(base);
     }
     default:
       return BuiltType();
@@ -391,6 +431,10 @@ private:
   using OwnedCaptureDescriptor =
     std::unique_ptr<const CaptureDescriptor, delete_with_free>;
 
+  /// Cached isa mask.
+  StoredPointer isaMask;
+  bool hasIsaMask = false;
+
 public:
   BuilderType Builder;
 
@@ -422,6 +466,19 @@ public:
     return swift::remote::decodeMangledType(Builder, Node);
   }
 
+  /// Get the remote process's swift_isaMask.
+  std::pair<bool, StoredPointer> readIsaMask() {
+    auto address = Reader->getSymbolAddress("swift_isaMask");
+    if (!address)
+      return {false, 0};
+
+    if (!Reader->readInteger(address, &isaMask))
+      return {false, 0};
+
+    hasIsaMask = true;
+    return {true, isaMask};
+  }
+
   /// Given a remote pointer to metadata, attempt to discover its MetadataKind.
   std::pair<bool, MetadataKind>
   readKindFromMetadata(StoredPointer MetadataAddress) {
@@ -429,6 +486,51 @@ public:
     if (!meta) return {false, MetadataKind::Opaque};
 
     return {true, meta->getKind()};
+  }
+
+  /// Given a remote pointer to class metadata, attempt to read its superclass.
+  StoredPointer
+  readSuperClassFromClassMetadata(StoredPointer MetadataAddress) {
+    auto meta = readMetadata(MetadataAddress);
+    if (!meta || meta->getKind() != MetadataKind::Class)
+      return StoredPointer();
+
+    auto classMeta = cast<TargetClassMetadata<Runtime>>(meta);
+    return classMeta->SuperClass;
+  }
+
+  /// Given a remote pointer to class metadata, attempt to discover its class
+  /// instance size and alignment.
+  std::tuple<bool, unsigned, unsigned>
+  readInstanceSizeAndAlignmentFromClassMetadata(StoredPointer MetadataAddress) {
+    auto superMeta = readMetadata(MetadataAddress);
+    if (!superMeta || superMeta->getKind() != MetadataKind::Class)
+      return std::make_tuple(false, 0, 0);
+
+    auto super = cast<TargetClassMetadata<Runtime>>(superMeta);
+
+    // See swift_initClassMetadata_UniversalStrategy()
+    uint32_t size, align;
+    if (super->isTypeMetadata()) {
+      size = super->getInstanceSize();
+      align = super->getInstanceAlignMask() + 1;
+    } else {
+      // The following algorithm only works on the non-fragile Apple runtime.
+
+      // Grab the RO-data pointer.  This part is not ABI.
+      StoredPointer roDataPtr = readObjCRODataPtr(MetadataAddress);
+      if (!roDataPtr)
+        return std::make_tuple(false, 0, 0);
+
+      auto address = roDataPtr + sizeof(uint32_t) * 2;
+
+      align = 16; // malloc alignment guarantee
+
+      if (!Reader->readInteger(RemoteAddress(address), &size))
+        return std::make_tuple(false, 0, 0);
+    }
+
+    return std::make_tuple(true, size, align);
   }
 
   /// Given a remote pointer to metadata, attempt to turn it into a type.
@@ -449,24 +551,35 @@ public:
     case MetadataKind::Optional:
       return readNominalTypeFromMetadata(Meta);
     case MetadataKind::Tuple: {
-      auto TupleMeta = cast<TargetTupleTypeMetadata<Runtime>>(Meta);
-      std::vector<BuiltType> Elements;
-      StoredPointer ElementAddress = MetadataAddress +
+      auto tupleMeta = cast<TargetTupleTypeMetadata<Runtime>>(Meta);
+
+      std::vector<BuiltType> elementTypes;
+      elementTypes.reserve(tupleMeta->NumElements);
+
+      StoredPointer elementAddress = MetadataAddress +
         sizeof(TargetTupleTypeMetadata<Runtime>);
       using Element = typename TargetTupleTypeMetadata<Runtime>::Element;
-      for (StoredPointer i = 0; i < TupleMeta->NumElements; ++i,
-           ElementAddress += sizeof(Element)) {
-        Element E;
-        if (!Reader->readBytes(RemoteAddress(ElementAddress),
-                               (uint8_t*)&E, sizeof(Element)))
+      for (StoredPointer i = 0; i < tupleMeta->NumElements; ++i,
+           elementAddress += sizeof(Element)) {
+        Element element;
+        if (!Reader->readBytes(RemoteAddress(elementAddress),
+                               (uint8_t*)&element, sizeof(Element)))
           return BuiltType();
 
-        if (auto ElementTypeRef = readTypeFromMetadata(E.Type))
-          Elements.push_back(ElementTypeRef);
+        if (auto elementType = readTypeFromMetadata(element.Type))
+          elementTypes.push_back(elementType);
         else
           return BuiltType();
       }
-      return Builder.createTupleType(Elements, /*variadic*/ false);
+
+      // Read the labels string.
+      std::string labels;
+      if (tupleMeta->Labels &&
+          !Reader->readString(RemoteAddress(tupleMeta->Labels), labels))
+        return BuiltType();
+
+      return Builder.createTupleType(elementTypes, std::move(labels),
+                                     /*variadic*/ false);
     }
     case MetadataKind::Function: {
       auto Function = cast<TargetFunctionTypeMetadata<Runtime>>(Meta);
@@ -530,8 +643,16 @@ public:
       if (!Instance) return BuiltType();
       return Builder.createMetatypeType(Instance);
     }
-    case MetadataKind::ObjCClassWrapper:
-      return Builder.getUnnamedObjCClassType();
+    case MetadataKind::ObjCClassWrapper: {
+      auto objcWrapper = cast<TargetObjCClassWrapperMetadata<Runtime>>(Meta);
+      auto classAddress = objcWrapper->Class;
+
+      std::string className;
+      if (!readObjCClassName(classAddress, className))
+        return BuiltType();
+
+      return Builder.createObjCClassType(std::move(className));
+    }
     case MetadataKind::ExistentialMetatype: {
       auto Exist = cast<TargetExistentialMetatypeMetadata<Runtime>>(Meta);
       auto Instance = readTypeFromMetadata(Exist->InstanceType);
@@ -551,7 +672,7 @@ public:
       return Builder.createForeignClassType(std::move(name));
     }
     case MetadataKind::HeapLocalVariable:
-        return Builder.getUnnamedForeignClassType(); // FIXME?
+      return Builder.getUnnamedForeignClassType(); // FIXME?
     case MetadataKind::HeapGenericLocalVariable:
       return Builder.getUnnamedForeignClassType(); // FIXME?
     case MetadataKind::ErrorObject:
@@ -559,6 +680,23 @@ public:
     case MetadataKind::Opaque:
       return Builder.getOpaqueType(); // FIXME?
     }
+  }
+
+  /// Read the isa pointer of a class or closure context instance and apply
+  /// the isa mask.
+  std::pair<bool, StoredPointer> readMetadataFromInstance(
+      StoredPointer ObjectAddress) {
+    auto isaMask = readIsaMask();
+    if (!isaMask.first)
+      return {false, 0};
+
+    StoredPointer MetadataAddress;
+    if (!Reader->readBytes(RemoteAddress(ObjectAddress),
+                           (uint8_t*)&MetadataAddress,
+                           sizeof(StoredPointer)))
+      return {false, 0};
+
+    return {true, MetadataAddress & isaMask.second};
   }
 
   /// Given the address of a nominal type descriptor, attempt to resolve
@@ -569,6 +707,29 @@ public:
       return BuiltNominalTypeDecl();
 
     return buildNominalTypeDecl(descriptor);
+  }
+
+  /// Try to read the offset of a tuple element from a tuple metadata.
+  bool readTupleElementOffset(StoredPointer metadataAddress, unsigned eltIndex,
+                              StoredSize *offset) {
+    // Read the metadata.
+    auto metadata = readMetadata(metadataAddress);
+    if (!metadata)
+      return false;
+
+    // Ensure that the metadata actually is tuple metadata.
+    auto tupleMetadata = dyn_cast<TargetTupleTypeMetadata<Runtime>>(metadata);
+    if (!tupleMetadata)
+      return false;
+
+    // Ensure that the element is in-bounds.
+    if (eltIndex >= tupleMetadata->NumElements)
+      return false;
+
+    // Read the offset.
+    const auto &element = tupleMetadata->getElement(eltIndex);
+    *offset = element.Offset;
+    return true;
   }
 
 protected:
@@ -863,6 +1024,75 @@ private:
 
     auto RawDescriptor = reinterpret_cast<const CaptureDescriptor *>(Buffer);
     return OwnedCaptureDescriptor(RawDescriptor);
+  }
+
+  /// Given a pointer to an Objective-C class, try to read its class name.
+  bool readObjCClassName(StoredPointer classAddress, std::string &className) {
+    // The following algorithm only works on the non-fragile Apple runtime.
+
+    // Grab the RO-data pointer.  This part is not ABI.
+    StoredPointer roDataPtr = readObjCRODataPtr(classAddress);
+    if (!roDataPtr) return false;
+
+    // This is ABI.
+    static constexpr auto OffsetToName =
+      roundUpToAlignment(size_t(12), sizeof(StoredPointer))
+        + sizeof(StoredPointer);;
+
+    // Read the name pointer.
+    StoredPointer namePtr;
+    if (!Reader->readInteger(RemoteAddress(roDataPtr + OffsetToName), &namePtr))
+      return false;
+
+    // If the name pointer is null, treat that as an error.
+    if (!namePtr)
+      return false;
+
+    return Reader->readString(RemoteAddress(namePtr), className);
+  }
+
+  /// Given that the remote process is running the non-fragile Apple runtime,
+  /// grab the ro-data from a class pointer.
+  StoredPointer readObjCRODataPtr(StoredPointer classAddress) {
+    // WARNING: the following algorithm works on current modern Apple
+    // runtimes but is not actually ABI.  But it is pretty reliable.
+
+    StoredPointer dataPtr;
+    if (!Reader->readInteger(RemoteAddress(classAddress +
+                               TargetClassMetadata<Runtime>::offsetToData()),
+                             &dataPtr))
+      return StoredPointer();
+
+    // Apply the data-pointer mask.
+    // These values have been stolen from the runtime source.
+    static constexpr uint64_t DataPtrMask =
+      (Runtime::PointerSize == 8 ? 0x00007ffffffffff8ULL : 0xfffffffcULL);
+    dataPtr &= StoredPointer(DataPtrMask);
+    if (!dataPtr)
+      return StoredPointer();
+
+    // Read the flags, which is a 32-bit header on both formats.
+    uint32_t flags;
+    if (!Reader->readInteger(RemoteAddress(dataPtr), &flags))
+      return StoredPointer();
+
+    // If the type is not realized, this is the RO-data.
+    static constexpr uint32_t RO_REALIZED = 0x80000000U;
+    if (!(flags & RO_REALIZED))
+      return dataPtr;
+
+    // Otherwise, it's the RW-data; read the RO-data pointer from a
+    // well-known position within the RW-data.
+    static constexpr uint32_t OffsetToROPtr = 8;
+    if (!Reader->readInteger(RemoteAddress(dataPtr + OffsetToROPtr), &dataPtr))
+      return StoredPointer();
+
+    return dataPtr;
+  }
+
+  template <class T>
+  static constexpr T roundUpToAlignment(T offset, T alignment) {
+    return (offset + alignment - 1) & ~(alignment - 1);
   }
 };
 

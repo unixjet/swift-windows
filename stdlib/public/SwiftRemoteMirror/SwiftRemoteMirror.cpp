@@ -23,14 +23,14 @@ using NativeReflectionContext
   = ReflectionContext<External<RuntimeTarget<sizeof(uintptr_t)>>>;
 
 SwiftReflectionContextRef
-swift_reflection_createReflectionContext(void *reader_context,
+swift_reflection_createReflectionContext(void *ReaderContext,
                                          PointerSizeFunction getPointerSize,
                                          SizeSizeFunction getSizeSize,
                                          ReadBytesFunction readBytes,
                                          GetStringLengthFunction getStringLength,
                                          GetSymbolAddressFunction getSymbolAddress) {
   MemoryReaderImpl ReaderImpl {
-    reader_context,
+    ReaderContext,
     getPointerSize,
     getSizeSize,
     readBytes,
@@ -51,29 +51,36 @@ void swift_reflection_destroyReflectionContext(SwiftReflectionContextRef Context
 
 void
 swift_reflection_addReflectionInfo(SwiftReflectionContextRef ContextRef,
-                                   const char *ImageName,
-                                   swift_reflection_section_t fieldmd,
-                                   swift_reflection_section_t assocty,
-                                   swift_reflection_section_t builtin,
-                                   swift_reflection_section_t typeref,
-                                   swift_reflection_section_t reflstr) {
-  ReflectionInfo Info {
-    ImageName,
-    FieldSection(fieldmd.Begin, fieldmd.End),
-    AssociatedTypeSection(assocty.Begin, assocty.End),
-    BuiltinTypeSection(builtin.Begin, builtin.End),
-    GenericSection(typeref.Begin, typeref.End),
-    GenericSection(reflstr.Begin, reflstr.End)
-  };
+                                   swift_reflection_info_t Info) {
   auto Context = reinterpret_cast<NativeReflectionContext *>(ContextRef);
-  Context->addReflectionInfo(Info);
+  Context->addReflectionInfo(*reinterpret_cast<ReflectionInfo *>(&Info));
+}
+
+int
+swift_reflection_readIsaMask(SwiftReflectionContextRef ContextRef,
+                             uintptr_t *outIsaMask) {
+  auto Context = reinterpret_cast<NativeReflectionContext *>(ContextRef);
+  auto isaMask = Context->readIsaMask();
+  *outIsaMask = isaMask.second;
+  return isaMask.first;
 }
 
 swift_typeref_t
 swift_reflection_typeRefForMetadata(SwiftReflectionContextRef ContextRef,
-                                    uintptr_t metadata) {
+                                    uintptr_t Metadata) {
   auto Context = reinterpret_cast<NativeReflectionContext *>(ContextRef);
-  auto TR = Context->readTypeFromMetadata(metadata);
+  auto TR = Context->readTypeFromMetadata(Metadata);
+  return reinterpret_cast<swift_typeref_t>(TR);
+}
+
+swift_typeref_t
+swift_reflection_typeRefForInstance(SwiftReflectionContextRef ContextRef,
+                                    uintptr_t Object) {
+  auto Context = reinterpret_cast<NativeReflectionContext *>(ContextRef);
+  auto MetadataAddress = Context->readMetadataFromInstance(Object);
+  if (!MetadataAddress.first)
+    return 0;
+  auto TR = Context->readTypeFromMetadata(MetadataAddress.second);
   return reinterpret_cast<swift_typeref_t>(TR);
 }
 
@@ -101,13 +108,46 @@ swift_reflection_genericArgumentCountOfTypeRef(swift_typeref_t OpaqueTypeRef) {
   return 0;
 }
 
-swift_typeinfo_t
-swift_reflection_infoForTypeRef(SwiftReflectionContextRef ContextRef,
-                                swift_typeref_t OpaqueTypeRef) {
-  auto Context = reinterpret_cast<NativeReflectionContext *>(ContextRef);
-  auto TR = reinterpret_cast<const TypeRef *>(OpaqueTypeRef);
-  auto TI = Context->getTypeInfo(TR);
+swift_layout_kind_t getTypeInfoKind(const TypeInfo &TI) {
+  switch (TI.getKind()) {
+  case TypeInfoKind::Builtin:
+    return SWIFT_BUILTIN;
+  case TypeInfoKind::Record: {
+    auto &RecordTI = cast<RecordTypeInfo>(TI);
+    switch (RecordTI.getRecordKind()) {
+    case RecordKind::Tuple:
+      return SWIFT_TUPLE;
+    case RecordKind::Struct:
+      return SWIFT_STRUCT;
+    case RecordKind::ThickFunction:
+      return SWIFT_THICK_FUNCTION;
+    case RecordKind::Existential:
+      return SWIFT_EXISTENTIAL;
+    case RecordKind::ClassExistential:
+      return SWIFT_CLASS_EXISTENTIAL;
+    case RecordKind::ExistentialMetatype:
+      return SWIFT_EXISTENTIAL_METATYPE;
+    case RecordKind::ClassInstance:
+      return SWIFT_CLASS_INSTANCE;
+    }
+  }
+  case TypeInfoKind::Reference: {
+    auto &ReferenceTI = cast<ReferenceTypeInfo>(TI);
+    switch (ReferenceTI.getReferenceKind()) {
+    case ReferenceKind::Strong:
+      return SWIFT_STRONG_REFERENCE;
+    case ReferenceKind::Unowned:
+      return SWIFT_UNOWNED_REFERENCE;
+    case ReferenceKind::Weak:
+      return SWIFT_WEAK_REFERENCE;
+    case ReferenceKind::Unmanaged:
+      return SWIFT_UNMANAGED_REFERENCE;
+    }
+  }
+  }
+}
 
+static swift_typeinfo_t convertTypeInfo(const TypeInfo *TI) {
   if (TI == nullptr) {
     return {
       SWIFT_UNKNOWN,
@@ -118,50 +158,12 @@ swift_reflection_infoForTypeRef(SwiftReflectionContextRef ContextRef,
     };
   }
 
-  swift_layout_kind_t Kind;
   unsigned NumFields = 0;
-
-  switch (TI->getKind()) {
-  case TypeInfoKind::Builtin:
-    Kind = SWIFT_BUILTIN;
-    break;
-  case TypeInfoKind::Record: {
-    auto *RecordTI = cast<RecordTypeInfo>(TI);
-    switch (RecordTI->getRecordKind()) {
-    case RecordKind::Tuple:
-      Kind = SWIFT_TUPLE;
-      break;
-    case RecordKind::Struct:
-      Kind = SWIFT_STRUCT;
-      break;
-    case RecordKind::ThickFunction:
-      Kind = SWIFT_THICK_FUNCTION;
-      break;
-    }
+  if (auto *RecordTI = dyn_cast<RecordTypeInfo>(TI))
     NumFields = RecordTI->getNumFields();
-    break;
-  }
-  case TypeInfoKind::Reference: {
-    auto *ReferenceTI = cast<ReferenceTypeInfo>(TI);
-    switch (ReferenceTI->getReferenceKind()) {
-    case ReferenceKind::Strong:
-      Kind = SWIFT_STRONG_REFERENCE;
-      break;
-    case ReferenceKind::Unowned:
-      Kind = SWIFT_UNOWNED_REFERENCE;
-      break;
-    case ReferenceKind::Weak:
-      Kind = SWIFT_WEAK_REFERENCE;
-      break;
-    case ReferenceKind::Unmanaged:
-      Kind = SWIFT_UNMANAGED_REFERENCE;
-      break;
-    }
-  }
-  }
 
   return {
-    Kind,
+    getTypeInfoKind(*TI),
     TI->getSize(),
     TI->getAlignment(),
     TI->getStride(),
@@ -169,19 +171,119 @@ swift_reflection_infoForTypeRef(SwiftReflectionContextRef ContextRef,
   };
 }
 
-swift_childinfo_t
-swift_reflection_infoForChild(SwiftReflectionContextRef ContextRef,
-                              swift_typeref_t OpaqueTypeRef,
-                              unsigned Index) {
-  auto Context = reinterpret_cast<NativeReflectionContext *>(ContextRef);
-  auto TR = reinterpret_cast<const TypeRef *>(OpaqueTypeRef);
-
-  auto *RecordTI = cast<RecordTypeInfo>(Context->getTypeInfo(TR));
-  auto FieldInfo = RecordTI->getFields()[Index];
+static swift_childinfo_t convertChild(const TypeInfo *TI, unsigned Index) {
+  auto *RecordTI = cast<RecordTypeInfo>(TI);
+  auto &FieldInfo = RecordTI->getFields()[Index];
 
   return {
     FieldInfo.Name.c_str(),
     FieldInfo.Offset,
+    getTypeInfoKind(FieldInfo.TI),
     reinterpret_cast<swift_typeref_t>(FieldInfo.TR),
   };
+}
+
+swift_typeinfo_t
+swift_reflection_infoForTypeRef(SwiftReflectionContextRef ContextRef,
+                                swift_typeref_t OpaqueTypeRef) {
+  auto Context = reinterpret_cast<NativeReflectionContext *>(ContextRef);
+  auto TR = reinterpret_cast<const TypeRef *>(OpaqueTypeRef);
+  auto TI = Context->getTypeInfo(TR);
+  return convertTypeInfo(TI);
+}
+
+swift_childinfo_t
+swift_reflection_childOfTypeRef(SwiftReflectionContextRef ContextRef,
+                                swift_typeref_t OpaqueTypeRef,
+                                unsigned Index) {
+  auto Context = reinterpret_cast<NativeReflectionContext *>(ContextRef);
+  auto TR = reinterpret_cast<const TypeRef *>(OpaqueTypeRef);
+  auto *TI = Context->getTypeInfo(TR);
+  return convertChild(TI, Index);
+}
+
+swift_typeinfo_t
+swift_reflection_infoForMetadata(SwiftReflectionContextRef ContextRef,
+                                 uintptr_t Metadata) {
+  auto Context = reinterpret_cast<NativeReflectionContext *>(ContextRef);
+  auto *TI = Context->getMetadataTypeInfo(Metadata);
+  return convertTypeInfo(TI);
+}
+
+swift_childinfo_t
+swift_reflection_childOfMetadata(SwiftReflectionContextRef ContextRef,
+                                 uintptr_t Metadata,
+                                 unsigned Index) {
+  auto Context = reinterpret_cast<NativeReflectionContext *>(ContextRef);
+  auto *TI = Context->getMetadataTypeInfo(Metadata);
+  return convertChild(TI, Index);
+}
+
+swift_typeinfo_t
+swift_reflection_infoForInstance(SwiftReflectionContextRef ContextRef,
+                                 uintptr_t Object) {
+  auto Context = reinterpret_cast<NativeReflectionContext *>(ContextRef);
+  auto *TI = Context->getInstanceTypeInfo(Object);
+  return convertTypeInfo(TI);
+}
+
+swift_childinfo_t
+swift_reflection_childOfInstance(SwiftReflectionContextRef ContextRef,
+                                 uintptr_t Object,
+                                 unsigned Index) {
+  auto Context = reinterpret_cast<NativeReflectionContext *>(ContextRef);
+  auto *TI = Context->getInstanceTypeInfo(Object);
+  return convertChild(TI, Index);
+}
+
+int swift_reflection_projectExistential(SwiftReflectionContextRef ContextRef,
+                                        addr_t InstanceAddress,
+                                        swift_typeref_t ExistentialTypeRef,
+                                        swift_typeref_t *InstanceTypeRef,
+                                        addr_t *StartOfInstanceData) {
+  // TODO
+  return false;
+}
+
+void swift_reflection_dumpTypeRef(swift_typeref_t OpaqueTypeRef) {
+  auto TR = reinterpret_cast<const TypeRef *>(OpaqueTypeRef);
+  if (TR == nullptr) {
+    std::cerr << "<null type reference>\n";
+  } else {
+    TR->dump();
+  }
+}
+
+void swift_reflection_dumpInfoForTypeRef(SwiftReflectionContextRef ContextRef,
+                                         swift_typeref_t OpaqueTypeRef) {
+  auto Context = reinterpret_cast<NativeReflectionContext *>(ContextRef);
+  auto TR = reinterpret_cast<const TypeRef *>(OpaqueTypeRef);
+  auto TI = Context->getTypeInfo(TR);
+  if (TI == nullptr) {
+    std::cerr << "<null type info>\n";
+  } else {
+    TI->dump();
+  }
+}
+
+void swift_reflection_dumpInfoForMetadata(SwiftReflectionContextRef ContextRef,
+                                          uintptr_t Metadata) {
+  auto Context = reinterpret_cast<NativeReflectionContext *>(ContextRef);
+  auto TI = Context->getMetadataTypeInfo(Metadata);
+  if (TI == nullptr) {
+    std::cerr << "<null type info>\n";
+  } else {
+    TI->dump();
+  }
+}
+
+void swift_reflection_dumpInfoForInstance(SwiftReflectionContextRef ContextRef,
+                                          uintptr_t Object) {
+  auto Context = reinterpret_cast<NativeReflectionContext *>(ContextRef);
+  auto TI = Context->getInstanceTypeInfo(Object);
+  if (TI == nullptr) {
+    std::cerr << "<null type info>\n";
+  } else {
+    TI->dump();
+  }
 }

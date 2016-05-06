@@ -36,7 +36,25 @@ class TypeRefBuilder;
 enum class RecordKind : unsigned {
   Tuple,
   Struct,
+
+  // A Swift-native function is always a function pointer followed by a
+  // retainable, nullable context pointer.
   ThickFunction,
+
+  // An existential is a three-word buffer followed by value metadata and
+  // witness tables.
+  Existential,
+
+  // A class existential is a retainable pointer followed by witness
+  // tables.
+  ClassExistential,
+
+  // An existential metatype.
+  ExistentialMetatype,
+
+  // A class instance layout, consisting of the stored properties of
+  // one class, excluding superclasses.
+  ClassInstance,
 };
 
 enum class ReferenceCounting : unsigned {
@@ -146,13 +164,24 @@ class TypeConverter {
   const TypeRef *NativeObjectTR = nullptr;
   const TypeRef *UnknownObjectTR = nullptr;
   const TypeInfo *ThickFunctionTI = nullptr;
+  const TypeInfo *EmptyTI = nullptr;
 
 public:
   explicit TypeConverter(TypeRefBuilder &Builder) : Builder(Builder) {}
 
   TypeRefBuilder &getBuilder() { return Builder; }
 
+  /// Returns layout information for a value of the given type.
+  /// For a class, this returns the lowering of the reference value.
   const TypeInfo *getTypeInfo(const TypeRef *TR);
+
+  /// Returns layout information for an instance of the given
+  /// class.
+  ///
+  /// Not cached.
+  const TypeInfo *getClassInstanceTypeInfo(const TypeRef *TR,
+                                           unsigned start,
+                                           unsigned align);
 
   /* Not really public */
   const ReferenceTypeInfo *
@@ -163,6 +192,7 @@ public:
   const TypeRef *getNativeObjectTypeRef();
   const TypeRef *getUnknownObjectTypeRef();
   const TypeInfo *getThickFunctionTypeInfo();
+  const TypeInfo *getEmptyTypeInfo();
 
   template <typename TypeInfoTy, typename... Args>
   const TypeInfoTy *makeTypeInfo(Args... args) {
