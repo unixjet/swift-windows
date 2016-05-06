@@ -1,0 +1,5 @@
+module CCompilerUtil {
+  header "StringUtil.h"
+  link "CompilerUtil"
+  export *
+}
