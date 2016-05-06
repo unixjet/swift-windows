@@ -29,9 +29,9 @@
 #include <new>
 #include <cctype>
 #if defined(_MSC_VER)
+// Avoid defining macro max(), min() which conflict with std::max(), std::min()
+#define NOMINMAX
 #include <windows.h>
-// Macro max() conflicts with std::max()
-#undef max
 #else
 #include <sys/mman.h>
 #include <unistd.h>
@@ -78,6 +78,16 @@ static void *swift_allocPage(size_t size) {
   return mem;
 }
 
+// free memory allocated by swift_allocPage()
+// On success, swift_freePage() returns 0, on failure -1
+static int swift_freePage(void *addr, size_t size) {
+#if defined(_MSC_VER)
+  return VirtualFree(addr, 0, MEM_RELEASE) == 0? -1 : 0;
+#else
+  return munmap(addr, size);
+#endif
+}
+
 void *MetadataAllocator::alloc(size_t size) {
 #if defined(__APPLE__)
   const uintptr_t PageSizeMask = vm_page_mask;
@@ -107,7 +117,7 @@ void *MetadataAllocator::alloc(size_t size) {
     if (LLVM_UNLIKELY(((uintptr_t)next & ~PageSizeMask)
                         != (((uintptr_t)end & ~PageSizeMask)))) {
       // Allocate a new page if we haven't already.
-      allocation = swift_allocPage(pagesizeMask+1);
+      allocation = swift_allocPage(PageSizeMask+1);
 
       if (!allocation)
         crash("unable to allocate memory for metadata cache");
@@ -127,7 +137,7 @@ void *MetadataAllocator::alloc(size_t size) {
     // This potentially causes us to perform multiple mmaps under contention,
     // but it keeps the fast path pristine.
     if (allocation) {
-      munmap(allocation, PageSizeMask + 1);
+      swift_freePage(allocation, PageSizeMask + 1);
     }
   }
 }
