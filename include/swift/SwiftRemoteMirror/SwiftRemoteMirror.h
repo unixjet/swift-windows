@@ -139,10 +139,10 @@ swift_reflection_genericArgumentOfTypeRef(swift_typeref_t OpaqueTypeRef,
 /// Returns true if InstanceTypeRef and StartOfInstanceData contain valid
 /// valid values.
 int swift_reflection_projectExistential(SwiftReflectionContextRef ContextRef,
-                                        addr_t InstanceAddress,
+                                        swift_addr_t InstanceAddress,
                                         swift_typeref_t ExistentialTypeRef,
                                         swift_typeref_t *OutInstanceTypeRef,
-                                        addr_t *OutStartOfInstanceData);
+                                        swift_addr_t *OutStartOfInstanceData);
 
 /// Dump a brief description of the typeref as a tree to stderr.
 void swift_reflection_dumpTypeRef(swift_typeref_t OpaqueTypeRef);

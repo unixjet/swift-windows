@@ -237,10 +237,10 @@ swift_reflection_childOfInstance(SwiftReflectionContextRef ContextRef,
 }
 
 int swift_reflection_projectExistential(SwiftReflectionContextRef ContextRef,
-                                        addr_t InstanceAddress,
+                                        swift_addr_t InstanceAddress,
                                         swift_typeref_t ExistentialTypeRef,
                                         swift_typeref_t *InstanceTypeRef,
-                                        addr_t *StartOfInstanceData) {
+                                        swift_addr_t *StartOfInstanceData) {
   // TODO
   return false;
 }
