@@ -14,44 +14,74 @@
 // sane value semantics and operators.
 //
 //===----------------------------------------------------------------------===//
-
+#if defined(_MSC_VER)
+// Avoid defining macro max(), min() which conflict with std::max(), std::min()
+#define NOMINMAX
+#include <Rpc.h>
+#else
 #include <uuid/uuid.h>
+#endif
 #include "swift/Basic/UUID.h"
 
 using namespace swift;
 
-UUID::UUID(FromRandom_t) {
+swift::UUID::UUID(FromRandom_t) {
+#if defined(_MSC_VER)
+  UuidCreate((_GUID *)&Value);
+#else
   uuid_generate_random(Value);
+#endif
 }
 
-UUID::UUID(FromTime_t) {
+swift::UUID::UUID(FromTime_t) {
+#if defined(_MSC_VER)
+  UuidCreate((_GUID *)&Value);
+#else
   uuid_generate_time(Value);
+#endif
 }
 
-UUID::UUID() {
+swift::UUID::UUID() {
+#if defined(_MSC_VER)
+  UuidCreateNil((_GUID *)&Value);
+#else
   uuid_clear(Value);
+#endif
 }
 
-Optional<UUID> UUID::fromString(const char *s) {
-  UUID result;
+Optional<swift::UUID> swift::UUID::fromString(const char *s) {
+  swift::UUID result;
+#if defined(_MSC_VER)
+  if (UuidFromString(RPC_CSTR(s), (_GUID *)&result) == RPC_S_OK)
+#else
   if (uuid_parse(s, result.Value))
+#endif
     return None;
   return result;
 }
 
-void UUID::toString(llvm::SmallVectorImpl<char> &out) const {
+void swift::UUID::toString(llvm::SmallVectorImpl<char> &out) const {
   out.resize(UUID::StringBufferSize);
+#if defined(_MSC_VER)
+  UuidToString((const GUID *)Value, (RPC_CSTR *)(out.data()));
+#else
   uuid_unparse_upper(Value, out.data());
+#endif
   // Pop off the null terminator.
   assert(out.back() == '\0' && "did not null-terminate?!");
   out.pop_back();
 }
 
-int UUID::compare(UUID y) const {
+int swift::UUID::compare(swift::UUID y) const {
+#if defined(_MSC_VER)
+  RPC_STATUS status;
+  return UuidCompare((GUID *)Value, (GUID *)&y, &status);
+#else
   return uuid_compare(Value, y.Value);
+#endif
 }
 
-llvm::raw_ostream &swift::operator<<(llvm::raw_ostream &os, UUID uuid) {
+llvm::raw_ostream &swift::operator<<(llvm::raw_ostream &os, swift::UUID uuid) {
   llvm::SmallString<UUID::StringBufferSize> buf;
   uuid.toString(buf);
   os << buf;
