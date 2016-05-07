@@ -1,0 +1,37 @@
+Most wanted bugs
+================
+
+Swift on Windows(MSVC)
+----------------------
+
+1. Full compilation
+  Currently, 'ninja [Enter]' can compile 90% of all sources. It should compile all of the sources without compile error. Any runtime error of the executables is other issue.
+
+2. Bug of swiftc.exe
+  Due to unknown bug, Swift.obj built by swiftc.exe(MSVC) does not work. But the one built by swiftc.exe(Cygwin) works well.
+
+3. Dynamic linking
+  Lack of option for dllimport/dllexport, it cann't generate or link dynamic library.
+  It is discussing in swift-dev mailing list with subject '[swift-dev] swift (ABI) and Windows'.
+  
+4. Static linking
+  Due to unknown reason (may related incompatibility of debug information), .pdata section in *.lib should be removed.
+  I used a workaround renaming .pdata to .qdata with HxD editor.
+  
+5. Memory map layout
+  Due to a difficult-to-explain-bug, the contents of .rdata section should be placed after the .data section.
+  But linker's default behavior is the reverse order. It caused the runtime crash.
+  I used a workaroud using the option '/MERGE:.rdata=.rodata' of LINK.exe. It rename the section name to .rodata and place it after the .data section.
+
+6. Library name convension
+  Library name can be one of the forms - libOOO.a, libOOO.lib, OOO.lib, libOOO.dll, OOO.dll, etc.
+  And static libraries and import libraries can have same extention - *.a or *.lib.
+  Swift community should have consensus about this and Cygwin/MinGW also be considered.
+
+7. Test codes are not touched
+  We should can use the built-in test code for the quality.
+
+8. Remove build hack
+  A cmake patch and a post-processing(sed command) of rules.ninja is used in build procedure.
+  It is better to submit and confirm cmake patch to CMake maintainer, after polishing the patch.
+  The post-processing should be removed or reduced by updating CMakeList.txt.
