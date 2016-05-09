@@ -448,17 +448,20 @@ static const char *_swift_stdlib_strtoX_clocale_impl(
   return nptr + pos;
 }
 
+SWIFT_RUNTIME_STDLIB_INTERFACE
 extern "C" const char *_swift_stdlib_strtold_clocale(
     const char *nptr, void *outResult) {
   return _swift_stdlib_strtoX_clocale_impl(
     nptr, static_cast<long double*>(outResult));
 }
 
+SWIFT_RUNTIME_STDLIB_INTERFACE
 extern "C" const char *_swift_stdlib_strtod_clocale(
     const char * nptr, double *outResult) {
   return _swift_stdlib_strtoX_clocale_impl(nptr, outResult);
 }
 
+SWIFT_RUNTIME_STDLIB_INTERFACE
 extern "C" const char *_swift_stdlib_strtof_clocale(
     const char * nptr, float *outResult) {
   return _swift_stdlib_strtoX_clocale_impl(nptr, outResult);
