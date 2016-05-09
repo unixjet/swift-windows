@@ -22,6 +22,7 @@
 #include <uuid/uuid.h>
 #endif
 #include "swift/Basic/UUID.h"
+#include <stdio.h>
 
 using namespace swift;
 
@@ -52,7 +53,7 @@ swift::UUID::UUID() {
 Optional<swift::UUID> swift::UUID::fromString(const char *s) {
   swift::UUID result;
 #if defined(_MSC_VER)
-  if (UuidFromString(RPC_CSTR(s), (_GUID *)&result) == RPC_S_OK)
+  if (UuidFromString(RPC_CSTR(s), (_GUID *)&result) != RPC_S_OK)
 #else
   if (uuid_parse(s, result.Value))
 #endif
@@ -63,7 +64,10 @@ Optional<swift::UUID> swift::UUID::fromString(const char *s) {
 void swift::UUID::toString(llvm::SmallVectorImpl<char> &out) const {
   out.resize(UUID::StringBufferSize);
 #if defined(_MSC_VER)
-  UuidToString((const GUID *)Value, (RPC_CSTR *)(out.data()));
+  RPC_CSTR  UUIDString;
+  UuidToString((const GUID *)Value, &UUIDString);
+  memcpy(out.data(), UUIDString, StringBufferSize);
+  RpcStringFree(&UUIDString);
 #else
   uuid_unparse_upper(Value, out.data());
 #endif
