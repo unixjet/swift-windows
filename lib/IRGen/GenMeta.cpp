@@ -1213,13 +1213,13 @@ createInPlaceMetadataInitializationFunction(IRGenModule &IGM,
   // There's an ignored i8* parameter.
   auto fnTy = llvm::FunctionType::get(IGM.VoidTy, {IGM.Int8PtrTy},
                                       /*variadic*/ false);
-  llvm::Function *fn = llvm::Function::Create(fnTy,
-                                       llvm::GlobalValue::PrivateLinkage,
-                                       Twine("initialize_metadata_")
-                                           + type->getDecl()->getName().str(),
-                                       &IGM.Module);
+  llvm::Function *fn = llvm::Function::Create(
+      fnTy, llvm::GlobalValue::PrivateLinkage,
+      Twine("initialize_metadata_") + type->getDecl()->getName().str(),
+      &IGM.Module);
+  // FIXME: should we be setting visibility and DLL storage as well?
   fn->setAttributes(IGM.constructInitialAttributes());
-  
+
   // Set up the function.
   IRGenFunction IGF(IGM, fn);
   if (IGM.DebugInfo)
@@ -2372,9 +2372,10 @@ namespace {
                                         IGM.TypeMetadataPtrTy,
                                         /*vararg*/ false);
     auto fn = llvm::Function::Create(fnTy, llvm::GlobalValue::PrivateLinkage,
-                                     llvm::Twine("get_field_types_")
-                                       + type->getName().str(),
+                                     llvm::Twine("get_field_types_") +
+                                         type->getName().str(),
                                      IGM.getModule());
+    // FIXME: should we be setting visibility and DLL storage as well?
     fn->setAttributes(IGM.constructInitialAttributes());
 
     // Emit the body of the field type accessor later. We need to access
@@ -2872,13 +2873,13 @@ namespace {
       llvm::Type *argTys[] = {IGM.TypeMetadataPatternPtrTy, IGM.Int8PtrPtrTy};
       auto ty = llvm::FunctionType::get(IGM.TypeMetadataPtrTy,
                                         argTys, /*isVarArg*/ false);
-      llvm::Function *f = llvm::Function::Create(ty,
-                                           llvm::GlobalValue::PrivateLinkage,
-                                           llvm::Twine("create_generic_metadata_")
-                                               + Target->getName().str(),
-                                           &IGM.Module);
+      llvm::Function *f = llvm::Function::Create(
+          ty, llvm::GlobalValue::PrivateLinkage,
+          llvm::Twine("create_generic_metadata_") + Target->getName().str(),
+          &IGM.Module);
+      // FIXME: should we be setting visibility and DLL storage as well?
       f->setAttributes(IGM.constructInitialAttributes());
-      
+
       IRGenFunction IGF(IGM, f);
       if (IGM.DebugInfo)
         IGM.DebugInfo->emitArtificialFunction(IGF, f);
@@ -3945,15 +3946,18 @@ static void emitObjCClassSymbol(IRGenModule &IGM,
                                 llvm::GlobalValue *metadata) {
   llvm::SmallString<32> classSymbol;
   LinkEntity::forObjCClass(classDecl).mangle(classSymbol);
-  
+
   // Create the alias.
   auto *metadataTy = cast<llvm::PointerType>(metadata->getType());
 
   // Create the alias.
-  llvm::GlobalAlias::create(metadataTy->getElementType(),
-                            metadataTy->getAddressSpace(),
-                            metadata->getLinkage(), classSymbol.str(),
-                            metadata, IGM.getModule());
+  auto *alias =
+      llvm::GlobalAlias::create(metadataTy->getElementType(),
+                                metadataTy->getAddressSpace(),
+                                metadata->getLinkage(), classSymbol.str(),
+                                metadata, IGM.getModule());
+  if (IGM.TargetInfo.OutputObjectFormat == llvm::Triple::COFF)
+    alias->setDLLStorageClass(metadata->getDLLStorageClass());
 }
 
 /// Emit the type metadata or metadata template for a class.
@@ -5230,13 +5234,13 @@ namespace {
 
       auto fnTy = llvm::FunctionType::get(IGM.VoidTy, {IGM.TypeMetadataPtrTy},
                                           /*variadic*/ false);
-      llvm::Function *fn = llvm::Function::Create(fnTy,
-                                           llvm::GlobalValue::PrivateLinkage,
-                                           Twine("initialize_metadata_")
-                                             + type->getDecl()->getName().str(),
-                                           &IGM.Module);
+      llvm::Function *fn = llvm::Function::Create(
+          fnTy, llvm::GlobalValue::PrivateLinkage,
+          Twine("initialize_metadata_") + type->getDecl()->getName().str(),
+          &IGM.Module);
+      // FIXME: should we be setting visibility and DLL storage as well?
       fn->setAttributes(IGM.constructInitialAttributes());
-      
+
       // Set up the function.
       IRGenFunction IGF(IGM, fn);
       if (IGM.DebugInfo)

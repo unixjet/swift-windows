@@ -590,6 +590,7 @@ class LinkInfo {
   llvm::SmallString<32> Name;
   llvm::GlobalValue::LinkageTypes Linkage;
   llvm::GlobalValue::VisibilityTypes Visibility;
+  llvm::GlobalValue::DLLStorageClassTypes DLLStorageClass;
   ForDefinition_t ForDefinition;
 
 public:
@@ -605,6 +606,9 @@ public:
   }
   llvm::GlobalValue::VisibilityTypes getVisibility() const {
     return Visibility;
+  }
+  llvm::GlobalValue::DLLStorageClassTypes getDLLStorage() const {
+    return DLLStorageClass;
   }
 
   llvm::Function *createFunction(IRGenModule &IGM,
@@ -622,11 +626,12 @@ public:
                                   StringRef DebugName = StringRef());
 
   bool isUsed() const {
-    return ForDefinition && isUsed(Linkage, Visibility);
+    return ForDefinition && isUsed(Linkage, Visibility, DLLStorageClass);
   }
-  
+
   static bool isUsed(llvm::GlobalValue::LinkageTypes Linkage,
-                     llvm::GlobalValue::VisibilityTypes Visibility);
+                     llvm::GlobalValue::VisibilityTypes Visibility,
+                     llvm::GlobalValue::DLLStorageClassTypes DLLStorage);
 };
 
 } // end namespace irgen

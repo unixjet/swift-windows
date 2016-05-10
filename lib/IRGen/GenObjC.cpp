@@ -799,8 +799,9 @@ static llvm::Function *emitObjCPartialApplicationForwarder(IRGenModule &IGM,
   // FIXME: Give the thunk a real name.
   // FIXME: Maybe cache the thunk by function and closure types?
   llvm::Function *fwd =
-    llvm::Function::Create(fwdTy, llvm::Function::InternalLinkage,
-                           "_TPAo", &IGM.Module);
+      llvm::Function::Create(fwdTy, llvm::Function::InternalLinkage,
+                             "_TPAo", &IGM.Module);
+  // FIXME: should we be setting visibility and DLL storage as well?
 
   auto initialAttrs = IGM.constructInitialAttributes();
   // Merge initialAttrs with attrs.

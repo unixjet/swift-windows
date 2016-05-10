@@ -453,6 +453,11 @@ llvm::Constant *swift::getRuntimeFn(llvm::Module &Module,
   if (auto fn = dyn_cast<llvm::Function>(cache)) {
     fn->setCallingConv(cc);
 
+    if (llvm::Triple(Module.getTargetTriple()).isOSBinFormatCOFF() &&
+        (fn->getLinkage() == llvm::GlobalValue::ExternalLinkage ||
+         fn->getLinkage() == llvm::GlobalValue::AvailableExternallyLinkage))
+      fn->setDLLStorageClass(llvm::GlobalValue::DLLImportStorageClass);
+
     llvm::AttrBuilder buildFnAttr;
     llvm::AttrBuilder buildRetAttr;
 
@@ -511,6 +516,7 @@ llvm::Constant *swift::getWrapperFn(llvm::Module &Module,
     // and leave only one copy.
     fun->setLinkage(llvm::Function::LinkOnceODRLinkage);
     fun->setVisibility(llvm::Function::HiddenVisibility);
+    fun->setDLLStorageClass(llvm::GlobalValue::DefaultStorageClass);
     fun->setDoesNotThrow();
 
     // Add the body of a wrapper.
@@ -527,6 +533,8 @@ llvm::Constant *swift::getWrapperFn(llvm::Module &Module,
     auto *globalFnPtr =
         new llvm::GlobalVariable(Module, fnPtrTy, false,
                                  llvm::GlobalValue::ExternalLinkage, 0, symbol);
+    if (llvm::Triple(Module.getTargetTriple()).isOSBinFormatCOFF())
+      globalFnPtr->setDLLStorageClass(llvm::GlobalValue::DLLImportStorageClass);
 
     // Forward all arguments.
     llvm::SmallVector<llvm::Value *, 4> args;

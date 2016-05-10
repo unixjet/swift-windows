@@ -677,6 +677,7 @@ static llvm::Function *emitPartialApplicationForwarder(IRGenModule &IGM,
   llvm::Function *fwd =
     llvm::Function::Create(fwdTy, llvm::Function::InternalLinkage,
                            llvm::StringRef(thunkName), &IGM.Module);
+  // FIXME: should we be setting the visibility and the DLL storage as well?
 
   auto initialAttrs = IGM.constructInitialAttributes();
   // Merge initialAttrs with outAttrs.
@@ -1393,9 +1394,10 @@ static llvm::Function *emitBlockCopyHelper(IRGenModule &IGM,
   auto copyTy = llvm::FunctionType::get(IGM.VoidTy, args, /*vararg*/ false);
   // TODO: Give these predictable mangled names and shared linkage.
   auto func = llvm::Function::Create(copyTy, llvm::GlobalValue::InternalLinkage,
-                                     "block_copy_helper",
-                                     IGM.getModule());
+                                     "block_copy_helper", IGM.getModule());
   func->setAttributes(IGM.constructInitialAttributes());
+  // FIXME: should we be setting visibility and DLL storage as well?
+
   IRGenFunction IGF(IGM, func);
   
   // Copy the captures from the source to the destination.
@@ -1431,6 +1433,8 @@ static llvm::Function *emitBlockDisposeHelper(IRGenModule &IGM,
                                      "block_destroy_helper",
                                      IGM.getModule());
   func->setAttributes(IGM.constructInitialAttributes());
+  // FIXME: should we be setting visibility and DLL storage as well?
+
   IRGenFunction IGF(IGM, func);
   
   // Destroy the captures.

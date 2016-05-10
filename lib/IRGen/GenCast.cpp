@@ -333,7 +333,8 @@ static llvm::Function *emitExistentialScalarCastFn(IRGenModule &IGM,
   auto fn = llvm::Function::Create(fnTy, llvm::GlobalValue::PrivateLinkage,
                                    llvm::Twine(name), IGM.getModule());
   fn->setAttributes(IGM.constructInitialAttributes());
-  
+  // FIXME: should we be setting the visibility and the DLL storage as well?
+
   IRGenFunction IGF(IGM, fn);
   if (IGM.DebugInfo)
     IGM.DebugInfo->emitArtificialFunction(IGF, fn);

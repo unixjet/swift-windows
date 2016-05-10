@@ -560,12 +560,12 @@ void IRGenModule::emitRuntimeRegistration() {
   
   // Create a new function to contain our logic.
   auto fnTy = llvm::FunctionType::get(VoidTy, /*varArg*/ false);
-  auto RegistrationFunction = llvm::Function::Create(fnTy,
-                                           llvm::GlobalValue::PrivateLinkage,
-                                           "runtime_registration",
-                                           getModule());
+  auto RegistrationFunction =
+      llvm::Function::Create(fnTy, llvm::GlobalValue::PrivateLinkage,
+                             "runtime_registration", getModule());
   RegistrationFunction->setAttributes(constructInitialAttributes());
-  
+  // FIXME: should we be setting the visibility and DLL storage as well?
+
   // Insert a call into the entry function.
   {
     llvm::BasicBlock *EntryBB = &EntryFunction->getEntryBlock();
@@ -919,12 +919,13 @@ void IRGenModule::emitVTableStubs() {
     const SILFunction &F = *I;
     if (! F.isExternallyUsedSymbol())
       continue;
-    
+
     if (!stub) {
       // Create a single stub function which calls swift_deletedMethodError().
       stub = llvm::Function::Create(llvm::FunctionType::get(VoidTy, false),
                                     llvm::GlobalValue::InternalLinkage,
                                     "_swift_dead_method_stub");
+      // FIXME: should we be setting the visibility and DLL storage as well?
       stub->setAttributes(constructInitialAttributes());
       Module.getFunctionList().push_back(stub);
       stub->setCallingConv(DefaultCC);
@@ -933,9 +934,13 @@ void IRGenModule::emitVTableStubs() {
       llvm::CallInst::Create(errorFunc, ArrayRef<llvm::Value *>(), "", entry);
       new llvm::UnreachableInst(getLLVMContext(), entry);
     }
+
     // For each eliminated method symbol create an alias to the stub.
-    llvm::GlobalAlias::create(llvm::GlobalValue::ExternalLinkage, F.getName(),
-                              stub);
+    auto *alias = llvm::GlobalAlias::create(llvm::GlobalValue::ExternalLinkage,
+                                            F.getName(), stub);
+    // FIXME: should we be setting the visibility as well?
+    if (TargetInfo.OutputObjectFormat == llvm::Triple::COFF)
+      alias->setDLLStorageClass(llvm::GlobalValue::DLLExportStorageClass);
   }
 }
 
@@ -1000,12 +1005,12 @@ void IRGenModule::emitTypeVerifier() {
   
   // Create a new function to contain our logic.
   auto fnTy = llvm::FunctionType::get(VoidTy, /*varArg*/ false);
-  auto VerifierFunction = llvm::Function::Create(fnTy,
-                                             llvm::GlobalValue::PrivateLinkage,
-                                             "type_verifier",
-                                             getModule());
+  auto VerifierFunction =
+      llvm::Function::Create(fnTy, llvm::GlobalValue::PrivateLinkage,
+                             "type_verifier", getModule());
   VerifierFunction->setAttributes(constructInitialAttributes());
-  
+  // FIXME: should we be setting the visibility and DLL storage as well?
+
   // Insert a call into the entry function.
   {
     llvm::BasicBlock *EntryBB = &EntryFunction->getEntryBlock();
@@ -1195,67 +1200,65 @@ bool LinkEntity::isAvailableExternally(IRGenModule &IGM) const {
   llvm_unreachable("bad link entity kind");
 }
 
-
-static std::pair<llvm::GlobalValue::LinkageTypes,
-                 llvm::GlobalValue::VisibilityTypes>
-getIRLinkage(IRGenModule &IGM,
-             SILLinkage linkage, ForDefinition_t isDefinition,
+static std::tuple<llvm::GlobalValue::LinkageTypes,
+                  llvm::GlobalValue::VisibilityTypes,
+                  llvm::GlobalValue::DLLStorageClassTypes>
+getIRLinkage(IRGenModule &IGM, SILLinkage linkage, ForDefinition_t isDefinition,
              bool isWeakImported) {
-  
-#define RESULT(LINKAGE, VISIBILITY)        \
-{ llvm::GlobalValue::LINKAGE##Linkage, \
-llvm::GlobalValue::VISIBILITY##Visibility }
-  // Public visibility depends on the target object format.
-  
-  llvm::GlobalValue::VisibilityTypes PublicDefinitionVisibility;
-  switch (IGM.TargetInfo.OutputObjectFormat) {
-  case llvm::Triple::ELF:
-  //FIXME: what effect in COFF ?
-  case llvm::Triple::COFF:
-    // Use protected visibility for public symbols we define.
-    // ld.so doesn't support relative relocations at load time, which interferes
-    // with our metadata formats.
-    PublicDefinitionVisibility = llvm::GlobalValue::ProtectedVisibility;
-    break;
-  default:
-    // Default visibility should suffice for other object formats.
-    PublicDefinitionVisibility = llvm::GlobalValue::DefaultVisibility;
-    break;
+#define RESULT(LINKAGE, VISIBILITY, DLL_STORAGE)                               \
+  {                                                                            \
+    llvm::GlobalValue::LINKAGE##Linkage,                                       \
+    llvm::GlobalValue::VISIBILITY##Visibility,                                 \
+    llvm::GlobalValue::DLL_STORAGE##StorageClass                               \
   }
+
+  const auto ObjFormat = IGM.TargetInfo.OutputObjectFormat;
+
+  // Use protected visibility for public symbols we define on ELF.  ld.so
+  // doesn't support relative relocations at load time, which interferes with
+  // our metadata formats.  Default visibility should suffice for other object
+  // formats.
+  llvm::GlobalValue::VisibilityTypes PublicDefinitionVisibility =
+      ObjFormat == llvm::Triple::ELF ? llvm::GlobalValue::ProtectedVisibility
+                                     : llvm::GlobalValue::DefaultVisibility;
+  llvm::GlobalValue::DLLStorageClassTypes ExportedStorage =
+      ObjFormat == llvm::Triple::COFF ? llvm::GlobalValue::DLLExportStorageClass
+                                      : llvm::GlobalValue::DefaultStorageClass;
+  llvm::GlobalValue::DLLStorageClassTypes ImportedStorage =
+      ObjFormat == llvm::Triple::COFF ? llvm::GlobalValue::DLLImportStorageClass
+                                      : llvm::GlobalValue::DefaultStorageClass;
 
   switch (linkage) {
   case SILLinkage::Public:
-    return {llvm::GlobalValue::ExternalLinkage, PublicDefinitionVisibility};
-
+    return {llvm::GlobalValue::ExternalLinkage, PublicDefinitionVisibility,
+            ExportedStorage};
   case SILLinkage::Shared:
   case SILLinkage::SharedExternal:
-    return RESULT(LinkOnceODR, Hidden);
-
+    return RESULT(LinkOnceODR, Hidden, Default);
   case SILLinkage::Hidden:
-    return RESULT(External, Hidden);
-
+    return RESULT(External, Hidden, Default);
   case SILLinkage::Private:
-    if (IGM.IRGen.hasMultipleIGMs()) {
-      // In case of multiple llvm modules (in multi-threaded compilation) all
-      // private decls must be visible from other files.
-      return RESULT(External, Hidden);
-    }
-    return RESULT(Internal, Default);
-
-  case SILLinkage::PublicExternal:
-    if (isDefinition) {
-      return RESULT(AvailableExternally, Default);
-    }
-
-    if (isWeakImported)
-      return RESULT(ExternalWeak, Default);
-    return RESULT(External, Default);
-
+    // In case of multiple llvm modules (in multi-threaded compilation) all
+    // private decls must be visible from other files.
+    if (IGM.IRGen.hasMultipleIGMs())
+      return RESULT(External, Hidden, Default);
+    return RESULT(Internal, Default, Default);
+  case SILLinkage::PublicExternal: {
+    auto linkage = isDefinition
+                       ? llvm::GlobalValue::AvailableExternallyLinkage
+                       : isWeakImported ? llvm::GlobalValue::ExternalWeakLinkage
+                                        : llvm::GlobalValue::ExternalLinkage;
+    return {linkage, llvm::GlobalValue::DefaultVisibility, ImportedStorage};
+  }
   case SILLinkage::HiddenExternal:
-  case SILLinkage::PrivateExternal:
-    if (isDefinition) 
-      return RESULT(AvailableExternally, Hidden);
-    return RESULT(External, Hidden);
+  case SILLinkage::PrivateExternal: {
+    auto visibility = ObjFormat == llvm::Triple::COFF
+                          ? llvm::GlobalValue::DefaultVisibility
+                          : llvm::GlobalValue::HiddenVisibility;
+    auto linkage = isDefinition ? llvm::GlobalValue::AvailableExternallyLinkage
+                                : llvm::GlobalValue::ExternalLinkage;
+    return {linkage, visibility, ImportedStorage};
+  }
   }
   llvm_unreachable("bad SIL linkage");
 }
@@ -1267,13 +1270,12 @@ static void updateLinkageForDefinition(IRGenModule &IGM,
                                        const LinkEntity &entity) {
   // TODO: there are probably cases where we can avoid redoing the
   // entire linkage computation.
-  auto linkage = getIRLinkage(
-                   IGM,
-                   entity.getLinkage(IGM, ForDefinition),
-                   ForDefinition,
+  auto linkage =
+      getIRLinkage(IGM, entity.getLinkage(IGM, ForDefinition), ForDefinition,
                    entity.isWeakImported(IGM.getSwiftModule()));
-  global->setLinkage(linkage.first);
-  global->setVisibility(linkage.second);
+  global->setLinkage(std::get<0>(linkage));
+  global->setVisibility(std::get<1>(linkage));
+  global->setDLLStorageClass(std::get<2>(linkage));
 
   // Everything externally visible is considered used in Swift.
   // That mostly means we need to be good at not marking things external.
@@ -1281,10 +1283,10 @@ static void updateLinkageForDefinition(IRGenModule &IGM,
   // Exclude "main", because it should naturally be used, and because adding it
   // to llvm.used leaves a dangling use when the REPL attempts to discard
   // intermediate mains.
-  if (LinkInfo::isUsed(linkage.first, linkage.second) &&
-      global->getName() != SWIFT_ENTRY_POINT_FUNCTION) {
+  if (LinkInfo::isUsed(std::get<0>(linkage), std::get<1>(linkage),
+                       std::get<2>(linkage)) &&
+      global->getName() != SWIFT_ENTRY_POINT_FUNCTION)
     IGM.addUsedGlobal(global);
-  }
 }
 
 LinkInfo LinkInfo::get(IRGenModule &IGM, const LinkEntity &entity,
@@ -1293,10 +1295,9 @@ LinkInfo LinkInfo::get(IRGenModule &IGM, const LinkEntity &entity,
 
   entity.mangle(result.Name);
 
-  std::tie(result.Linkage, result.Visibility) =
-    getIRLinkage(IGM, entity.getLinkage(IGM, isDefinition),
-                 isDefinition,
-                 entity.isWeakImported(IGM.getSwiftModule()));
+  std::tie(result.Linkage, result.Visibility, result.DLLStorageClass) =
+      getIRLinkage(IGM, entity.getLinkage(IGM, isDefinition), isDefinition,
+                   entity.isWeakImported(IGM.getSwiftModule()));
 
   result.ForDefinition = isDefinition;
 
@@ -1326,15 +1327,15 @@ llvm::Function *LinkInfo::createFunction(IRGenModule &IGM,
     existing->setName(getName() + ".unique");
   }
 
-  llvm::Function *fn
-    = llvm::Function::Create(fnType, getLinkage(), getName());
-  if (insertBefore) {
-    IGM.Module.getFunctionList().insert(insertBefore->getIterator(), fn);
-  } else {
-    IGM.Module.getFunctionList().push_back(fn);
-  }
+  llvm::Function *fn = llvm::Function::Create(fnType, getLinkage(), getName());
   fn->setVisibility(getVisibility());
   fn->setCallingConv(cc);
+  fn->setDLLStorageClass(getDLLStorage());
+
+  if (insertBefore)
+    IGM.Module.getFunctionList().insert(insertBefore->getIterator(), fn);
+  else
+    IGM.Module.getFunctionList().push_back(fn);
 
   auto initialAttrs = IGM.constructInitialAttributes();
   // Merge initialAttrs with attrs.
@@ -1358,12 +1359,15 @@ llvm::Function *LinkInfo::createFunction(IRGenModule &IGM,
 }
 
 bool LinkInfo::isUsed(llvm::GlobalValue::LinkageTypes Linkage,
-                      llvm::GlobalValue::VisibilityTypes Visibility) {
+                      llvm::GlobalValue::VisibilityTypes Visibility,
+                      llvm::GlobalValue::DLLStorageClassTypes DLLStorage) {
   // Everything externally visible is considered used in Swift.
   // That mostly means we need to be good at not marking things external.
   return Linkage == llvm::GlobalValue::ExternalLinkage &&
-    (Visibility == llvm::GlobalValue::DefaultVisibility ||
-     Visibility == llvm::GlobalValue::ProtectedVisibility);
+         (Visibility == llvm::GlobalValue::DefaultVisibility ||
+          Visibility == llvm::GlobalValue::ProtectedVisibility) &&
+         (DLLStorage == llvm::GlobalValue::DefaultStorageClass ||
+          DLLStorage == llvm::GlobalValue::DLLExportStorageClass);
 }
 
 /// Get or create an LLVM global variable with these linkage rules.
@@ -1388,11 +1392,12 @@ llvm::GlobalVariable *LinkInfo::createVariable(IRGenModule &IGM,
   }
 
   auto var = new llvm::GlobalVariable(IGM.Module, storageType,
-                                      /*constant*/ false,
-                                      getLinkage(), /*initializer*/ nullptr,
-                                      getName());
+                                      /*constant*/ false, getLinkage(),
+                                      /*initializer*/ nullptr, getName());
+
   var->setVisibility(getVisibility());
   var->setAlignment(alignment.getValue());
+  var->setDLLStorageClass(getDLLStorage());
 
   // Everything externally visible is considered used in Swift.
   // That mostly means we need to be good at not marking things external.
@@ -2394,10 +2399,12 @@ llvm::GlobalValue *IRGenModule::defineTypeMetadata(CanType concreteType,
 
   LinkInfo link = LinkInfo::get(*this, directEntity, ForDefinition);
   auto *ptrTy = cast<llvm::PointerType>(addr->getType());
-  auto *alias = llvm::GlobalAlias::create(
-      ptrTy->getElementType(), ptrTy->getAddressSpace(), link.getLinkage(),
-      link.getName(), addr, &Module);
+  auto *alias =
+      llvm::GlobalAlias::create(ptrTy->getElementType(),
+                                ptrTy->getAddressSpace(), link.getLinkage(),
+                                link.getName(), addr, &Module);
   alias->setVisibility(link.getVisibility());
+  alias->setDLLStorageClass(link.getDLLStorage());
 
   // The full metadata is used based on the visibility of the address point,
   // not the metadata itself.
