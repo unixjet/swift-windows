@@ -1008,18 +1008,176 @@ void swift::fixItAvailableAttrRename(TypeChecker &TC,
                                      const AvailableAttr *attr,
                                      const CallExpr *CE) {
   ParsedDeclName parsed = swift::parseDeclName(attr->Rename);
-  if (!parsed || parsed.isInstanceMember() || parsed.isPropertyAccessor())
+  if (!parsed)
     return;
 
-  SmallString<64> baseReplace;
-  if (!parsed.ContextName.empty()) {
-    baseReplace += parsed.ContextName;
-    baseReplace += '.';
-  }
-  baseReplace += parsed.BaseName;
-  diag.fixItReplace(referenceRange, baseReplace);
+  SourceManager &sourceMgr = TC.Context.SourceMgr;
 
-  if (!CE || !parsed.IsFunctionName)
+  if (parsed.isInstanceMember()) {
+    // Replace the base of the call with the "self argument".
+    // We can only do a good job with the fix-it if we have the whole call
+    // expression.
+    // FIXME: Should we be validating the ContextName in some way?
+    if (!CE)
+      return;
+
+    unsigned selfIndex = parsed.SelfIndex.getValue();
+    const Expr *selfExpr = nullptr;
+    SourceLoc removeRangeStart;
+    SourceLoc removeRangeEnd;
+
+    const Expr *argExpr = CE->getArg();
+    if (auto args = dyn_cast<TupleExpr>(argExpr)) {
+      if (selfIndex >= args->getNumElements())
+        return;
+
+      if (parsed.IsGetter) {
+        if (args->getNumElements() != 1)
+          return;
+      } else if (parsed.IsSetter) {
+        if (args->getNumElements() != 2)
+          return;
+      } else {
+        if (parsed.ArgumentLabels.size() != args->getNumElements() - 1)
+          return;
+      }
+
+      selfExpr = args->getElement(selfIndex);
+
+      if (selfIndex + 1 == args->getNumElements()) {
+        if (selfIndex > 0) {
+          // Remove from the previous comma to the close-paren (half-open).
+          removeRangeStart = args->getElement(selfIndex-1)->getEndLoc();
+          removeRangeStart = Lexer::getLocForEndOfToken(sourceMgr,
+                                                        removeRangeStart);
+        } else {
+          // Remove from after the open paren to the close paren (half-open).
+          removeRangeStart = Lexer::getLocForEndOfToken(sourceMgr,
+                                                        argExpr->getStartLoc());
+        }
+        removeRangeEnd = args->getEndLoc();
+
+      } else {
+        // Remove from the label to the start of the next argument (half-open).
+        SourceLoc labelLoc = args->getElementNameLoc(selfIndex);
+        if (labelLoc.isValid())
+          removeRangeStart = labelLoc;
+        else
+          removeRangeStart = selfExpr->getStartLoc();
+
+        SourceLoc nextLabelLoc = args->getElementNameLoc(selfIndex + 1);
+        if (nextLabelLoc.isValid())
+          removeRangeEnd = nextLabelLoc;
+        else
+          removeRangeEnd = args->getElement(selfIndex + 1)->getStartLoc();
+      }
+
+      // Avoid later argument label fix-its for this argument.
+      if (!parsed.isPropertyAccessor()) {
+        Identifier oldLabel = args->getElementName(selfIndex);
+        StringRef oldLabelStr;
+        if (!oldLabel.empty())
+          oldLabelStr = oldLabel.str();
+        parsed.ArgumentLabels.insert(parsed.ArgumentLabels.begin() + selfIndex,
+                                     oldLabelStr);
+      }
+
+    } else {
+      if (selfIndex != 0 || !parsed.ArgumentLabels.empty())
+        return;
+      selfExpr = cast<ParenExpr>(argExpr)->getSubExpr();
+      // Remove from after the open paren to the close paren (half-open).
+      removeRangeStart = Lexer::getLocForEndOfToken(sourceMgr,
+                                                    argExpr->getStartLoc());
+      removeRangeEnd = argExpr->getEndLoc();
+    }
+
+    if (auto *inoutSelf = dyn_cast<InOutExpr>(selfExpr))
+      selfExpr = inoutSelf->getSubExpr();
+
+    CharSourceRange selfExprRange =
+        Lexer::getCharSourceRangeFromSourceRange(sourceMgr,
+                                                 selfExpr->getSourceRange());
+    bool needsParens = !selfExpr->canAppendCallParentheses();
+
+    SmallString<64> selfReplace;
+    if (needsParens)
+      selfReplace.push_back('(');
+    selfReplace += sourceMgr.extractText(selfExprRange);
+    if (needsParens)
+      selfReplace.push_back(')');
+    selfReplace.push_back('.');
+    selfReplace += parsed.BaseName;
+    diag.fixItReplace(CE->getFn()->getSourceRange(), selfReplace);
+
+    if (!parsed.isPropertyAccessor())
+      diag.fixItRemoveChars(removeRangeStart, removeRangeEnd);
+
+    // Continue on to diagnose any argument label renames.
+
+  } else if (parsed.BaseName == TC.Context.Id_init.str() && CE) {
+    // For initializers, replace with a "call" of the context type...but only
+    // if we know we're doing a call (rather than a first-class reference).
+    if (parsed.isMember()) {
+      diag.fixItReplace(CE->getFn()->getSourceRange(), parsed.ContextName);
+
+    } else {
+      auto *dotCall = dyn_cast<DotSyntaxCallExpr>(CE->getFn());
+      if (!dotCall)
+        return;
+
+      SourceLoc removeLoc = dotCall->getDotLoc();
+      if (removeLoc.isInvalid())
+        return;
+
+      diag.fixItRemove(SourceRange(removeLoc, dotCall->getFn()->getEndLoc()));
+    }
+
+  } else {
+    // Just replace the base name.
+    SmallString<64> baseReplace;
+    if (!parsed.ContextName.empty()) {
+      baseReplace += parsed.ContextName;
+      baseReplace += '.';
+    }
+    baseReplace += parsed.BaseName;
+    diag.fixItReplace(referenceRange, baseReplace);
+  }
+
+  if (!CE)
+    return;
+
+  const Expr *argExpr = CE->getArg();
+  if (parsed.IsGetter) {
+    diag.fixItRemove(argExpr->getSourceRange());
+    return;
+  }
+
+  if (parsed.IsSetter) {
+    const Expr *newValueExpr = nullptr;
+
+    if (auto args = dyn_cast<TupleExpr>(argExpr)) {
+      size_t newValueIndex = 0;
+      if (parsed.isInstanceMember()) {
+        assert(parsed.SelfIndex.getValue() == 0 ||
+               parsed.SelfIndex.getValue() == 1);
+        newValueIndex = !parsed.SelfIndex.getValue();
+      }
+      newValueExpr = args->getElement(newValueIndex);
+    } else {
+      newValueExpr = cast<ParenExpr>(argExpr)->getSubExpr();
+    }
+
+    diag.fixItReplaceChars(argExpr->getStartLoc(), newValueExpr->getStartLoc(),
+                           " = ");
+    diag.fixItRemoveChars(Lexer::getLocForEndOfToken(sourceMgr,
+                                                     newValueExpr->getEndLoc()),
+                          Lexer::getLocForEndOfToken(sourceMgr,
+                                                     argExpr->getEndLoc()));
+    return;
+  }
+
+  if (!parsed.IsFunctionName)
     return;
 
   SmallVector<Identifier, 4> argumentLabelIDs;
@@ -1029,7 +1187,6 @@ void swift::fixItAvailableAttrRename(TypeChecker &TC,
     return labelStr.empty() ? Identifier() : TC.Context.getIdentifier(labelStr);
   });
 
-  const Expr *argExpr = CE->getArg();
   if (auto args = dyn_cast<TupleExpr>(argExpr)) {
     if (argumentLabelIDs.size() != args->getNumElements()) {
       // Mismatched lengths; give up.
@@ -1064,6 +1221,63 @@ void swift::fixItAvailableAttrRename(TypeChecker &TC,
   }
 
   diagnoseArgumentLabelError(TC, argExpr, argumentLabelIDs, false, &diag);
+}
+
+// Must be kept in sync with diag::availability_decl_unavailable_rename and
+// others.
+namespace {
+  enum class ReplacementDeclKind : unsigned {
+    None,
+    InstanceMethod,
+    Property,
+  };
+}
+
+static Optional<ReplacementDeclKind>
+describeRename(ASTContext &ctx, const AvailableAttr *attr,
+               SmallVectorImpl<char> &nameBuf) {
+  ParsedDeclName parsed = swift::parseDeclName(attr->Rename);
+  if (!parsed)
+    return None;
+
+  // Only produce special descriptions for renames to
+  // - instance members
+  // - properties (or global bindings)
+  // - class/static methods
+  // - initializers, even if unqualified
+  // Leave non-member renames alone, as well as renames from top-level types
+  // and bindings to member types and class/static properties.
+  if (!(parsed.isInstanceMember() || parsed.isPropertyAccessor() ||
+        (parsed.isMember() && parsed.IsFunctionName) ||
+        (parsed.BaseName == ctx.Id_init.str()))) {
+    return None;
+  }
+
+  llvm::raw_svector_ostream name(nameBuf);
+
+  if (!parsed.ContextName.empty())
+    name << parsed.ContextName << '.';
+
+  if (parsed.IsFunctionName) {
+    // FIXME: duplicated from above.
+    SmallVector<Identifier, 4> argumentLabelIDs;
+    std::transform(parsed.ArgumentLabels.begin(), parsed.ArgumentLabels.end(),
+                   std::back_inserter(argumentLabelIDs),
+                   [&ctx](StringRef labelStr) -> Identifier {
+      return labelStr.empty() ? Identifier() : ctx.getIdentifier(labelStr);
+    });
+    name << DeclName(ctx, ctx.getIdentifier(parsed.BaseName), argumentLabelIDs);
+  } else {
+    name << parsed.BaseName;
+  }
+
+  if (parsed.isMember() && parsed.isPropertyAccessor())
+    return ReplacementDeclKind::Property;
+  if (parsed.isInstanceMember() && parsed.IsFunctionName)
+    return ReplacementDeclKind::InstanceMethod;
+
+  // We don't have enough information.
+  return ReplacementDeclKind::None;
 }
 
 void TypeChecker::diagnoseDeprecated(SourceRange ReferenceRange,
@@ -1102,23 +1316,31 @@ void TypeChecker::diagnoseDeprecated(SourceRange ReferenceRange,
     return;
   }
 
-  if (Attr->Message.empty()) {
-    diagnose(ReferenceRange.Start, diag::availability_deprecated_rename, Name,
-             Attr->hasPlatform(), Platform, Attr->Deprecated.hasValue(),
-             DeprecatedVersion, Attr->Rename)
-      .highlight(Attr->getRange());
-  } else {
+  SmallString<32> newNameBuf;
+  Optional<ReplacementDeclKind> replacementDeclKind =
+    describeRename(Context, Attr, newNameBuf);
+  StringRef newName = replacementDeclKind ? newNameBuf.str() : Attr->Rename;
+
+  if (!Attr->Message.empty()) {
     EncodedDiagnosticMessage EncodedMessage(Attr->Message);
     diagnose(ReferenceRange.Start, diag::availability_deprecated_msg, Name,
              Attr->hasPlatform(), Platform, Attr->Deprecated.hasValue(),
              DeprecatedVersion, EncodedMessage.Message)
+      .highlight(Attr->getRange());
+  } else {
+    unsigned rawReplaceKind = static_cast<unsigned>(
+        replacementDeclKind.getValueOr(ReplacementDeclKind::None));
+    diagnose(ReferenceRange.Start, diag::availability_deprecated_rename, Name,
+             Attr->hasPlatform(), Platform, Attr->Deprecated.hasValue(),
+             DeprecatedVersion, replacementDeclKind.hasValue(), rawReplaceKind,
+             newName)
       .highlight(Attr->getRange());
   }
 
   if (!Attr->Rename.empty()) {
     auto renameDiag = diagnose(ReferenceRange.Start,
                                diag::note_deprecated_rename,
-                               Attr->Rename);
+                               newName);
     fixItAvailableAttrRename(*this, renameDiag, ReferenceRange, Attr, CE);
   }
 }
@@ -1153,14 +1375,24 @@ bool TypeChecker::diagnoseExplicitUnavailability(const ValueDecl *D,
 
   case UnconditionalAvailabilityKind::None:
   case UnconditionalAvailabilityKind::Unavailable:
+  case UnconditionalAvailabilityKind::UnavailableInCurrentSwift:
     if (!Attr->Rename.empty()) {
+      SmallString<32> newNameBuf;
+      Optional<ReplacementDeclKind> replaceKind =
+          describeRename(Context, Attr, newNameBuf);
+      unsigned rawReplaceKind = static_cast<unsigned>(
+          replaceKind.getValueOr(ReplacementDeclKind::None));
+      StringRef newName = replaceKind ? newNameBuf.str() : Attr->Rename;
+
       if (Attr->Message.empty()) {
         auto diag = diagnose(Loc, diag::availability_decl_unavailable_rename,
-                             Name, Attr->Rename);
+                             Name, replaceKind.hasValue(), rawReplaceKind,
+                             newName);
         fixItAvailableAttrRename(*this, diag, R, Attr, CE);
       } else {
         auto diag = diagnose(Loc,diag::availability_decl_unavailable_rename_msg,
-                             Name, Attr->Rename, Attr->Message);
+                             Name, replaceKind.hasValue(), rawReplaceKind,
+                             newName, Attr->Message);
         fixItAvailableAttrRename(*this, diag, R, Attr, CE);
       }
     } else if (Attr->Message.empty()) {

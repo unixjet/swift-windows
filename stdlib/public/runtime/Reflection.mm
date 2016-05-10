@@ -183,7 +183,7 @@ static_assert(offsetof(MagicMirror, MirrorWitness) ==
 #pragma clang diagnostic ignored "-Wreturn-type-c-linkage"
   
 
-SWIFT_RUNTIME_STDLIB_INTERFACE
+SWIFT_CC(swift) SWIFT_RUNTIME_STDLIB_INTERFACE
 extern "C"
 AnyReturn swift_MagicMirrorData_value(HeapObject *owner,
                                       const OpaqueValue *value,
@@ -196,7 +196,7 @@ AnyReturn swift_MagicMirrorData_value(HeapObject *owner,
 
   return AnyReturn(result);
 }
-SWIFT_RUNTIME_STDLIB_INTERFACE
+SWIFT_CC(swift) SWIFT_RUNTIME_STDLIB_INTERFACE
 extern "C"
 const Metadata *swift_MagicMirrorData_valueType(HeapObject *owner,
                                                 const OpaqueValue *value,
@@ -205,7 +205,7 @@ const Metadata *swift_MagicMirrorData_valueType(HeapObject *owner,
 }
 
 #if SWIFT_OBJC_INTEROP
-SWIFT_RUNTIME_STDLIB_INTERFACE
+SWIFT_CC(swift) SWIFT_RUNTIME_STDLIB_INTERFACE
 extern "C"
 AnyReturn swift_MagicMirrorData_objcValue(HeapObject *owner,
                                           const OpaqueValue *value,
@@ -223,7 +223,7 @@ AnyReturn swift_MagicMirrorData_objcValue(HeapObject *owner,
 
 #pragma clang diagnostic pop
 
-SWIFT_RUNTIME_STDLIB_INTERFACE
+SWIFT_CC(swift) SWIFT_RUNTIME_STDLIB_INTERFACE
 extern "C"
 const char *swift_OpaqueSummary(const Metadata *T) {
   switch (T->getKind()) {
@@ -256,7 +256,7 @@ const char *swift_OpaqueSummary(const Metadata *T) {
   }
 }
 
-SWIFT_RUNTIME_STDLIB_INTERFACE
+SWIFT_CC(swift) SWIFT_RUNTIME_STDLIB_INTERFACE
 extern "C"
 void swift_MagicMirrorData_summary(const Metadata *T, String *result) {
   switch (T->getKind()) {
@@ -306,7 +306,7 @@ void swift_MagicMirrorData_summary(const Metadata *T, String *result) {
   }
 }
 
-SWIFT_RUNTIME_STDLIB_INTERFACE
+SWIFT_CC(swift) SWIFT_RUNTIME_STDLIB_INTERFACE
 extern "C"
 const Metadata *swift_MagicMirrorData_objcValueType(HeapObject *owner,
                                                     const OpaqueValue *value,
@@ -414,7 +414,7 @@ static Mirror reflect(HeapObject *owner,
 
 // -- Tuple destructuring.
   
-SWIFT_RUNTIME_STDLIB_INTERFACE
+SWIFT_CC(swift) SWIFT_RUNTIME_STDLIB_INTERFACE
 extern "C"
 intptr_t swift_TupleMirror_count(HeapObject *owner,
                                  const OpaqueValue *value,
@@ -426,7 +426,7 @@ intptr_t swift_TupleMirror_count(HeapObject *owner,
 
 /// \param owner passed at +1, consumed.
 /// \param value passed unowned.
-SWIFT_RUNTIME_STDLIB_INTERFACE
+SWIFT_CC(swift) SWIFT_RUNTIME_STDLIB_INTERFACE
 extern "C"
 void swift_TupleMirror_subscript(String *outString,
                                  Mirror *outMirror,
@@ -468,7 +468,7 @@ static const char *getFieldName(const char *fieldNames, size_t i) {
 
 // -- Struct destructuring.
   
-SWIFT_RUNTIME_STDLIB_INTERFACE
+SWIFT_CC(swift) SWIFT_RUNTIME_STDLIB_INTERFACE
 extern "C"
 intptr_t swift_StructMirror_count(HeapObject *owner,
                                   const OpaqueValue *value,
@@ -478,7 +478,7 @@ intptr_t swift_StructMirror_count(HeapObject *owner,
   return Struct->Description->Struct.NumFields;
 }
 
-SWIFT_RUNTIME_STDLIB_INTERFACE
+SWIFT_CC(swift) SWIFT_RUNTIME_STDLIB_INTERFACE
 extern "C"
 void swift_StructMirror_subscript(String *outString,
                                   Mirror *outMirror,
@@ -551,7 +551,7 @@ static void getEnumMirrorInfo(const OpaqueValue *value,
     *indirectPtr = indirect;
 }
 
-SWIFT_RUNTIME_STDLIB_INTERFACE
+SWIFT_CC(swift) SWIFT_RUNTIME_STDLIB_INTERFACE
 extern "C"
 const char *swift_EnumMirror_caseName(HeapObject *owner,
                                       const OpaqueValue *value,
@@ -572,7 +572,7 @@ const char *swift_EnumMirror_caseName(HeapObject *owner,
   return getFieldName(Description.CaseNames, tag);
 }
 
-SWIFT_RUNTIME_STDLIB_INTERFACE
+SWIFT_CC(swift) SWIFT_RUNTIME_STDLIB_INTERFACE
 extern "C"
 const char *swift_EnumCaseName(OpaqueValue *value, const Metadata *type) {
   // Build a magic mirror. Unconditionally destroy the value at the end.
@@ -597,7 +597,7 @@ const char *swift_EnumCaseName(OpaqueValue *value, const Metadata *type) {
   return result;
 }
 
-SWIFT_RUNTIME_STDLIB_INTERFACE
+SWIFT_CC(swift) SWIFT_RUNTIME_STDLIB_INTERFACE
 extern "C"
 intptr_t swift_EnumMirror_count(HeapObject *owner,
                                 const OpaqueValue *value,
@@ -613,7 +613,7 @@ intptr_t swift_EnumMirror_count(HeapObject *owner,
   return (payloadType != nullptr) ? 1 : 0;
 }
 
-SWIFT_RUNTIME_STDLIB_INTERFACE
+SWIFT_CC(swift) SWIFT_RUNTIME_STDLIB_INTERFACE
 extern "C"
 void swift_EnumMirror_subscript(String *outString,
                                 Mirror *outMirror,
@@ -662,7 +662,7 @@ static Mirror getMirrorForSuperclass(const ClassMetadata *sup,
                                      const OpaqueValue *value,
                                      const Metadata *type);
 
-SWIFT_RUNTIME_STDLIB_INTERFACE
+SWIFT_CC(swift) SWIFT_RUNTIME_STDLIB_INTERFACE
 extern "C"
 intptr_t swift_ClassMirror_count(HeapObject *owner,
                                  const OpaqueValue *value,
@@ -681,7 +681,7 @@ intptr_t swift_ClassMirror_count(HeapObject *owner,
 
 /// \param owner passed at +1, consumed.
 /// \param value passed unowned.
-SWIFT_RUNTIME_STDLIB_INTERFACE
+SWIFT_CC(swift) SWIFT_RUNTIME_STDLIB_INTERFACE
 extern "C"
 void swift_ClassMirror_subscript(String *outString,
                                  Mirror *outMirror,
@@ -802,7 +802,7 @@ static const Metadata *getMetadataForEncoding(const char *encoding) {
 
 /// \param owner passed at +1, consumed.
 /// \param value passed unowned.
-SWIFT_RUNTIME_STDLIB_INTERFACE
+SWIFT_CC(swift) SWIFT_RUNTIME_STDLIB_INTERFACE
 extern "C"
 intptr_t swift_ObjCMirror_count(HeapObject *owner,
                                 const OpaqueValue *value,
@@ -838,7 +838,7 @@ static Mirror ObjC_getMirrorForSuperclass(Class sup,
                                           const OpaqueValue *value,
                                           const Metadata *type);
   
-SWIFT_RUNTIME_STDLIB_INTERFACE
+SWIFT_CC(swift) SWIFT_RUNTIME_STDLIB_INTERFACE
 extern "C"
 void swift_ObjCMirror_subscript(String *outString,
                                 Mirror *outMirror,
@@ -902,7 +902,7 @@ void swift_ObjCMirror_subscript(String *outString,
 #endif
 }
 
-SWIFT_RUNTIME_STDLIB_INTERFACE
+SWIFT_CC(swift) SWIFT_RUNTIME_STDLIB_INTERFACE
 extern "C" id
 swift_ClassMirror_quickLookObject(HeapObject *owner, const OpaqueValue *value,
                                   const Metadata *type) {
@@ -918,7 +918,7 @@ swift_ClassMirror_quickLookObject(HeapObject *owner, const OpaqueValue *value,
   return object;
 }
 
-SWIFT_RUNTIME_STDLIB_INTERFACE
+SWIFT_CC(swift) SWIFT_RUNTIME_STDLIB_INTERFACE
 extern "C" bool swift_isKind(id object, NSString *className) {
   bool result = [object isKindOfClass:NSClassFromString(className)];
   [object release];

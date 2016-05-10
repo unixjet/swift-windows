@@ -991,10 +991,11 @@ details of the setups of other systems or automated environments.""")
     if args.test_optimized:
         args.test = True
 
-    # XCTest has a dependency on Foundation.
+    # SwiftPM and XCTest have a dependency on Foundation.
     # On OS X, Foundation is built automatically using xcodebuild.
     # On Linux, we must ensure that it is built manually.
-    if args.build_xctest and platform.system() != "Darwin":
+    if (args.build_swiftpm or args.build_xctest) and \
+            platform.system() != "Darwin":
         args.build_foundation = True
 
     # --skip-test-ios is merely a shorthand for host and simulator tests.
@@ -1014,14 +1015,7 @@ details of the setups of other systems or automated environments.""")
 
     if not args.test and not args.validation_test and not args.long_test:
         build_script_impl_inferred_args += [
-            "--skip-test-cmark",
-            "--skip-test-lldb",
             "--skip-test-swift",
-            "--skip-test-llbuild",
-            "--skip-test-swiftpm",
-            "--skip-test-xctest",
-            "--skip-test-foundation",
-            "--skip-test-libdispatch",
             "--skip-test-linux",
             "--skip-test-freebsd",
             "--skip-test-cygwin",
@@ -1032,6 +1026,17 @@ details of the setups of other systems or automated environments.""")
             "--skip-test-tvos-host",
             "--skip-test-watchos-simulator",
             "--skip-test-watchos-host",
+        ]
+
+    if not args.test:
+        build_script_impl_inferred_args += [
+            "--skip-test-cmark",
+            "--skip-test-lldb",
+            "--skip-test-llbuild",
+            "--skip-test-swiftpm",
+            "--skip-test-xctest",
+            "--skip-test-foundation",
+            "--skip-test-libdispatch",
         ]
 
     if args.validation_test:

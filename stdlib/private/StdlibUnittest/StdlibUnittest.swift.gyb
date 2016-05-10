@@ -599,7 +599,7 @@ func _printDebuggingAdvice(_ fullTestName: String) {
   var invocation = [Process.arguments[0]]
   let interpreter = getenv("SWIFT_INTERPRETER")
   if interpreter != nil {
-    if let interpreterCmd = String(validatingUTF8: interpreter) {
+    if let interpreterCmd = String(validatingUTF8: interpreter!) {
         invocation.insert(interpreterCmd, at: 0)
     }
   }
@@ -618,7 +618,7 @@ func _stdlib_installTrapInterceptor()
 
 #if _runtime(_ObjC)
 @objc protocol _StdlibUnittestNSException {
-  optional var name: AnyObject { get }
+  @objc optional var name: AnyObject { get }
 }
 #endif
 
@@ -627,14 +627,17 @@ func _childProcess() {
 
 #if _runtime(_ObjC)
   objc_setUncaughtExceptionHandler {
+    let exception: AnyObject = $0!
     var stderr = _Stderr()
-    let maybeNSException = unsafeBitCast($0, to:_StdlibUnittestNSException.self)
+    let maybeNSException =
+        unsafeBitCast(exception, to: _StdlibUnittestNSException.self)
     if let name = maybeNSException.name {
       print("*** [StdlibUnittest] Terminating due to uncaught exception " +
-        "\(name): \($0)",
+        "\(name): \(exception)",
         to: &stderr)
     } else {
-      print("*** [StdlibUnittest] Terminating due to uncaught exception: \($0)",
+      print("*** [StdlibUnittest] Terminating due to uncaught exception: " +
+        "\(exception)",
         to: &stderr)      
     }
   }
@@ -2268,8 +2271,8 @@ public func expectEqualsUnordered<
 }
 
 public func expectEqualFunctionsForDomain<ArgumentType, Result : Equatable>(
-    _ arguments: [ArgumentType], _ function1: ArgumentType -> Result,
-    _ function2: ArgumentType -> Result
+    _ arguments: [ArgumentType], _ function1: (ArgumentType) -> Result,
+    _ function2: (ArgumentType) -> Result
 ) {
   for a in arguments {
     let expected = function1(a)
@@ -2282,8 +2285,8 @@ public func expectEqualMethodsForDomain<
   SelfType, ArgumentType, Result : Equatable
 >(
   _ selfs: [SelfType], _ arguments: [ArgumentType],
-  _ function1: SelfType -> ArgumentType -> Result,
-  _ function2: SelfType -> ArgumentType -> Result
+  _ function1: (SelfType) -> (ArgumentType) -> Result,
+  _ function2: (SelfType) -> (ArgumentType) -> Result
 ) {
   for s in selfs {
     for a in arguments {
@@ -2310,7 +2313,7 @@ public func expectEqualUnicodeScalars(
   }
 }
 
-func compose<A, B, C>(_ f: A -> B, _ g: B -> C) -> A -> C {
+func compose<A, B, C>(_ f: (A) -> B, _ g: (B) -> C) -> (A) -> C {
   return { a in
     return g(f(a))
   }

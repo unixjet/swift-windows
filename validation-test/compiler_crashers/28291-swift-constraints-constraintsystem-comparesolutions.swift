@@ -6,10 +6,5 @@
 // See http://swift.org/CONTRIBUTORS.txt for the list of Swift project authors
 
 // RUN: not --crash %target-swift-frontend %s -parse
-{
-protocol A{
-typealias e
-let f
-typealias e
-typealias e=b
-typealias b
+// REQUIRES: asserts
+class T,struct A{func b{}struct A{class B<T}func b:A.B{var _=b<T

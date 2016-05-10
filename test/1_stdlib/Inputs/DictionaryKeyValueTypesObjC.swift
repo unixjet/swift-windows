@@ -3,16 +3,6 @@ import Darwin
 import StdlibUnittest
 import Foundation
 
-// FIXME: Should go into the standard library.
-public extension _ObjectiveCBridgeable {
-  static func _unconditionallyBridgeFromObjectiveC(_ source: _ObjectiveCType?)
-      -> Self {
-    var result: Self? = nil
-    _forceBridgeFromObjectiveC(source!, result: &result)
-    return result!
-  }
-}
-
 func convertDictionaryToNSDictionary<Key, Value>(
   _ d: [Key : Value]
 ) -> NSDictionary {
@@ -44,18 +34,18 @@ func isCocoaDictionary<KeyTy : Hashable, ValueTy>(
 }
 
  func isNativeNSDictionary(_ d: NSDictionary) -> Bool {
-  let className: NSString = NSStringFromClass(d.dynamicType)
+  let className: NSString = NSStringFromClass(d.dynamicType) as NSString
   return className.range(of: "_NativeDictionaryStorageOwner").length > 0
 }
 
  func isCocoaNSDictionary(_ d: NSDictionary) -> Bool {
-  let className: NSString = NSStringFromClass(d.dynamicType)
+  let className: NSString = NSStringFromClass(d.dynamicType) as NSString
   return className.range(of: "NSDictionary").length > 0 ||
     className.range(of: "NSCFDictionary").length > 0
 }
 
  func isNativeNSArray(_ d: NSArray) -> Bool {
-  let className: NSString = NSStringFromClass(d.dynamicType)
+  let className: NSString = NSStringFromClass(d.dynamicType) as NSString
   return className.range(of: "_SwiftDeferredNSArray").length > 0
 }
 
@@ -258,6 +248,13 @@ struct TestBridgedKeyTy
     return true
   }
 
+  static func _unconditionallyBridgeFromObjectiveC(_ source: TestObjCKeyTy?)
+      -> TestBridgedKeyTy {
+    var result: TestBridgedKeyTy? = nil
+    _forceBridgeFromObjectiveC(source!, result: &result)
+    return result!
+  }
+
   var value: Int
   var _hashValue: Int
   var serial: Int
@@ -319,6 +316,13 @@ struct TestBridgedValueTy : CustomStringConvertible, _ObjectiveCBridgeable {
     return true
   }
 
+  static func _unconditionallyBridgeFromObjectiveC(_ source: TestObjCValueTy?)
+      -> TestBridgedValueTy {
+    var result: TestBridgedValueTy? = nil
+    _forceBridgeFromObjectiveC(source!, result: &result)
+    return result!
+  }
+
   var value: Int
   var serial: Int
 }
@@ -371,6 +375,14 @@ struct TestBridgedEquatableValueTy
   ) -> Bool {
     self._forceBridgeFromObjectiveC(x, result: &result)
     return true
+  }
+
+  static func _unconditionallyBridgeFromObjectiveC(
+    _ source: TestObjCEquatableValueTy?
+  ) -> TestBridgedEquatableValueTy {
+    var result: TestBridgedEquatableValueTy? = nil
+    _forceBridgeFromObjectiveC(source!, result: &result)
+    return result!
   }
 
   var value: Int
@@ -937,7 +949,7 @@ func convertArrayToNSArray<T>(_ array: [T]) -> NSArray {
 }
 
 func getBridgedNSArrayOfValueTypeCustomBridged(
-  numElements numElements: Int = 3,
+  numElements: Int = 3,
   capacity: Int? = nil
 ) -> NSArray {
   assert(!_isBridgedVerbatimToObjectiveC(TestBridgedValueTy.self))

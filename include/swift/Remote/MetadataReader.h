@@ -98,10 +98,25 @@ class TypeDecoder {
       return Builder.createExistentialMetatypeType(instance);
     }
     case NodeKind::Metatype: {
-      auto instance = decodeMangledType(Node->getChild(0));
+      unsigned i = 0;
+      bool wasAbstract = false;
+
+      // Handle lowered metatypes in a hackish way. If the representation
+      // was not thin, force the resulting typeref to have a non-empty
+      // representation.
+      if (Node->getNumChildren() == 2) {
+        auto repr = Node->getChild(i++);
+        if (repr->getKind() != NodeKind::MetatypeRepresentation ||
+            !repr->hasText())
+          return BuiltType();
+        auto &str = repr->getText();
+        if (str != "@thin")
+          wasAbstract = true;
+      }
+      auto instance = decodeMangledType(Node->getChild(i));
       if (!instance)
         return BuiltType();
-      return Builder.createMetatypeType(instance);
+      return Builder.createMetatypeType(instance, wasAbstract);
     }
     case NodeKind::ProtocolList: {
       std::vector<BuiltType> protocols;
@@ -163,6 +178,51 @@ class TypeDecoder {
 
       auto result = decodeMangledType(Node->getChild(isThrow ? 2 : 1));
       if (!result) return BuiltType();
+      return Builder.createFunctionType(arguments, argsAreInOut,
+                                        result, flags);
+    }
+    case NodeKind::ImplFunctionType: {
+      // Minimal support for lowered function types. These come up in
+      // reflection as capture types. For the reflection library's
+      // purposes, the only part that matters is the convention.
+      FunctionTypeFlags flags;
+
+      for (unsigned i = 0; i < Node->getNumChildren(); i++) {
+        auto child = Node->getChild(i);
+
+        if (child->getKind() == NodeKind::ImplConvention) {
+          if (!child->hasText())
+            return BuiltType();
+
+          auto &text = child->getText();
+
+          if (text == "@convention(thin)") {
+            flags =
+              flags.withConvention(FunctionMetadataConvention::Thin);
+          }
+        } else if (child->getKind() == NodeKind::ImplFunctionAttribute) {
+          if (!child->hasText())
+            return BuiltType();
+
+          auto &text = child->getText();
+          if (text == "@convention(c)") {
+            flags =
+              flags.withConvention(FunctionMetadataConvention::CFunctionPointer);
+          } else if (text == "@convention(block)") {
+            flags =
+              flags.withConvention(FunctionMetadataConvention::Block);
+          }
+        }
+      }
+
+      // Completely punt on argument types and results.
+      std::vector<BuiltType> arguments;
+      std::vector<bool> argsAreInOut;
+
+      std::vector<BuiltType> elements;
+      std::string labels;
+      auto result = Builder.createTupleType(elements, std::move(labels), false);
+
       return Builder.createFunctionType(arguments, argsAreInOut,
                                         result, flags);
     }
@@ -682,13 +742,20 @@ public:
     }
   }
 
+  BuiltType readTypeFromMangledName(const char *MangledTypeName,
+                                    size_t Length) {
+    auto Demangled = Demangle::demangleSymbolAsNode(MangledTypeName, Length);
+    return decodeMangledType(Demangled);
+  }
+
   /// Read the isa pointer of a class or closure context instance and apply
   /// the isa mask.
   std::pair<bool, StoredPointer> readMetadataFromInstance(
       StoredPointer ObjectAddress) {
+    StoredPointer isaMaskValue = ~0;
     auto isaMask = readIsaMask();
-    if (!isaMask.first)
-      return {false, 0};
+    if (isaMask.first)
+      isaMaskValue = isaMask.second;
 
     StoredPointer MetadataAddress;
     if (!Reader->readBytes(RemoteAddress(ObjectAddress),
@@ -696,7 +763,7 @@ public:
                            sizeof(StoredPointer)))
       return {false, 0};
 
-    return {true, MetadataAddress & isaMask.second};
+    return {true, MetadataAddress & isaMaskValue};
   }
 
   /// Given the address of a nominal type descriptor, attempt to resolve

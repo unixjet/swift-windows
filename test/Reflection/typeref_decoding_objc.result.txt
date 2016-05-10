@@ -56,9 +56,9 @@ CAPTURE DESCRIPTORS:
 - Metadata sources:
 
 - Capture types:
+(function
+  (tuple))
 - Metadata sources:
-!!! Invalid typeref
-!!! Invalid matadata source
 
 - Capture types:
 (struct Swift.StaticString)
@@ -69,9 +69,9 @@ CAPTURE DESCRIPTORS:
 - Metadata sources:
 
 - Capture types:
+(function
+  (tuple))
 - Metadata sources:
-!!! Invalid typeref
-!!! Invalid matadata source
 
 - Capture types:
 (bound_generic_struct Swift.UnsafeBufferPointer
@@ -83,8 +83,8 @@ CAPTURE DESCRIPTORS:
 - Metadata sources:
 
 - Capture types:
+(function
+  (tuple))
 - Metadata sources:
-!!! Invalid typeref
-!!! Invalid matadata source
 
 

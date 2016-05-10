@@ -29,4 +29,24 @@ typedef NSString * IUONewtype __attribute((swift_newtype(struct)));
 
 typedef float MyFloat __attribute((swift_newtype(struct)));
 extern const MyFloat globalFloat;
+extern const MyFloat kPI;
+extern const MyFloat kVersion;
+
+typedef NSString * NSURLResourceKey __attribute((swift_newtype(struct)));
+extern NSURLResourceKey const NSURLIsRegularFileKey;
+extern NSURLResourceKey const NSURLIsDirectoryKey;
+extern NSURLResourceKey const NSURLLocalizedNameKey;
+
+// Special case: Notifications
+extern const NSString *FooNotification;
+extern const NSString *kBarNotification;
+extern const NSString *NSWibbleNotification;
+
+// But not just 'Notification'
+extern const NSString *kNotification;
+extern const NSString *Notification;
+
+// Nor when explicitly swift_name-ed
+extern const NSString *kSNNotification
+    __attribute((swift_name("swiftNamedNotification")));
 

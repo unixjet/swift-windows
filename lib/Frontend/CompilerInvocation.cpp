@@ -760,9 +760,6 @@ static bool ParseLangArgs(LangOptions &Opts, ArgList &Args,
   Opts.WarnOmitNeedlessWords = Args.hasArg(OPT_warn_omit_needless_words);
   Opts.StripNSPrefix |= Args.hasArg(OPT_enable_strip_ns_prefix);
   Opts.InferImportAsMember |= Args.hasArg(OPT_enable_infer_import_as_member);
-  if (Args.hasArg(OPT_disable_infer_iuos)) {
-    Opts.InferIUOs = false;
-  }
 
   Opts.EnableThrowWithoutTry |= Args.hasArg(OPT_enable_throw_without_try);
 
@@ -1219,6 +1216,8 @@ static bool ParseIRGenArgs(IRGenOptions &Opts, ArgList &Args,
 
   Opts.GenerateProfile |= Args.hasArg(OPT_profile_generate);
   Opts.PrintInlineTree |= Args.hasArg(OPT_print_llvm_inline_tree);
+
+  Opts.UseSwiftCall = Args.hasArg(OPT_enable_swiftcall);
 
   // This is set to true by default.
   Opts.UseIncrementalLLVMCodeGen &=
