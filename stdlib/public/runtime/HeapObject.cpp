@@ -822,7 +822,11 @@ HeapObject *swift::swift_weakLoadStrong(WeakReference *ref) {
     short c = 0;
     while (__atomic_load_n(&ref->Value, __ATOMIC_RELAXED) & WR_READING) {
       if (++c == WR_SPINLIMIT) {
+#if defined(_MSC_VER)
+        Sleep(0);
+#else
         sched_yield();
+#endif
         c -= 1;
       }
     }
@@ -871,7 +875,11 @@ void swift::swift_weakCopyInit(WeakReference *dest, WeakReference *src) {
     short c = 0;
     while (__atomic_load_n(&src->Value, __ATOMIC_RELAXED) & WR_READING) {
       if (++c == WR_SPINLIMIT) {
+#if defined(_MSC_VER)
+        Sleep(0);
+#else
         sched_yield();
+#endif
         c -= 1;
       }
     }
