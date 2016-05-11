@@ -3956,7 +3956,10 @@ static void emitObjCClassSymbol(IRGenModule &IGM,
                                 metadataTy->getAddressSpace(),
                                 metadata->getLinkage(), classSymbol.str(),
                                 metadata, IGM.getModule());
-  if (IGM.TargetInfo.OutputObjectFormat == llvm::Triple::COFF)
+  //FIXME: After having complete solution for MSVC, we will determine if 
+  //the solution is applicable to all Windows environment.
+  //If it is applicable, we will use the method .isOSBinFormatCOFF().
+  if (IGM.Triple.isKnownWindowsMSVCEnvironment())
     alias->setDLLStorageClass(metadata->getDLLStorageClass());
 }
 

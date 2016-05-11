@@ -453,7 +453,11 @@ llvm::Constant *swift::getRuntimeFn(llvm::Module &Module,
   if (auto fn = dyn_cast<llvm::Function>(cache)) {
     fn->setCallingConv(cc);
 
-    if (llvm::Triple(Module.getTargetTriple()).isOSBinFormatCOFF() &&
+    //FIXME: After having complete solution for MSVC, we will determine if 
+    //the solution is applicable to all Windows environment.
+    //If it is applicable, we will use the method .isOSBinFormatCOFF().
+    if (llvm::Triple(Module.getTargetTriple())
+            .isKnownWindowsMSVCEnvironment() &&
         (fn->getLinkage() == llvm::GlobalValue::ExternalLinkage ||
          fn->getLinkage() == llvm::GlobalValue::AvailableExternallyLinkage))
       fn->setDLLStorageClass(llvm::GlobalValue::DLLImportStorageClass);
@@ -533,7 +537,10 @@ llvm::Constant *swift::getWrapperFn(llvm::Module &Module,
     auto *globalFnPtr =
         new llvm::GlobalVariable(Module, fnPtrTy, false,
                                  llvm::GlobalValue::ExternalLinkage, 0, symbol);
-    if (llvm::Triple(Module.getTargetTriple()).isOSBinFormatCOFF())
+    //FIXME: After having complete solution for MSVC, we will determine if 
+    //the solution is applicable to all Windows environment.
+    //If it is applicable, we will use the method .isOSBinFormatCOFF().
+    if (llvm::Triple(Module.getTargetTriple()).isKnownWindowsMSVCEnvironment())
       globalFnPtr->setDLLStorageClass(llvm::GlobalValue::DLLImportStorageClass);
 
     // Forward all arguments.

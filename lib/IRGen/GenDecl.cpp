@@ -939,7 +939,10 @@ void IRGenModule::emitVTableStubs() {
     auto *alias = llvm::GlobalAlias::create(llvm::GlobalValue::ExternalLinkage,
                                             F.getName(), stub);
     // FIXME: should we be setting the visibility as well?
-    if (TargetInfo.OutputObjectFormat == llvm::Triple::COFF)
+    //FIXME: After having complete solution for MSVC, we will determine if 
+    //the solution is applicable to all Windows environment.
+    //If it is applicable, we will use the method .isOSBinFormatCOFF().
+    if (Triple.isKnownWindowsMSVCEnvironment())
       alias->setDLLStorageClass(llvm::GlobalValue::DLLExportStorageClass);
   }
 }
@@ -1223,12 +1226,12 @@ static IRLinkageTuple getIRLinkage(IRGenModule &IGM, SILLinkage linkage,
       ObjFormat == llvm::Triple::ELF ? llvm::GlobalValue::ProtectedVisibility
                                      : llvm::GlobalValue::DefaultVisibility;
   llvm::GlobalValue::DLLStorageClassTypes ExportedStorage =
-      ObjFormat == llvm::Triple::COFF ? llvm::GlobalValue::DLLExportStorageClass
+      IGM.Triple.isKnownWindowsMSVCEnvironment() ? llvm::GlobalValue::DLLExportStorageClass
                                       : llvm::GlobalValue::DefaultStorageClass;
   llvm::GlobalValue::DLLStorageClassTypes ImportedStorage =
-      ObjFormat == llvm::Triple::COFF ? llvm::GlobalValue::DLLImportStorageClass
+      IGM.Triple.isKnownWindowsMSVCEnvironment() ? llvm::GlobalValue::DLLImportStorageClass
                                       : llvm::GlobalValue::DefaultStorageClass;
-
+                                      
   switch (linkage) {
   case SILLinkage::Public:
     return IRLinkageTuple{llvm::GlobalValue::ExternalLinkage,
