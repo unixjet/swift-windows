@@ -1200,13 +1200,14 @@ bool LinkEntity::isAvailableExternally(IRGenModule &IGM) const {
   llvm_unreachable("bad link entity kind");
 }
 
-static std::tuple<llvm::GlobalValue::LinkageTypes,
-                  llvm::GlobalValue::VisibilityTypes,
-                  llvm::GlobalValue::DLLStorageClassTypes>
-getIRLinkage(IRGenModule &IGM, SILLinkage linkage, ForDefinition_t isDefinition,
-             bool isWeakImported) {
+using IRLinkageTuple = std::tuple<llvm::GlobalValue::LinkageTypes,
+                                  llvm::GlobalValue::VisibilityTypes,
+                                  llvm::GlobalValue::DLLStorageClassTypes>;
+static IRLinkageTuple getIRLinkage(IRGenModule &IGM, SILLinkage linkage,
+                                   ForDefinition_t isDefinition,
+                                   bool isWeakImported) {
 #define RESULT(LINKAGE, VISIBILITY, DLL_STORAGE)                               \
-  {                                                                            \
+  IRLinkageTuple {                                                             \
     llvm::GlobalValue::LINKAGE##Linkage,                                       \
     llvm::GlobalValue::VISIBILITY##Visibility,                                 \
     llvm::GlobalValue::DLL_STORAGE##StorageClass                               \
@@ -1230,8 +1231,8 @@ getIRLinkage(IRGenModule &IGM, SILLinkage linkage, ForDefinition_t isDefinition,
 
   switch (linkage) {
   case SILLinkage::Public:
-    return {llvm::GlobalValue::ExternalLinkage, PublicDefinitionVisibility,
-            ExportedStorage};
+    return IRLinkageTuple{llvm::GlobalValue::ExternalLinkage,
+                          PublicDefinitionVisibility, ExportedStorage};
   case SILLinkage::Shared:
   case SILLinkage::SharedExternal:
     return RESULT(LinkOnceODR, Hidden, Default);
@@ -1248,7 +1249,8 @@ getIRLinkage(IRGenModule &IGM, SILLinkage linkage, ForDefinition_t isDefinition,
                        ? llvm::GlobalValue::AvailableExternallyLinkage
                        : isWeakImported ? llvm::GlobalValue::ExternalWeakLinkage
                                         : llvm::GlobalValue::ExternalLinkage;
-    return {linkage, llvm::GlobalValue::DefaultVisibility, ImportedStorage};
+    return IRLinkageTuple{linkage, llvm::GlobalValue::DefaultVisibility,
+                          ImportedStorage};
   }
   case SILLinkage::HiddenExternal:
   case SILLinkage::PrivateExternal: {
@@ -1257,7 +1259,7 @@ getIRLinkage(IRGenModule &IGM, SILLinkage linkage, ForDefinition_t isDefinition,
                           : llvm::GlobalValue::HiddenVisibility;
     auto linkage = isDefinition ? llvm::GlobalValue::AvailableExternallyLinkage
                                 : llvm::GlobalValue::ExternalLinkage;
-    return {linkage, visibility, ImportedStorage};
+    return IRLinkageTuple{linkage, visibility, ImportedStorage};
   }
   }
   llvm_unreachable("bad SIL linkage");
