@@ -1319,6 +1319,10 @@ toolchains::GenericUnix::constructInvocation(const LinkJobAction &job,
     Arguments.push_back(context.Args.MakeArgString(context.OI.SDKPath));
   }
 
+  //FIXME: Patch for Cygwin, '-lswiftSwiftOnoneSupport' will be removed if 
+  //SR-1128 autolink-extraction is fixed.
+  Arguments.push_back("-lswiftSwiftOnoneSupport");
+
   // Link the standard library.
   Arguments.push_back("-L");
   if (context.Args.hasFlag(options::OPT_static_stdlib,
@@ -1331,7 +1335,15 @@ toolchains::GenericUnix::constructInvocation(const LinkJobAction &job,
     // static program
     Arguments.push_back("-ldl");
     Arguments.push_back("-lpthread");
+//FIXME: Change this macro condition to the runtime logic
+#if defined(__CYGWIN__)
+    Arguments.push_back("-Xlinker");
+    Arguments.push_back("--allow-multiple-definition");
+    Arguments.push_back("-lswiftCore");
+    Arguments.push_back("-lpsapi");    
+#else
     Arguments.push_back("-lbsd");
+#endif
     Arguments.push_back("-licui18n");
     Arguments.push_back("-licuuc");
     // The runtime uses dlopen to look for the protocol conformances.
@@ -1339,7 +1351,12 @@ toolchains::GenericUnix::constructInvocation(const LinkJobAction &job,
     // This happens automatically for dynamically-linked programs, but
     // in this case we have to take additional measures.
     Arguments.push_back("-Xlinker");
+//FIXME: Change this macro condition to the runtime logic
+#if defined(__CYGWIN__)
+    Arguments.push_back("--export-all-symbols");
+#else
     Arguments.push_back("-export-dynamic");
+#endif
     Arguments.push_back("-Xlinker");
     Arguments.push_back("--exclude-libs");
     Arguments.push_back("-Xlinker");
