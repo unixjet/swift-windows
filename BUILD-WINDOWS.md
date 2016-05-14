@@ -70,9 +70,9 @@ Download sources
   git clone https://github.com/tinysun212/swift-clang-cygwin.git clang
   git clone https://github.com/apple/swift-cmark.git cmark
 
-  cd swift; git checkout swift-msvc-20160507 ; cd ..
-  cd llvm; git checkout swift-msvc-20160507 ; cd ..
-  cd clang; git checkout swift-msvc-20160507 ; cd ..
+  cd swift; git checkout swift-msvc-20160515 ; cd ..
+  cd llvm; git checkout swift-msvc-20160515 ; cd ..
+  cd clang; git checkout swift-msvc-20160515 ; cd ..
   cd cmark; git checkout 6873b; cd ..
 ```
 
@@ -185,18 +185,20 @@ Compile Swift.obj
 -----------------
 ```
 **********************************************************************************
-*** CAUTION: Due to a bug, you should use swiftc.exe built on Cygwin 
-***          (or other good swiftc) with working files in %WORKDIR%/swift.
+*** CAUTION: Due to a bug, you should use the swiftc.exe recent built on Cygwin 
+***          with working files in %WORKDIR%/swift.
 **********************************************************************************
 
 (In Cygwin64 Terminal)
-export CYGWIN_WORKDIR=<Your CYGWIN BUILD working directory>
-export WORKDIR=<Your MSVC working directory>
-cd $CYGWIN_WORKDIR/build/Ninja-ReleaseAssert/swift-cygwin-x86_64/bin
-// The CYGWIN_WORKDIR can be different from the WORKDIR used in MSVC BUILD.
-// Check current directory has your Cygwin version swiftc.exe.
+export WORKDIR=<Your Windows (MSVC) build working directory>
+export CYGWIN_SWIFTC_DIR=<Your Cygwin build working directory>/build/Ninja-ReleaseAssert/swift-cygwin-x86_64/bin
+// Your Cygwin build working directory can be different from the WORKDIR used in Windows (MSVC) build.
+// Check if $CYGWIN_SWIFTC_DIR directory has the Cygwin version of swiftc.exe.
+export CORE8DIR=$WORKDIR/build/NinjaMSVC/swift/stdlib/public/core/8
 
-./swiftc -c -sdk / -target x86_64-pc-windows-msvc -O -I $WORKDIR/build/NinjaMSVC/swift/./lib/swift/windows/x86_64 -module-cache-path $WORKDIR/build/NinjaMSVC/swift/./module-cache -no-link-objc-runtime -Xfrontend -enable-reflection-metadata -nostdimport -parse-stdlib -module-name Swift -Xfrontend -enable-reflection-builtins -Xfrontend -group-info-path -Xfrontend $WORKDIR/swift/stdlib/public/core/GroupInfo.json -Xfrontend -sil-serialize-all -module-link-name swiftCore -force-single-frontend-invocation -parse-as-library -emit-module -emit-module-path $WORKDIR/build/NinjaMSVC/swift/./lib/swift/windows/x86_64/Swift.swiftmodule -o $WORKDIR/build/NinjaMSVC/swift/stdlib/public/core/windows/x86_64/Swift.obj $WORKDIR/swift/stdlib/public/core/Algorithm.swift $WORKDIR/swift/stdlib/public/core/ArrayBody.swift $WORKDIR/swift/stdlib/public/core/ArrayBuffer.swift $WORKDIR/swift/stdlib/public/core/ArrayBufferProtocol.swift $WORKDIR/swift/stdlib/public/core/ArrayCast.swift $WORKDIR/build/NinjaMSVC/swift/stdlib/public/core/8/Arrays.swift $WORKDIR/swift/stdlib/public/core/ArrayType.swift $WORKDIR/swift/stdlib/public/core/Assert.swift $WORKDIR/swift/stdlib/public/core/AssertCommon.swift $WORKDIR/swift/stdlib/public/core/BidirectionalCollection.swift $WORKDIR/swift/stdlib/public/core/Bool.swift $WORKDIR/swift/stdlib/public/core/Boolean.swift $WORKDIR/swift/stdlib/public/core/BridgeObjectiveC.swift $WORKDIR/swift/stdlib/public/core/BridgeStorage.swift $WORKDIR/swift/stdlib/public/core/Builtin.swift $WORKDIR/build/NinjaMSVC/swift/stdlib/public/core/8/BuiltinMath.swift $WORKDIR/swift/stdlib/public/core/Character.swift $WORKDIR/swift/stdlib/public/core/CocoaArray.swift $WORKDIR/swift/stdlib/public/core/Collection.swift $WORKDIR/build/NinjaMSVC/swift/stdlib/public/core/8/CollectionAlgorithms.swift $WORKDIR/swift/stdlib/public/core/CompilerProtocols.swift $WORKDIR/swift/stdlib/public/core/ClosedRange.swift $WORKDIR/swift/stdlib/public/core/ContiguousArrayBuffer.swift $WORKDIR/swift/stdlib/public/core/CString.swift $WORKDIR/swift/stdlib/public/core/CTypes.swift $WORKDIR/swift/stdlib/public/core/EmptyCollection.swift $WORKDIR/swift/stdlib/public/core/ErrorType.swift $WORKDIR/swift/stdlib/public/core/Existential.swift $WORKDIR/build/NinjaMSVC/swift/stdlib/public/core/8/Filter.swift $WORKDIR/build/NinjaMSVC/swift/stdlib/public/core/8/FixedPoint.swift $WORKDIR/swift/stdlib/public/core/FlatMap.swift $WORKDIR/build/NinjaMSVC/swift/stdlib/public/core/8/Flatten.swift $WORKDIR/build/NinjaMSVC/swift/stdlib/public/core/8/FloatingPoint.swift $WORKDIR/build/NinjaMSVC/swift/stdlib/public/core/8/FloatingPointOperations.swift $WORKDIR/build/NinjaMSVC/swift/stdlib/public/core/8/FloatingPointParsing.swift $WORKDIR/build/NinjaMSVC/swift/stdlib/public/core/8/HashedCollections.swift $WORKDIR/swift/stdlib/public/core/Hashing.swift $WORKDIR/swift/stdlib/public/core/HeapBuffer.swift $WORKDIR/swift/stdlib/public/core/ImplicitlyUnwrappedOptional.swift $WORKDIR/swift/stdlib/public/core/Index.swift $WORKDIR/build/NinjaMSVC/swift/stdlib/public/core/8/Indices.swift $WORKDIR/swift/stdlib/public/core/InputStream.swift $WORKDIR/build/NinjaMSVC/swift/stdlib/public/core/8/IntegerArithmetic.swift $WORKDIR/build/NinjaMSVC/swift/stdlib/public/core/8/IntegerParsing.swift $WORKDIR/swift/stdlib/public/core/Join.swift $WORKDIR/build/NinjaMSVC/swift/stdlib/public/core/8/LazyCollection.swift $WORKDIR/swift/stdlib/public/core/LazySequence.swift $WORKDIR/swift/stdlib/public/core/LifetimeManager.swift $WORKDIR/swift/stdlib/public/core/ManagedBuffer.swift $WORKDIR/build/NinjaMSVC/swift/stdlib/public/core/8/Map.swift $WORKDIR/build/NinjaMSVC/swift/stdlib/public/core/8/Mirrors.swift $WORKDIR/swift/stdlib/public/core/Misc.swift $WORKDIR/swift/stdlib/public/core/MutableCollection.swift $WORKDIR/swift/stdlib/public/core/ObjCMirrors.swift $WORKDIR/swift/stdlib/public/core/Optional.swift $WORKDIR/swift/stdlib/public/core/OptionSet.swift $WORKDIR/swift/stdlib/public/core/OutputStream.swift $WORKDIR/swift/stdlib/public/core/Pointer.swift $WORKDIR/swift/stdlib/public/core/Policy.swift $WORKDIR/swift/stdlib/public/core/Print.swift $WORKDIR/swift/stdlib/public/core/RandomAccessCollection.swift $WORKDIR/build/NinjaMSVC/swift/stdlib/public/core/8/Range.swift $WORKDIR/build/NinjaMSVC/swift/stdlib/public/core/8/RangeReplaceableCollection.swift $WORKDIR/swift/stdlib/public/core/Reflection.swift $WORKDIR/swift/stdlib/public/core/Repeat.swift $WORKDIR/swift/stdlib/public/core/REPL.swift $WORKDIR/swift/stdlib/public/core/Reverse.swift $WORKDIR/build/NinjaMSVC/swift/stdlib/public/core/8/Runtime.swift $WORKDIR/swift/stdlib/public/core/Sequence.swift $WORKDIR/build/NinjaMSVC/swift/stdlib/public/core/8/SequenceAlgorithms.swift $WORKDIR/swift/stdlib/public/core/SequenceWrapper.swift $WORKDIR/swift/stdlib/public/core/SetAlgebra.swift $WORKDIR/swift/stdlib/public/core/ShadowProtocols.swift $WORKDIR/swift/stdlib/public/core/Shims.swift $WORKDIR/build/NinjaMSVC/swift/stdlib/public/core/8/Slice.swift $WORKDIR/build/NinjaMSVC/swift/stdlib/public/core/8/Sort.swift $WORKDIR/swift/stdlib/public/core/StaticString.swift $WORKDIR/build/NinjaMSVC/swift/stdlib/public/core/8/Stride.swift $WORKDIR/swift/stdlib/public/core/StringCharacterView.swift $WORKDIR/swift/stdlib/public/core/String.swift $WORKDIR/swift/stdlib/public/core/StringBridge.swift $WORKDIR/swift/stdlib/public/core/StringBuffer.swift $WORKDIR/swift/stdlib/public/core/StringCore.swift $WORKDIR/build/NinjaMSVC/swift/stdlib/public/core/8/StringInterpolation.swift $WORKDIR/swift/stdlib/public/core/StringLegacy.swift $WORKDIR/build/NinjaMSVC/swift/stdlib/public/core/8/StringRangeReplaceableCollection.swift $WORKDIR/swift/stdlib/public/core/StringIndexConversions.swift $WORKDIR/swift/stdlib/public/core/StringUnicodeScalarView.swift $WORKDIR/swift/stdlib/public/core/StringUTF16.swift $WORKDIR/swift/stdlib/public/core/StringUTF8.swift $WORKDIR/swift/stdlib/public/core/SwiftNativeNSArray.swift $WORKDIR/build/NinjaMSVC/swift/stdlib/public/core/8/UnavailableStringAPIs.swift $WORKDIR/swift/stdlib/public/core/Unicode.swift $WORKDIR/swift/stdlib/public/core/UnicodeScalar.swift $WORKDIR/build/NinjaMSVC/swift/stdlib/public/core/8/UnicodeTrie.swift $WORKDIR/swift/stdlib/public/core/Unmanaged.swift $WORKDIR/build/NinjaMSVC/swift/stdlib/public/core/8/UnsafeBufferPointer.swift $WORKDIR/build/NinjaMSVC/swift/stdlib/public/core/8/UnsafePointer.swift $WORKDIR/swift/stdlib/public/core/WriteBackMutableSlice.swift $WORKDIR/swift/stdlib/public/core/Availability.swift $WORKDIR/swift/stdlib/public/core/CollectionOfOne.swift $WORKDIR/build/NinjaMSVC/swift/stdlib/public/core/8/ExistentialCollection.swift $WORKDIR/swift/stdlib/public/core/Mirror.swift $WORKDIR/swift/stdlib/public/core/Process.swift $WORKDIR/swift/stdlib/public/core/SliceBuffer.swift $WORKDIR/build/NinjaMSVC/swift/stdlib/public/core/8/Tuple.swift $WORKDIR/swift/stdlib/public/core/VarArgs.swift $WORKDIR/swift/stdlib/public/core/Zip.swift
+cd $WORKDIR/swift/stdlib/public/core
+
+(FORCE_DLLIMPORT=0; $CYGWIN_SWIFTC_DIR/swiftc -c -sdk / -target x86_64-pc-windows-msvc -O -I $WORKDIR/build/NinjaMSVC/swift/lib/swift/windows/x86_64 -module-cache-path $WORKDIR/build/NinjaMSVC/swift/module-cache -no-link-objc-runtime -Xfrontend -enable-reflection-metadata -nostdimport -parse-stdlib -module-name Swift -Xfrontend -enable-reflection-builtins -Xfrontend -group-info-path -Xfrontend GroupInfo.json -Xfrontend -sil-serialize-all -module-link-name swiftCore -force-single-frontend-invocation -parse-as-library -emit-module -emit-module-path $WORKDIR/build/NinjaMSVC/swift/lib/swift/windows/x86_64/Swift.swiftmodule -o $WORKDIR/build/NinjaMSVC/swift/stdlib/public/core/windows/x86_64/Swift.obj Algorithm.swift ArrayBody.swift ArrayBuffer.swift ArrayBufferProtocol.swift ArrayCast.swift $CORE8DIR/Arrays.swift ArrayType.swift Assert.swift AssertCommon.swift BidirectionalCollection.swift Bool.swift Boolean.swift BridgeObjectiveC.swift BridgeStorage.swift Builtin.swift $CORE8DIR/BuiltinMath.swift Character.swift CocoaArray.swift Collection.swift $CORE8DIR/CollectionAlgorithms.swift CompilerProtocols.swift ClosedRange.swift ContiguousArrayBuffer.swift CString.swift CTypes.swift EmptyCollection.swift ErrorType.swift Existential.swift $CORE8DIR/Filter.swift $CORE8DIR/FixedPoint.swift FlatMap.swift $CORE8DIR/Flatten.swift $CORE8DIR/FloatingPoint.swift $CORE8DIR/FloatingPointOperations.swift $CORE8DIR/FloatingPointParsing.swift $CORE8DIR/HashedCollections.swift Hashing.swift HeapBuffer.swift ImplicitlyUnwrappedOptional.swift Index.swift $CORE8DIR/Indices.swift InputStream.swift $CORE8DIR/IntegerArithmetic.swift $CORE8DIR/IntegerParsing.swift Join.swift $CORE8DIR/LazyCollection.swift LazySequence.swift LifetimeManager.swift ManagedBuffer.swift $CORE8DIR/Map.swift $CORE8DIR/Mirrors.swift Misc.swift MutableCollection.swift NewtypeWrapper.swift ObjCMirrors.swift Optional.swift OptionSet.swift OutputStream.swift Pointer.swift Policy.swift Print.swift RandomAccessCollection.swift $CORE8DIR/Range.swift $CORE8DIR/RangeReplaceableCollection.swift Reflection.swift Repeat.swift REPL.swift Reverse.swift $CORE8DIR/Runtime.swift Sequence.swift $CORE8DIR/SequenceAlgorithms.swift SequenceWrapper.swift SetAlgebra.swift ShadowProtocols.swift Shims.swift $CORE8DIR/Slice.swift $CORE8DIR/Sort.swift StaticString.swift $CORE8DIR/Stride.swift StringCharacterView.swift String.swift StringBridge.swift StringBuffer.swift StringCore.swift $CORE8DIR/StringInterpolation.swift StringLegacy.swift $CORE8DIR/StringRangeReplaceableCollection.swift StringIndexConversions.swift StringUnicodeScalarView.swift StringUTF16.swift StringUTF8.swift SwiftNativeNSArray.swift $CORE8DIR/UnavailableStringAPIs.swift Unicode.swift UnicodeScalar.swift $CORE8DIR/UnicodeTrie.swift Unmanaged.swift $CORE8DIR/UnsafeBufferPointer.swift $CORE8DIR/UnsafePointer.swift WriteBackMutableSlice.swift Availability.swift CollectionOfOne.swift $CORE8DIR/ExistentialCollection.swift Mirror.swift Process.swift SliceBuffer.swift $CORE8DIR/Tuple.swift VarArgs.swift Zip.swift )
 ```
 
 Build swiftCore (shared)
@@ -208,15 +210,7 @@ Build swiftCore (shared)
 
 cd %WORKDIR%/build/NinjaMSVC/swift/stdlib/public/core
 
-(In Cygwin64 Terminal)
-// change to the same directory
-//   export WORKDIR=<Your working directory>
-//   cd $WORKDIR/build/NinjaMSVC/swift/stdlib/public/core
-dlltool -z allexp.orig.def --export-all-symbols ./windows/x86_64/Swift.obj ../../../lib/swift/windows/x86_64/libswiftRuntime.a  ../../../lib/swift/windows/x86_64/libswiftStdlibStubs.a
-
-python %WORKDIR%/swift/misc/trim_exp.py allexp.orig.def allexp.def
-
-link /ERRORREPORT:PROMPT /OUT:"%WORKDIR%\build\NinjaMSVC\swift\lib\swift\windows\libswiftCore.dll" /INCREMENTAL:NO /NOLOGO /LIBPATH:%WORKDIR%/build/NinjaMSVC/llvm/Release/lib kernel32.lib user32.lib gdi32.lib winspool.lib shell32.lib ole32.lib oleaut32.lib uuid.lib comdlg32.lib advapi32.lib ..\..\..\lib\swift\windows\x86_64\libswiftRuntime.a ..\..\..\lib\swift\windows\x86_64\libswiftStdlibStubs.a %WORKDIR%\icu\lib64\icuuc.lib %WORKDIR%\icu\lib64\icuin.lib /MANIFEST /MANIFESTUAC:"level='asInvoker' uiAccess='false'" /manifest:embed /PDB:"%WORKDIR%/build/NinjaMSVC/swift/bin/swiftCore.pdb" /SUBSYSTEM:CONSOLE /TLBID:1 /DYNAMICBASE /NXCOMPAT /IMPLIB:"%WORKDIR%\build\NinjaMSVC\swift\lib\swift\windows\libswiftCore.lib" /MACHINE:X64 /DLL %WORKDIR%\build\NinjaMSVC\swift\stdlib\public\core\windows\x86_64\Swift.obj /DEF:allexp.def /MERGE:.rdata=.rodata /IGNORE:4102,4197 msvcrt.lib
+link /ERRORREPORT:PROMPT /OUT:"%WORKDIR%\build\NinjaMSVC\swift\lib\swift\windows\libswiftCore.dll" /INCREMENTAL:NO /NOLOGO /LIBPATH:%WORKDIR%/build/NinjaMSVC/llvm/Release/lib kernel32.lib user32.lib gdi32.lib winspool.lib shell32.lib ole32.lib oleaut32.lib uuid.lib comdlg32.lib advapi32.lib ..\..\..\lib\swift\windows\x86_64\libswiftRuntime.a ..\..\..\lib\swift\windows\x86_64\libswiftStdlibStubs.a %WORKDIR%\icu\lib64\icuuc.lib %WORKDIR%\icu\lib64\icuin.lib /IMPLIB:"%WORKDIR%\build\NinjaMSVC\swift\lib\swift\windows\libswiftCore.lib" /DLL %WORKDIR%\build\NinjaMSVC\swift\stdlib\public\core\windows\x86_64\Swift.obj /DEF:allexp.def /MERGE:.rdata=.rodata /IGNORE:4102,4197 msvcrt.lib
 ```
 
 Build swiftSwiftOnoneSupport (shared)
@@ -237,21 +231,14 @@ clang -c SwiftOnoneSupport.new.ll -o %WORKDIR%\build\NinjaMSVC\swift\stdlib\publ
 
 cd %WORKDIR%/build/NinjaMSVC/swift/stdlib/public/SwiftOnoneSupport
 
-(In Cygwin64 Terminal)
-// change to the same directory
-//   export WORKDIR=<Your working directory>
-//   cd $WORKDIR/build/NinjaMSVC/swift/stdlib/public/SwiftOnoneSupport
-dlltool -z allexp.orig.def --export-all-symbols ../../../stdlib/public/SwiftOnoneSupport/windows/x86_64/SwiftOnoneSupport.obj
-
-python %WORKDIR%/swift/misc/trim_exp.py allexp.orig.def allexp.def
-
-link /ERRORREPORT:PROMPT /OUT:"%WORKDIR%\build\NinjaMSVC\swift\lib\swift\windows\libswiftSwiftOnoneSupport.dll" /INCREMENTAL:NO /NOLOGO /LIBPATH:%WORKDIR%/build/NinjaMSVC/llvm/Release/lib kernel32.lib user32.lib gdi32.lib winspool.lib shell32.lib ole32.lib oleaut32.lib uuid.lib comdlg32.lib advapi32.lib ..\..\..\lib\swift\windows\libswiftCore.lib /MANIFEST /MANIFESTUAC:"level='asInvoker' uiAccess='false'" /manifest:embed /PDB:"%WORKDIR%/build/NinjaMSVC/swift/bin/libswiftSwiftOnoneSupport.pdb" /SUBSYSTEM:CONSOLE /TLBID:1 /DYNAMICBASE /NXCOMPAT /IMPLIB:"%WORKDIR%/build/NinjaMSVC/swift/lib/swift/windows/libswiftSwiftOnoneSupport.lib" /MACHINE:X64 /DLL %WORKDIR%\build\NinjaMSVC\swift\stdlib\public\SwiftOnoneSupport\windows\x86_64\SwiftOnoneSupport.obj    /DEF:allexp.def msvcrt.lib /MERGE:.rdata=.rodata
+link /ERRORREPORT:PROMPT /OUT:"%WORKDIR%\build\NinjaMSVC\swift\lib\swift\windows\libswiftSwiftOnoneSupport.dll" /INCREMENTAL:NO /NOLOGO /LIBPATH:%WORKDIR%/build/NinjaMSVC/llvm/Release/lib kernel32.lib user32.lib gdi32.lib winspool.lib shell32.lib ole32.lib oleaut32.lib uuid.lib comdlg32.lib advapi32.lib ..\..\..\lib\swift\windows\libswiftCore.lib /MANIFEST /MANIFESTUAC:"level='asInvoker' uiAccess='false'" /manifest:embed /PDB:"%WORKDIR%/build/NinjaMSVC/swift/bin/libswiftSwiftOnoneSupport.pdb" /SUBSYSTEM:CONSOLE /TLBID:1 /DYNAMICBASE /NXCOMPAT /IMPLIB:"%WORKDIR%/build/NinjaMSVC/swift/lib/swift/windows/libswiftSwiftOnoneSupport.lib" /MACHINE:X64 /DLL %WORKDIR%\build\NinjaMSVC\swift\stdlib\public\SwiftOnoneSupport\windows\x86_64\SwiftOnoneSupport.obj    /DEF:allexp.def msvcrt.lib /MERGE:.rdata=.rodata /IGNORE:4197
 ```
 
 Run with Interpreter
 --------------------
 ```
 cd %WORKDIR%/build/NinjaMSVC/swift/bin
+
 Create a sample source
   echo print("Hello") > Hello.swift
 
@@ -264,51 +251,36 @@ Compile & Run with DLL
 ```
 cd %WORKDIR%/build/NinjaMSVC/swift/bin
 
-Run
-   swiftc -emit-ir Hello.swift -o Hello.orig.ll
-OR swiftc -emit-ir Hello.swift -o Hello.orig.ll -O
-OR swiftc -emit-ir Hello.swift -o Hello.orig.ll -Onone
-
-python %WORKDIR%/swift/misc/inject_dllimport.py Hello.orig.ll Hello.ll
-
-clang -c hello.ll -o hello.obj -mcmodel=large -target x86_64-pc-windows-msvc19.0.0
-
-link /out:hello.exe hello.obj %WORKDIR%\build\NinjaMSVC\swift\lib\swift\windows\libswiftCore.lib %WORKDIR%\icu\lib64\icuuc.lib %WORKDIR%\icu\lib64\icuin.lib %WORKDIR%\build\NinjaMSVC\swift\lib\swift\windows\libswiftSwiftOnoneSupport.lib /MERGE:.rdata=.rodata msvcrt.lib
+Compile
+  swiftc Hello.swift
 
 Run
-	set PATH=%PATH%;%WORKDIR%/build/NinjaMSVC/swift/lib/swift/windows
-	Hello.exe
+  set PATH=%PATH%;%WORKDIR%/build/NinjaMSVC/swift/lib/swift/windows
+  Hello.exe
 ```
 
 Build Static libraries
 ----------------------
 ```
+cd %WORKDIR%/build/NinjaMSVC/swift
+mkdir lib\swift_static\windows
+
+lib /out:lib\swift_static\windows\libswiftCore.lib  lib\swift\windows\x86_64\libswiftRuntime.a  lib\swift\windows\x86_64\libswiftStdlibStubs.a stdlib/public/core/windows/x86_64/Swift.obj %WORKDIR%\icu\lib64\icuuc.lib %WORKDIR%\icu\lib64\icuin.lib /IGNORE:4006,4221
+
+lib /out:lib\swift_static\windows\libswiftSwiftOnoneSupport.lib stdlib\public\SwiftOnoneSupport\windows\x86_64\SwiftOnoneSupport.obj
+
+Edit libswiftCore.lib with hexa editor
+rename all ".pdata" to ".qdata" (multiple occurrence)
+```
+
+Compile & Run with Static library
+---------------------------------
+```
 cd %WORKDIR%/build/NinjaMSVC/swift/bin
 
-lib /out:libswiftCore.lib  ..\lib\swift\windows\x86_64\libswiftRuntime.a  ..\lib\swift\windows\x86_64\libswiftStdlibStubs.a %WORKDIR%/build/NinjaMSVC/swift/stdlib/public/core/windows/x86_64/Swift.obj %WORKDIR%\icu\lib64\icuuc.lib %WORKDIR%\icu\lib64\icuin.lib /IGNORE:4006,4221
-
-lib /out:libswiftSwiftOnoneSupport.lib %WORKDIR%\build\NinjaMSVC\swift\stdlib\public\SwiftOnoneSupport\windows\x86_64\SwiftOnoneSupport.obj
-
-Edit libswiftSwiftOnoneSupport.lib with hexa editor
-rename ".pdata" to ".qdata" (twice occurrence)
-```
-
-Link with Static library
-------------------------
-```
-cd %WORKDIR%/build/NinjaMSVC/swift/bin
+Compile
+  swiftc -static-stdlib Hello.swift
 
 Run
-   swiftc -c Hello.swift -o Hello_static.obj
-OR swiftc -c Hello.swift -o Hello_static.obj -O
-OR swiftc -c Hello.swift -o Hello_static.obj -Onone
-
-link /out:hello_static.exe hello_static.obj libswiftCore.lib libswiftSwiftOnoneSupport.lib msvcrt.lib /MERGE:.rdata=.rodata /FORCE:MULTIPLE /IGNORE:4006,4049,4217
-
-(Another way to link)
-	clang -o hello_static.exe Hello_static.obj -llibswiftCore -llibswiftSwiftOnoneSupport -Wl,/LIBPATH:"C:/Program Files/Swift/lib/swift_static/windows",/MERGE:.rdata=.rodata,/FORCE:MULTIPLE,/NODEFAULTLIB:libcmt,msvcrt.lib -Xlinker /IGNORE:4006,4049,4217
-	
-Run
-	Hello_static.exe
+  Hello.exe
 ```
-

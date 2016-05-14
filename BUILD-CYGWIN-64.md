@@ -74,9 +74,9 @@ Download sources
   git clone https://github.com/apple/swift-cmark.git cmark
   git clone https://github.com/ninja-build/ninja.git
 
-  cd swift; git checkout swift-cygwin-20160428 ; cd ..
-  cd llvm; git checkout swift-cygwin-20160428 ; cd ..
-  cd clang; git checkout swift-cygwin-20160428 ; cd ..
+  cd swift; git checkout swift-cygwin-20160515 ; cd ..
+  cd llvm; git checkout swift-cygwin-20160515 ; cd ..
+  cd clang; git checkout swift-cygwin-20160515 ; cd ..
   cd cmark; git checkout 6873b; cd ..
   cd ninja; git checkout 2eb1cc9; cd ..
 ```
@@ -88,6 +88,18 @@ Build
   utils/build-script -R
 ```
   
-Build Troubleshoot
-------------------
-  TBD
+Build Static libraries
+----------------------
+```
+  cd $WORK_DIR/build/Ninja-ReleaseAssert/swift-cygwin-x86_64
+  
+  mkdir -p lib/swift_static/cygwin
+  ar rvs lib/swift_static/cygwin/libswiftSwiftOnoneSupport.a stdlib/public/SwiftOnoneSupport/cygwin/x86_64/SwiftOnoneSupport.o
+
+  mkdir tmp_coreobj
+  cd tmp_coreobj
+  ar -x ../lib/swift/cygwin/x86_64/libswiftRuntime.a
+  ar -x ../lib/swift/cygwin/x86_64/libswiftStdlibStubs.a
+  ar rvs ../lib/swift_static/cygwin/libswiftCore.a *.o ../stdlib/public/core/cygwin/x86_64/Swift.o
+  cd ..
+```
