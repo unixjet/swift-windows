@@ -909,6 +909,25 @@ void IRGenerator::emitLazyDefinitions() {
   }
 }
 
+// FIXME: temporarial patch for MSVC
+bool EnabledDllStorage() {
+  static char *value = getenv("_USE_DLLSTORAGE");
+  if (value == nullptr || value[0] == '0')
+    return false;
+  return true;
+}
+
+static bool EnabledDllExport() { return EnabledDllStorage(); }
+
+bool EnabledDllImport() {
+  static char *value = getenv("FORCE_DLLIMPORT");
+  if (value == nullptr)
+    return EnabledDllStorage();
+  else if (value[0] == '1')
+    return true;
+  return false;
+}
+
 /// Emit symbols for eliminated dead methods, which can still be referenced
 /// from other modules. This happens e.g. if a public class contains a (dead)
 /// private method.
@@ -942,7 +961,7 @@ void IRGenModule::emitVTableStubs() {
     //FIXME: After having complete solution for MSVC, we will determine if 
     //the solution is applicable to all Windows environment.
     //If it is applicable, we will use the method .isOSBinFormatCOFF().
-    if (Triple.isKnownWindowsMSVCEnvironment())
+    if (Triple.isKnownWindowsMSVCEnvironment() && EnabledDllExport())
       alias->setDLLStorageClass(llvm::GlobalValue::DLLExportStorageClass);
   }
 }
@@ -1226,12 +1245,14 @@ static IRLinkageTuple getIRLinkage(IRGenModule &IGM, SILLinkage linkage,
       ObjFormat == llvm::Triple::ELF ? llvm::GlobalValue::ProtectedVisibility
                                      : llvm::GlobalValue::DefaultVisibility;
   llvm::GlobalValue::DLLStorageClassTypes ExportedStorage =
-      IGM.Triple.isKnownWindowsMSVCEnvironment() ? llvm::GlobalValue::DLLExportStorageClass
-                                      : llvm::GlobalValue::DefaultStorageClass;
+      IGM.Triple.isKnownWindowsMSVCEnvironment() && EnabledDllExport()
+          ? llvm::GlobalValue::DLLExportStorageClass
+          : llvm::GlobalValue::DefaultStorageClass;
   llvm::GlobalValue::DLLStorageClassTypes ImportedStorage =
-      IGM.Triple.isKnownWindowsMSVCEnvironment() ? llvm::GlobalValue::DLLImportStorageClass
-                                      : llvm::GlobalValue::DefaultStorageClass;
-                                      
+      IGM.Triple.isKnownWindowsMSVCEnvironment() && EnabledDllImport()
+          ? llvm::GlobalValue::DLLImportStorageClass
+          : llvm::GlobalValue::DefaultStorageClass;
+
   switch (linkage) {
   case SILLinkage::Public:
     return IRLinkageTuple{llvm::GlobalValue::ExternalLinkage,

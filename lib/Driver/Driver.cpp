@@ -882,6 +882,22 @@ void Driver::buildOutputInfo(const ToolChain &TC, const DerivedArgList &Args,
     }
   }
 
+#if defined(_MSC_VER)
+  if (OI.CompilerMode == OutputInfo::Mode::Immediate ||
+      Args.hasArg(options::OPT_static_stdlib)) {
+    _putenv("_USE_DLLSTORAGE=0");
+  } else {
+    _putenv("_USE_DLLSTORAGE=1");
+  }
+#else
+  if (OI.CompilerMode == OutputInfo::Mode::Immediate ||
+      Args.hasArg(options::OPT_static_stdlib)) {
+    putenv("_USE_DLLSTORAGE=0");
+  } else {
+    putenv("_USE_DLLSTORAGE=1");
+  }
+#endif
+
   const Arg *const OutputModeArg = Args.getLastArg(options::OPT_modes_Group);
 
   if (!OutputModeArg) {

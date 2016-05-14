@@ -419,6 +419,9 @@ namespace RuntimeConstants {
   const auto ZExt = llvm::Attribute::ZExt;
 }
 
+// FIXME: temporarial patch for MSVC
+extern bool EnabledDllImport();
+
 // We don't use enough attributes to justify generalizing the
 // RuntimeFunctions.def FUNCTION macro. Instead, special case the one attribute
 // associated with the return type not the function type.
@@ -458,6 +461,7 @@ llvm::Constant *swift::getRuntimeFn(llvm::Module &Module,
     //If it is applicable, we will use the method .isOSBinFormatCOFF().
     if (llvm::Triple(Module.getTargetTriple())
             .isKnownWindowsMSVCEnvironment() &&
+        EnabledDllImport() &&
         (fn->getLinkage() == llvm::GlobalValue::ExternalLinkage ||
          fn->getLinkage() == llvm::GlobalValue::AvailableExternallyLinkage))
       fn->setDLLStorageClass(llvm::GlobalValue::DLLImportStorageClass);
@@ -540,7 +544,9 @@ llvm::Constant *swift::getWrapperFn(llvm::Module &Module,
     //FIXME: After having complete solution for MSVC, we will determine if 
     //the solution is applicable to all Windows environment.
     //If it is applicable, we will use the method .isOSBinFormatCOFF().
-    if (llvm::Triple(Module.getTargetTriple()).isKnownWindowsMSVCEnvironment())
+    if (llvm::Triple(Module.getTargetTriple())
+            .isKnownWindowsMSVCEnvironment() &&
+        EnabledDllImport())
       globalFnPtr->setDLLStorageClass(llvm::GlobalValue::DLLImportStorageClass);
 
     // Forward all arguments.

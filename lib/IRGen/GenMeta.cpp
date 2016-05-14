@@ -3938,6 +3938,9 @@ namespace {
   };
 }
 
+// FIXME: temporarial patch for MSVC
+extern bool EnabledDllStorage();
+
 /// Emit the ObjC-compatible class symbol for a class.
 /// Since LLVM and many system linkers do not have a notion of relative symbol
 /// references, we emit the symbol as a global asm block.
@@ -3959,7 +3962,7 @@ static void emitObjCClassSymbol(IRGenModule &IGM,
   //FIXME: After having complete solution for MSVC, we will determine if 
   //the solution is applicable to all Windows environment.
   //If it is applicable, we will use the method .isOSBinFormatCOFF().
-  if (IGM.Triple.isKnownWindowsMSVCEnvironment())
+  if (IGM.Triple.isKnownWindowsMSVCEnvironment() && EnabledDllStorage())
     alias->setDLLStorageClass(metadata->getDLLStorageClass());
 }
 
