@@ -2057,7 +2057,12 @@ const ToolChain *Driver::getToolChain(const ArgList &Args) const {
       TC = new toolchains::GenericUnix(*this, Target);
       break;
     case llvm::Triple::Win32:
-      TC = new toolchains::Cygwin(*this, Target);
+      if (Target.isKnownWindowsMSVCEnvironment())
+        TC = new toolchains::Windows(*this, Target);
+      else if (Target.isWindowsCygwinEnvironment())
+        TC = new toolchains::Cygwin(*this, Target);
+      else
+        TC = nullptr;
       break;
     default:
       TC = nullptr;
