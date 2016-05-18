@@ -378,7 +378,7 @@ function(_compile_swift_files dependency_target_out_var_name)
       # the overlay sees.
       ${command_create_apinotes}
       COMMAND
-        "${line_directive_tool}" "${source_files}" --
+#       "${line_directive_tool}" "${source_files}" --
         "${swift_compiler_tool}" "${main_command}" ${swift_flags}
         ${output_option} "${source_files}"
       OUTPUT
