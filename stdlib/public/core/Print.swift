@@ -28,7 +28,6 @@ public func print(
   separator: String = " ",
   terminator: String = "\n"
 ) {
-  let _playgroundPrintHook: ((String) -> Void)? = nil
   if let hook = _playgroundPrintHook {
     var output = _TeeStream(left: "", right: _Stdout())
     _print(
