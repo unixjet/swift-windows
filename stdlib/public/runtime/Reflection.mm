@@ -24,10 +24,6 @@
 #include <cstring>
 #include <new>
 #include <string>
-#include <tuple>
-#if !defined(_MSC_VER)
-#include <dlfcn.h>
-#endif
 
 #if SWIFT_OBJC_INTEROP
 #include "swift/Runtime/ObjCBridge.h"

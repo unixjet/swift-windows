@@ -7,13 +7,13 @@ func statement_starts() {
   f(0)
   f (0)
   f // expected-error{{expression resolves to an unused l-value}}
-  (0)
+  (0) // expected-warning {{result of call to 'init(_builtinIntegerLiteral:)' is unused}}
 
   var a = [1,2,3]
   a[0] = 1
   a [0] = 1
   a // expected-error{{expression resolves to an unused l-value}}
-  [0, 1, 2]
+  [0, 1, 2] // expected-warning {{expression of type '[Int]' is unused}}
 }
 
 // Within a function

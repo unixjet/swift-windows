@@ -5,12 +5,15 @@
 
 import Foundation
 import ImportAsMember.A
+import AppKit
 
 func testOldTypeNames() {
   var ps: NSPostingStyle? // expected-error{{'NSPostingStyle' has been renamed to 'PostingStyle'}}{{11-25=PostingStyle}}
 
 
   _ = NSPostingStyle(rawValue: 1) // expected-error{{'NSPostingStyle' has been renamed to 'PostingStyle'}}{{7-21=PostingStyle}}
+
+  _ = NSSoapDispenser<AnyObject>() // expected-error{{'NSSoapDispenser' has been renamed to 'SoapDispenser'}}{{7-22=SoapDispenser}}
 }
 
 func testOldMethodNames(array: NSArray) {
@@ -67,8 +70,8 @@ func testImportAsMember() {
   // expected-error@-1{{'IAMStruct1Rotate' has been replaced by instance method 'Struct1.translate(radians:)'}}{{7-23=(&iam1).translate}} {{24-31=}} {{31-31=radians: }}
   // FIXME: "&" part has to be removed for mutating methods.
 
-  IAMStruct1StaticMethod()
-  // expected-error@-1{{'IAMStruct1StaticMethod()' has been replaced by 'Struct1.staticMethod()'}}{{3-25=Struct1.staticMethod}}
+  _ = IAMStruct1StaticMethod()
+  // expected-error@-1{{'IAMStruct1StaticMethod()' has been replaced by 'Struct1.staticMethod()'}}{{7-29=Struct1.staticMethod}}
 
   _ = IAMStruct1GetRadius(&iam1)
   // expected-error@-1{{'IAMStruct1GetRadius' has been replaced by property 'Struct1.radius'}}{{7-26=(&iam1).radius}} {{26-33=}}
@@ -76,4 +79,26 @@ func testImportAsMember() {
 
   IAMStruct1SetRadius(iam1, 3.14159)
   // expected-error@-1{{'IAMStruct1SetRadius' has been replaced by property 'Struct1.radius'}}{{3-22=iam1.radius}} {{22-29= = }} {{36-37=}}
+}
+
+// rdar://problem/26236989
+class X : NSDocument {
+  func test(url: URL) {
+  }
+  func test2() {
+    let url = URL(string: "ABC")
+    self.url = url!
+  }
+  func getTheURL() -> URL {
+    return url
+  }
+}
+
+func makeCopy<T: NSWobbling>(thing: T) {} // expected-error {{'NSWobbling' has been renamed to 'Wobbling'}} {{18-28=Wobbling}} 
+
+func useLowercasedEnumCase(x: RuncingMode) {
+  switch x {
+    case .Mince: return // expected-error {{'Mince' has been renamed to 'mince'}} {{11-16=mince}}
+    case .Quince: return // expected-error {{'Quince' has been renamed to 'quince'}} {{11-17=quince}}
+  }
 }

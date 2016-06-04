@@ -237,6 +237,10 @@ if(PYTHONINTERP_FOUND)
         endif()
 
         foreach(test_subset ${TEST_SUBSETS})
+          # We will add arguments specific for this subset to LIT_ARGS.  Copy
+          # the original value and restore it later.
+          set(LIT_ARGS_COPY "${LIT_ARGS}")
+
           set(want_this_combination TRUE)
           if(test_subset STREQUAL "only_long")
             # Long tests are only run in 'optimize_none' mode.
@@ -283,6 +287,7 @@ if(PYTHONINTERP_FOUND)
                 COMMENT "Running ${test_subset} Swift tests for ${VARIANT_TRIPLE}"
                 ${cmake_3_2_USES_TERMINAL})
           endif()
+          set(LIT_ARGS "${LIT_ARGS_COPY}")
         endforeach()
       endforeach()
     endforeach()

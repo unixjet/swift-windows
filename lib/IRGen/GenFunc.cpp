@@ -1121,10 +1121,6 @@ void irgen::emitFunctionPartialApplication(IRGenFunction &IGF,
     argConventions.push_back(ParameterConvention::Direct_Unowned);
   }
 
-  // For capture descriptors, we need to know where the capture list begins
-  // in the lowered SIL type of the callee.
-  unsigned firstCaptureIndex = origType->getNumSILArguments() - params.size();
-
   // Collect the type infos for the context parameters.
   for (auto param : params) {
     SILType argType = param.getSILType();
@@ -1306,8 +1302,7 @@ void irgen::emitFunctionPartialApplication(IRGenFunction &IGF,
 
   auto descriptor = IGF.IGM.getAddrOfCaptureDescriptor(SILFn, origType,
                                                        substType, subs,
-                                                       layout,
-                                                       firstCaptureIndex);
+                                                       layout);
 
   llvm::Value *data;
   if (layout.isKnownEmpty()) {

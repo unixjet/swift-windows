@@ -63,7 +63,7 @@ namespace {
       /// The source type is 'Boolean'.
       Boolean,
 
-      /// The source type an Objective-C class type bridged to a Swift
+      /// The source type is an Objective-C class type bridged to a Swift
       /// type.
       ObjCBridged,
 
@@ -90,6 +90,11 @@ namespace {
 
       /// The source type created a new Swift type, using swift_newtype
       SwiftNewtype,
+
+      /// The source type created a new Swift type, using swift_newtype, of an
+      /// original underlying CFPointer. This distinction is necessary to
+      /// trigger audit-checking.
+      SwiftNewtypeFromCFPointer,
     };
 
     ImportHintKind Kind;
@@ -121,7 +126,6 @@ namespace {
     case ImportHint::NSUInteger:
     case ImportHint::Reference:
     case ImportHint::Void:
-    case ImportHint::SwiftNewtype:
       return false;
 
     case ImportHint::Block:
@@ -130,6 +134,8 @@ namespace {
     case ImportHint::ObjCPointer:
     case ImportHint::CFunctionPointer:
     case ImportHint::OtherPointer:
+    case ImportHint::SwiftNewtype:
+    case ImportHint::SwiftNewtypeFromCFPointer:
       return true;
     }
   }
@@ -555,7 +561,18 @@ namespace {
       ImportHint hint = ImportHint::None;
 
       if (Impl.getSwiftNewtypeAttr(type->getDecl(), /*useSwift2Name=*/false)) {
-        hint = ImportHint::SwiftNewtype;
+        if (ClangImporter::Implementation::isCFTypeDecl(type->getDecl()))
+          hint = ImportHint::SwiftNewtypeFromCFPointer;
+        else
+          hint = ImportHint::SwiftNewtype;
+
+        // If the underlying type was bridged, the wrapper type is
+        // only useful in bridged cases.
+        auto underlying = Visit(type->getDecl()->getUnderlyingType());
+        if (underlying.Hint == ImportHint::ObjCBridged) {
+          return { underlying.AbstractType,
+                   ImportHint(ImportHint::ObjCBridged, mappedType) };
+        }
 
       // For certain special typedefs, we don't want to use the imported type.
       } else if (auto specialKind = Impl.getSpecialTypedefKind(type->getDecl())) {
@@ -1176,6 +1193,15 @@ static Type adjustTypeForConcreteImport(ClangImporter::Implementation &impl,
   // context.
   if (hint == ImportHint::CFPointer && !isCFAudited(importKind)) {
     importedType = getUnmanagedType(impl, importedType);
+  }
+
+  // For types we import as new types in Swift, if the use is CF un-audited,
+  // then we have to force it to be unmanaged
+  if (hint == ImportHint::SwiftNewtypeFromCFPointer &&
+      !isCFAudited(importKind)) {
+    auto underlyingType = importedType->getSwiftNewtypeUnderlyingType();
+    if (underlyingType)
+      importedType = getUnmanagedType(impl, underlyingType);
   }
 
   // If we have a bridged Objective-C type and we are allowed to

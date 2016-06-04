@@ -1159,6 +1159,8 @@ class infer_instanceVar1 {
   var var_Optional_fail14: CBool?
   var var_Optional_fail20: AnyObject??
   var var_Optional_fail21: AnyObject.Type??
+  var var_Optional_fail22: NSComparisonResult? // a non-bridged imported value type
+  var var_Optional_fail23: NSRange? // a bridged struct imported from C
 // CHECK-NOT: @objc{{.*}}Optional_fail
 
   // CHECK-LABEL: @objc var var_CFunctionPointer_1: @convention(c) () -> ()
@@ -1602,6 +1604,20 @@ class HasIBOutlet {
   @IBOutlet var badOutlet: PlainStruct
   // expected-error@-1 {{@IBOutlet property cannot have non-object type 'PlainStruct'}} {{3-13=}}
   // CHECK-LABEL: {{^}}  @IBOutlet var badOutlet: PlainStruct
+}
+
+//===---
+//===--- @IBAction implies @objc
+//===---
+
+// CHECK-LABEL: {{^}}class HasIBAction {
+class HasIBAction {
+  @IBAction func goodAction(_ sender: AnyObject?) { }
+  // CHECK: {{^}}  @IBAction @objc func goodAction(_ sender: AnyObject?) {
+
+  @IBAction func badAction(_ sender: PlainStruct?) { }
+  // expected-error@-1{{argument to @IBAction method cannot have non-object type 'PlainStruct?'}}
+  // expected-error@-2{{method cannot be marked @IBAction because the type of the parameter cannot be represented in Objective-C}}
 }
 
 //===---

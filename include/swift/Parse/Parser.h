@@ -1109,6 +1109,7 @@ public:
                                               bool isExprBasic);
   ParserResult<Expr> parseExprPostfix(Diag<> ID, bool isExprBasic);
   ParserResult<Expr> parseExprUnary(Diag<> ID, bool isExprBasic);
+  ParserResult<Expr> parseExprKeyPath();
   ParserResult<Expr> parseExprSelector();
   ParserResult<Expr> parseExprSuper();
   ParserResult<Expr> parseExprConfiguration();
@@ -1239,9 +1240,13 @@ public:
   ParserResult<GenericParamList> parseGenericParameters();
   ParserResult<GenericParamList> parseGenericParameters(SourceLoc LAngleLoc);
   ParserResult<GenericParamList> maybeParseGenericParams();
+  ParserStatus parseFreestandingGenericWhereClause(GenericParamList *&GPList);
+  
   ParserStatus parseGenericWhereClause(SourceLoc &WhereLoc,
                                SmallVectorImpl<RequirementRepr> &Requirements,
                                        bool &FirstTypeInComplete);
+  
+
 
   //===--------------------------------------------------------------------===//
   // Availability Specification Parsing

@@ -33,18 +33,18 @@ func isCocoaDictionary<KeyTy : Hashable, ValueTy>(
   return !isNativeDictionary(d)
 }
 
- func isNativeNSDictionary(_ d: NSDictionary) -> Bool {
+func isNativeNSDictionary(_ d: NSDictionary) -> Bool {
   let className: NSString = NSStringFromClass(d.dynamicType) as NSString
   return className.range(of: "_NativeDictionaryStorageOwner").length > 0
 }
 
- func isCocoaNSDictionary(_ d: NSDictionary) -> Bool {
+func isCocoaNSDictionary(_ d: NSDictionary) -> Bool {
   let className: NSString = NSStringFromClass(d.dynamicType) as NSString
   return className.range(of: "NSDictionary").length > 0 ||
     className.range(of: "NSCFDictionary").length > 0
 }
 
- func isNativeNSArray(_ d: NSArray) -> Bool {
+func isNativeNSArray(_ d: NSArray) -> Bool {
   let className: NSString = NSStringFromClass(d.dynamicType) as NSString
   return className.range(of: "_SwiftDeferredNSArray").length > 0
 }
@@ -110,6 +110,39 @@ class TestObjCKeyTy : NSObject, NSCopying {
 
   var value: Int
   var _hashValue: Int
+  var serial: Int
+}
+
+// A type that satisfies the requirements of an NSDictionary key (or an NSSet
+// member), but traps when any of its methods are called.
+class TestObjCInvalidKeyTy {
+  init() {
+    _objcKeyCount.fetchAndAdd(1)
+    serial = _objcKeySerial.addAndFetch(1)
+  }
+
+  deinit {
+    assert(serial > 0, "double destruction")
+    _objcKeyCount.fetchAndAdd(-1)
+    serial = -serial
+  }
+
+  @objc
+  var description: String {
+    assert(serial > 0, "dead TestObjCInvalidKeyTy")
+    fatalError()
+  }
+
+  @objc
+  func isEqual(_ object: AnyObject!) -> Bool {
+    fatalError()
+  }
+
+  @objc
+  var hash : Int {
+    fatalError()
+  }
+
   var serial: Int
 }
 

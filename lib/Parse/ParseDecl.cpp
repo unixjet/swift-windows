@@ -25,6 +25,7 @@
 #include "swift/AST/ParameterList.h"
 #include "swift/Basic/Defer.h"
 #include "swift/Basic/Fallthrough.h"
+#include "swift/Basic/StringExtras.h"
 #include "llvm/Support/MemoryBuffer.h"
 #include "llvm/Support/Path.h"
 #include "llvm/Support/SaveAndRestore.h"
@@ -2290,9 +2291,11 @@ ParserStatus Parser::parseDecl(ParseDeclOptions Flags,
   }
 
   if (auto SF = CurDeclContext->getParentSourceFile()) {
-    for (auto Attr : Attributes) {
-      if (isa<ObjCAttr>(Attr) || isa<DynamicAttr>(Attr))
-        SF->AttrsRequiringFoundation.insert({Attr->getKind(), Attr});
+    if (!getScopeInfo().isInactiveConfigBlock()) {
+      for (auto Attr : Attributes) {
+        if (isa<ObjCAttr>(Attr) || isa<DynamicAttr>(Attr))
+          SF->AttrsRequiringFoundation.insert({Attr->getKind(), Attr});
+      }
     }
   }
 
@@ -2424,6 +2427,8 @@ ParserResult<ImportDecl> Parser::parseDeclImport(ParseDeclOptions Flags,
       break;
     default:
       diagnose(Tok, diag::expected_identifier_in_decl, "import");
+      diagnose(Tok, diag::keyword_cant_be_identifier, Tok.getText());
+      diagnose(Tok, diag::backticks_to_escape);
       return nullptr;
     }
     KindLoc = consumeToken();
@@ -2925,10 +2930,10 @@ ParserResult<IfConfigDecl> Parser::parseDeclIfConfig(ParseDeclOptions Flags) {
 ///
 /// \verbatim
 ///   decl-typealias:
-///     'typealias' identifier generic-params? '=' type
+///     'typealias' identifier generic-params? '=' type requirement-clause?
 /// \endverbatim
-ParserResult<TypeDecl> Parser::parseDeclTypeAlias(Parser::ParseDeclOptions Flags,
-                                                  DeclAttributes &Attributes) {
+ParserResult<TypeDecl> Parser::
+parseDeclTypeAlias(Parser::ParseDeclOptions Flags, DeclAttributes &Attributes) {
   ParserPosition startPosition = getParserPosition();
   SourceLoc TypeAliasLoc = consumeToken(tok::kw_typealias);
   Identifier Id;
@@ -2986,6 +2991,13 @@ ParserResult<TypeDecl> Parser::parseDeclTypeAlias(Parser::ParseDeclOptions Flags
   if (UnderlyingTy.isNull())
     return Status;
 
+  // Parse a 'where' clause if present, adding it to our GenericParamList.
+  if (Tok.is(tok::kw_where)) {
+    auto whereStatus = parseFreestandingGenericWhereClause(genericParams);
+    if (whereStatus.shouldStopParsing())
+      return whereStatus;
+  }
+  
   auto *TAD = new (Context) TypeAliasDecl(TypeAliasLoc, Id, IdLoc,
                                           UnderlyingTy.getPtrOrNull(),
                                           genericParams, CurDeclContext);
@@ -3117,7 +3129,7 @@ static FuncDecl *createAccessorFunc(SourceLoc DeclLoc, ParameterList *param,
   
   // Add the implicit 'self' to Params, if needed.
   if (Flags & Parser::PD_HasContainerType)
-    Params.push_back(ParameterList::createSelf(DeclLoc, P->CurDeclContext));
+    Params.push_back(ParameterList::createUnboundSelf(DeclLoc, P->CurDeclContext));
   
   // Add the "(value)" and subscript indices parameter clause.
   Params.push_back(ValueArg);
@@ -3196,10 +3208,11 @@ static FuncDecl *createAccessorFunc(SourceLoc DeclLoc, ParameterList *param,
 
   // Start the function.
   auto *D = FuncDecl::create(P->Context, StaticLoc, StaticSpellingKind::None,
-                             /* FIXME*/DeclLoc, Identifier(),
-                             DeclLoc, SourceLoc(), AccessorKeywordLoc,
+                             /*FIXME FuncLoc=*/DeclLoc, Identifier(),
+                             /*NameLoc=*/DeclLoc, /*Throws=*/false,
+                             /*ThrowsLoc=*/SourceLoc(), AccessorKeywordLoc,
                              /*GenericParams=*/nullptr,
-                             Type(), Params, ReturnType, P->CurDeclContext);
+                             Params, Type(), ReturnType, P->CurDeclContext);
 
   // Non-static set/willSet/didSet/materializeForSet/mutableAddress
   // default to mutating.  get/address default to
@@ -4403,7 +4416,8 @@ void Parser::consumeAbstractFunctionBody(AbstractFunctionDecl *AFD,
 /// \verbatim
 ///   decl-func:
 ///     attribute-list? ('static' | 'class')? 'mutating'? 'func' 
-///               any-identifier generic-params? func-signature stmt-brace?
+///               any-identifier generic-params? func-signature where-clause?
+///               stmt-brace?
 /// \endverbatim
 ///
 /// \note The caller of this method must ensure that the next token is 'func'.
@@ -4456,6 +4470,34 @@ Parser::parseDeclFunc(SourceLoc StaticLoc, StaticSpellingKind StaticSpelling,
                                 diag::invalid_diagnostic);
     if (NameStatus.isError())
       return nullptr;
+  } else {
+    // We parsed an identifier for the function declaration. If we see another
+    // identifier, it might've been a single identifier that got broken by a
+    // space or newline accidentally.
+    if (Tok.isIdentifierOrUnderscore() && SimpleName.str().back() != '<') {
+      diagnose(Tok.getLoc(), diag::repeated_identifier, "function");
+
+      SourceRange DoubleIdentifierRange(NameLoc, Tok.getLoc());
+
+      // Provide two fix-its: a direct concatenation of the two identifiers
+      // and a camel-cased version.
+
+      auto DirectConcatenation = NameTok.getText().str() + Tok.getText().str();
+
+      diagnose(Tok.getLoc(), diag::join_identifiers)
+        .fixItReplace(DoubleIdentifierRange, DirectConcatenation);
+
+      SmallString<8> CapitalizedScratch;
+      auto Capitalized = camel_case::toSentencecase(Tok.getText(),
+                                                    CapitalizedScratch);
+      auto CamelCaseConcatenation = NameTok.getText().str() + Capitalized.str();
+
+      if (DirectConcatenation != CamelCaseConcatenation)
+        diagnose(Tok.getLoc(), diag::join_identifiers_camel_case)
+          .fixItReplace(DoubleIdentifierRange, CamelCaseConcatenation);
+
+      consumeToken();
+    }
   }
 
   DebuggerContextChange DCC(*this, SimpleName, DeclKind::Func);
@@ -4508,7 +4550,7 @@ Parser::parseDeclFunc(SourceLoc StaticLoc, StaticSpellingKind StaticSpelling,
   // "(int)->int" on FooTy into "(self: FooTy.Type)->(int)->int".
   // Note that we can't actually compute the type here until Sema.
   if (HasContainerType)
-    BodyParams.push_back(ParameterList::createSelf(NameLoc, CurDeclContext));
+    BodyParams.push_back(ParameterList::createUnboundSelf(NameLoc, CurDeclContext));
 
   DefaultArgumentInfo DefaultArgs(HasContainerType);
   TypeRepr *FuncRetTy = nullptr;
@@ -4522,6 +4564,13 @@ Parser::parseDeclFunc(SourceLoc StaticLoc, StaticSpellingKind StaticSpelling,
   if (SignatureStatus.hasCodeCompletion() && !CodeCompletion) {
     // Trigger delayed parsing, no need to continue.
     return SignatureStatus;
+  }
+  
+  // Parse a 'where' clause if present, adding it to our GenericParamList.
+  if (Tok.is(tok::kw_where)) {
+    auto whereStatus = parseFreestandingGenericWhereClause(GenericParams);
+    if (whereStatus.shouldStopParsing())
+      return whereStatus;
   }
   
   // Protocol method arguments may not have default values.
@@ -4544,8 +4593,10 @@ Parser::parseDeclFunc(SourceLoc StaticLoc, StaticSpellingKind StaticSpelling,
 
     // Create the decl for the func and add it to the parent scope.
     FD = FuncDecl::create(Context, StaticLoc, StaticSpelling,
-                          FuncLoc, FullName, NameLoc, throwsLoc, SourceLoc(),
-                          GenericParams, Type(), BodyParams, FuncRetTy,
+                          FuncLoc, FullName, NameLoc,
+                          /*Throws=*/throwsLoc.isValid(), throwsLoc,
+                          /*AccessorKeywordLoc=*/SourceLoc(),
+                          GenericParams, BodyParams, Type(), FuncRetTy,
                           CurDeclContext);
     
     // Add the attributes here so if we need them while parsing the body
@@ -4653,7 +4704,7 @@ bool Parser::parseAbstractFunctionBodyDelayed(AbstractFunctionDecl *AFD) {
 /// \verbatim
 ///   decl-enum:
 ///      'enum' attribute-list identifier generic-params? inheritance?
-///          '{' decl-enum-body '}'
+///          where-clause? '{' decl-enum-body '}'
 ///   decl-enum-body:
 ///      decl*
 /// \endverbatim
@@ -4695,6 +4746,14 @@ ParserResult<EnumDecl> Parser::parseDeclEnum(ParseDeclOptions Flags,
     SmallVector<TypeLoc, 2> Inherited;
     Status |= parseInheritance(Inherited, /*classRequirementLoc=*/nullptr);
     UD->setInherited(Context.AllocateCopy(Inherited));
+  }
+  
+  // Parse a 'where' clause if present, adding it to our GenericParamList.
+  if (Tok.is(tok::kw_where)) {
+    auto whereStatus = parseFreestandingGenericWhereClause(GenericParams);
+    if (whereStatus.shouldStopParsing())
+      return whereStatus;
+    UD->setGenericParams(GenericParams);
   }
 
   SourceLoc LBLoc, RBLoc;
@@ -4933,7 +4992,7 @@ bool Parser::parseNominalDeclMembers(SourceLoc LBLoc, SourceLoc &RBLoc,
 /// \verbatim
 ///   decl-struct:
 ///      'struct' attribute-list identifier generic-params? inheritance?
-///          '{' decl-struct-body '}
+///          where-clause? '{' decl-struct-body '}
 ///   decl-struct-body:
 ///      decl*
 /// \endverbatim
@@ -4979,6 +5038,14 @@ ParserResult<StructDecl> Parser::parseDeclStruct(ParseDeclOptions Flags,
     Status |= parseInheritance(Inherited, /*classRequirementLoc=*/nullptr);
     SD->setInherited(Context.AllocateCopy(Inherited));
   }
+  
+  // Parse a 'where' clause if present, adding it to our GenericParamList.
+  if (Tok.is(tok::kw_where)) {
+    auto whereStatus = parseFreestandingGenericWhereClause(GenericParams);
+    if (whereStatus.shouldStopParsing())
+      return whereStatus;
+    SD->setGenericParams(GenericParams);
+  }
 
   SourceLoc LBLoc, RBLoc;
   if (parseToken(tok::l_brace, LBLoc, diag::expected_lbrace_struct)) {
@@ -5014,7 +5081,7 @@ ParserResult<StructDecl> Parser::parseDeclStruct(ParseDeclOptions Flags,
 /// \verbatim
 ///   decl-class:
 ///      'class' attribute-list identifier generic-params? inheritance?
-///          '{' decl-class-body '}
+///          where-clause? '{' decl-class-body '}
 ///   decl-class-body:
 ///      decl*
 /// \endverbatim
@@ -5058,6 +5125,14 @@ ParserResult<ClassDecl> Parser::parseDeclClass(SourceLoc ClassLoc,
     SmallVector<TypeLoc, 2> Inherited;
     Status |= parseInheritance(Inherited, /*classRequirementLoc=*/nullptr);
     CD->setInherited(Context.AllocateCopy(Inherited));
+  }
+
+  // Parse a 'where' clause if present, adding it to our GenericParamList.
+  if (Tok.is(tok::kw_where)) {
+    auto whereStatus = parseFreestandingGenericWhereClause(GenericParams);
+    if (whereStatus.shouldStopParsing())
+      return whereStatus;
+    CD->setGenericParams(GenericParams);
   }
 
   SourceLoc LBLoc, RBLoc;
@@ -5343,13 +5418,21 @@ Parser::parseDeclInit(ParseDeclOptions Flags, DeclAttributes &Attributes) {
     Attributes.add(new (Context) RethrowsAttr(throwsLoc));
   }
 
-  auto *SelfDecl = ParamDecl::createSelf(ConstructorLoc, CurDeclContext);
+  // Parse a 'where' clause if present, adding it to our GenericParamList.
+  if (Tok.is(tok::kw_where)) {
+    auto whereStatus = parseFreestandingGenericWhereClause(GenericParams);
+    if (whereStatus.shouldStopParsing())
+      return whereStatus;
+  }
+  
+  auto *SelfDecl = ParamDecl::createUnboundSelf(ConstructorLoc, CurDeclContext);
 
   Scope S2(this, ScopeKind::ConstructorBody);
   auto *CD = new (Context) ConstructorDecl(FullName, ConstructorLoc,
                                            Failability, FailabilityLoc,
+                                           throwsLoc.isValid(), throwsLoc,
                                            SelfDecl, BodyPattern,
-                                           GenericParams, throwsLoc,
+                                           GenericParams,
                                            CurDeclContext);
   
   CtorInitializerKind initKind = CtorInitializerKind::Designated;
@@ -5438,7 +5521,7 @@ parseDeclDeinit(ParseDeclOptions Flags, DeclAttributes &Attributes) {
     }
   }
 
-  auto *SelfDecl = ParamDecl::createSelf(DestructorLoc, CurDeclContext);
+  auto *SelfDecl = ParamDecl::createUnboundSelf(DestructorLoc, CurDeclContext);
 
   Scope S(this, ScopeKind::DestructorBody);
   auto *DD = new (Context) DestructorDecl(Context.Id_deinit, DestructorLoc,

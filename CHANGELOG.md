@@ -3,6 +3,32 @@ Note: This is in reverse chronological order, so newer entries are added to the 
 Swift 3.0
 ---------
 
+* [SE-0081](https://github.com/apple/swift-evolution/blob/master/proposals/0081-move-where-expression.md)
+  "Move 'where' clause to end of declaration" is implemented, allowing you to 
+  write 'where' clauses after the signature for a declaration, but before its
+  body.  For example, before:
+
+    ```swift
+    func anyCommonElements<T : SequenceType, U : SequenceType 
+                           where T.Generator.Element: Equatable, T.Generator.Element == U.Generator.Element>
+        (lhs: T, _ rhs: U) -> Bool
+    {
+        ...
+    }
+    ```
+
+  after:
+
+    ```swift
+    func anyCommonElements<T : SequenceType, U : SequenceType>(lhs: T, _ rhs: U) -> Bool
+        where T.Generator.Element: Equatable, T.Generator.Element == U.Generator.Element
+    {
+        ...
+    }
+    ```
+   
+  The old form is still accepted for compatibility, but will eventually be rejected.
+
 * [SE-0071](https://github.com/apple/swift-evolution/blob/master/proposals/0071-member-keywords.md):
   "Allow (most) keywords in member references" is implemented.  This allows the
   use of members after a dot without backticks, e.g. "foo.default".
@@ -184,7 +210,7 @@ Swift 3.0
 * Generic signatures can now contain superclass requirements with generic
   parameter types, for example:
 
-  ```
+  ```swift
   func f<Food : Chunks<Meat>, Meat : Molerat>(f: Food, m: Meat) {}
   ```
 
@@ -210,6 +236,19 @@ Swift 3.0
     func executeClosureIfNotNil(closure: (() throws -> Void)?) rethrows {
         try closure?()
     }
+    ```
+
+* [SE-0064](https://github.com/apple/swift-evolution/blob/master/proposals/0064-property-selectors.md) The Objective-C selectors for the getter or setter of a property can now be referenced with `#selector`. For example:
+
+    ```swift
+    let sel1 = #selector(getter: UIView.backgroundColor) // sel1 has type Selector
+    let sel2 = #selector(setter: UIView.backgroundColor) // sel2 has type Selector
+    ```
+
+* [SE-0062](https://github.com/apple/swift-evolution/blob/master/proposals/0062-objc-keypaths.md): A key-path can now be formed with `#keyPath`. For example:
+
+    ```swift
+    person.valueForKeyPath(#keyPath(Person.bestFriend.lastName))
     ```
 
 Swift 2.2

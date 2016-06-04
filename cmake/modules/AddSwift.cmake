@@ -184,7 +184,8 @@ function(_add_variant_swift_compile_flags
 
   list(APPEND result
       "-sdk" "${SWIFT_SDK_${sdk}_PATH}"
-      "-target" "${SWIFT_SDK_${sdk}_ARCH_${arch}_TRIPLE}")
+      "-target" "${SWIFT_SDK_${sdk}_ARCH_${arch}_TRIPLE}"
+      "-resource-dir" "${SWIFTLIB_DIR}")
 
   if("${CMAKE_SYSTEM_NAME}" STREQUAL "Darwin")
     list(APPEND result
@@ -351,8 +352,8 @@ function(_target_merge_static_library dst_target src_target)
   add_custom_command(TARGET "${dst_target}" POST_BUILD
     COMMAND "${CMAKE_COMMAND}" -E make_directory "${unpack_dir}"
     COMMAND cd "${unpack_dir}"
-    COMMAND "${CMAKE_AR}" -x "$<TARGET_FILE:${src_target}>"
-    COMMAND "${CMAKE_AR}" -r "$<TARGET_FILE:${dst_target}>" ./*.o
+    COMMAND "${CMAKE_AR}" x "$<TARGET_FILE:${src_target}>"
+    COMMAND "${CMAKE_AR}" r "$<TARGET_FILE:${dst_target}>" ./*.o
     COMMAND cd "${CMAKE_BINARY_DIR}"
     COMMAND "${CMAKE_COMMAND}" -E remove_directory "${unpack_dir}"
   )
@@ -449,6 +450,7 @@ endfunction()
 function(_add_swift_library_single target name)
   set(SWIFTLIB_SINGLE_options
       SHARED IS_STDLIB IS_STDLIB_CORE IS_SDK_OVERLAY
+      TARGET_LIBRARY HOST_LIBRARY
       API_NOTES_NON_OVERLAY DONT_EMBED_BITCODE)
   cmake_parse_arguments(SWIFTLIB_SINGLE
     "${SWIFTLIB_SINGLE_options}"
@@ -609,7 +611,7 @@ function(_add_swift_library_single target name)
         SUFFIX ${LLVM_PLUGIN_EXT})
   endif()
 
-  if(SWIFTLIB_SINGLE_IS_STDLIB)
+  if(SWIFTLIB_SINGLE_TARGET_LIBRARY)
     # Install runtime libraries to lib/swift instead of lib. This works around
     # the fact that -isysroot prevents linking to libraries in the system
     # /usr/lib if Swift is installed in /usr.
@@ -703,7 +705,7 @@ function(_add_swift_library_single target name)
 
   # Don't build standard libraries by default.  We will enable building
   # standard libraries that the user requested; the rest can be built on-demand.
-  if(SWIFTLIB_SINGLE_IS_STDLIB)
+  if(SWIFTLIB_SINGLE_TARGET_LIBRARY)
     foreach(t "${target}" ${target_static})
       set_target_properties(${t} PROPERTIES EXCLUDE_FROM_ALL TRUE)
     endforeach()
@@ -853,9 +855,6 @@ function(_add_swift_library_single target name)
     LINK_FLAGS " ${link_flags} -L${SWIFTLIB_DIR}/${SWIFTLIB_SINGLE_SUBDIR} -L${SWIFT_NATIVE_SWIFT_TOOLS_PATH}/../lib/swift/${SWIFTLIB_SINGLE_SUBDIR} -L${SWIFT_NATIVE_SWIFT_TOOLS_PATH}/../lib/swift/${SWIFT_SDK_${SWIFTLIB_SINGLE_SDK}_LIB_SUBDIR}")
   target_link_libraries("${target}" PRIVATE
       ${SWIFTLIB_SINGLE_PRIVATE_LINK_LIBRARIES})
-  if(${SWIFTLIB_SINGLE_INTERFACE_LINK_LIBRARIES})
-    message(FATAL_ERROR "${SWIFTLIB_SINGLE_INTERFACE_LINK_LIBRARIES}")
-  endif()
   target_link_libraries("${target}" INTERFACE
       ${SWIFTLIB_SINGLE_INTERFACE_LINK_LIBRARIES})
   set_property(TARGET "${target}" PROPERTY
@@ -993,8 +992,9 @@ endfunction()
 #   Sources to add into this library.
 function(add_swift_library name)
   set(SWIFTLIB_options
-      SHARED IS_STDLIB IS_STDLIB_CORE IS_SDK_OVERLAY TARGET_LIBRARY IS_HOST
-      API_NOTES_NON_OVERLAY DONT_EMBED_BITCODE)
+      SHARED IS_STDLIB IS_STDLIB_CORE IS_SDK_OVERLAY
+      TARGET_LIBRARY HOST_LIBRARY
+      API_NOTES_NON_OVERLAY DONT_EMBED_BITCODE HAS_SWIFT_CONTENT)
   cmake_parse_arguments(SWIFTLIB
     "${SWIFTLIB_options}"
     "INSTALL_IN_COMPONENT;DEPLOYMENT_VERSION_IOS"
@@ -1005,6 +1005,7 @@ function(add_swift_library name)
   # Infer arguments.
 
   if(SWIFTLIB_IS_SDK_OVERLAY)
+    set(SWIFTLIB_HAS_SWIFT_CONTENT TRUE)
     set(SWIFTLIB_SHARED TRUE)
     set(SWIFTLIB_IS_STDLIB TRUE)
     set(SWIFTLIB_TARGET_LIBRARY TRUE)
@@ -1015,6 +1016,7 @@ function(add_swift_library name)
 
   # Standard library is always a target library.
   if(SWIFTLIB_IS_STDLIB)
+    set(SWIFTLIB_HAS_SWIFT_CONTENT TRUE)
     set(SWIFTLIB_TARGET_LIBRARY TRUE)
   endif()
 
@@ -1029,7 +1031,7 @@ function(add_swift_library name)
 
   # All Swift code depends on the standard library, except for the standard
   # library itself.
-  if(SWIFTLIB_TARGET_LIBRARY AND NOT SWIFTLIB_IS_STDLIB_CORE)
+  if(SWIFTLIB_TARGET_LIBRARY AND SWIFTLIB_HAS_SWIFT_CONTENT AND NOT SWIFTLIB_IS_STDLIB_CORE)
     list(APPEND SWIFTLIB_SWIFT_MODULE_DEPENDS Core)
   endif()
 
@@ -1072,8 +1074,10 @@ function(add_swift_library name)
     # SDKs building the variants of this library.
     list_intersect(
         "${SWIFTLIB_TARGET_SDKS}" "${SWIFT_SDKS}" SWIFTLIB_TARGET_SDKS)
-    if(SWIFTLIB_IS_HOST)
-      list_union("${SWIFTLIB_TARGET_SDKS}" "${SWIFT_HOST_VARIANT_SDK}" SWIFTLIB_TARGET_SDKS)
+    if(SWIFTLIB_HOST_LIBRARY)
+      list_union(
+          "${SWIFTLIB_TARGET_SDKS}" "${SWIFT_HOST_VARIANT_SDK}"
+          SWIFTLIB_TARGET_SDKS)
     endif()
     foreach(sdk ${SWIFTLIB_TARGET_SDKS})
       set(THIN_INPUT_TARGETS)
@@ -1174,6 +1178,8 @@ function(add_swift_library name)
           ${SWIFTLIB_IS_STDLIB_keyword}
           ${SWIFTLIB_IS_STDLIB_CORE_keyword}
           ${SWIFTLIB_IS_SDK_OVERLAY_keyword}
+          ${SWIFTLIB_TARGET_LIBRARY_keyword}
+          ${SWIFTLIB_HOST_LIBRARY_keyword}
           INSTALL_IN_COMPONENT "${SWIFTLIB_INSTALL_IN_COMPONENT}"
           DEPLOYMENT_VERSION_IOS "${SWIFTLIB_DEPLOYMENT_VERSION_IOS}"
         )
@@ -1229,7 +1235,7 @@ function(add_swift_library name)
         message(FATAL_ERROR "internal error: the variable should be non-empty")
       endif()
 
-      if(SWIFTLIB_IS_STDLIB)
+      if(SWIFTLIB_TARGET_LIBRARY)
         if(SWIFTLIB_SHARED)
           set(resource_dir "swift")
           set(file_permissions
@@ -1278,7 +1284,7 @@ function(add_swift_library name)
 
       # Add Swift standard library targets as dependencies to the top-level
       # convenience target.
-      if(SWIFTLIB_IS_STDLIB)
+      if(SWIFTLIB_TARGET_LIBRARY)
         foreach(arch ${SWIFT_SDK_${sdk}_ARCHITECTURES})
           set(VARIANT_SUFFIX "-${SWIFT_SDK_${sdk}_LIB_SUBDIR}-${arch}")
           if(TARGET "swift-stdlib${VARIANT_SUFFIX}" AND TARGET "swift-test-stdlib${VARIANT_SUFFIX}")

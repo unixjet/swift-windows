@@ -56,17 +56,14 @@ extension DarwinBoolean : CustomStringConvertible {
 }
 
 extension DarwinBoolean : Equatable {}
-@warn_unused_result
 public func ==(lhs: DarwinBoolean, rhs: DarwinBoolean) -> Bool {
   return lhs.boolValue == rhs.boolValue
 }
 
-@warn_unused_result
 public // COMPILER_INTRINSIC
 func _convertBoolToDarwinBoolean(_ x: Bool) -> DarwinBoolean {
   return DarwinBoolean(x)
 }
-@warn_unused_result
 public // COMPILER_INTRINSIC
 func _convertDarwinBooleanToBool(_ x: DarwinBoolean) -> Bool {
   return Bool(x)
@@ -76,7 +73,6 @@ func _convertDarwinBooleanToBool(_ x: DarwinBoolean) -> Bool {
 // rdar://problem/19418937, so here are some @_transparent overloads
 // for DarwinBoolean.
 @_transparent
-@warn_unused_result
 public func && <T : Boolean>(
   lhs: T,
   rhs: @autoclosure () -> DarwinBoolean
@@ -85,7 +81,6 @@ public func && <T : Boolean>(
 }
 
 @_transparent
-@warn_unused_result
 public func || <T : Boolean>(
   lhs: T,
   rhs: @autoclosure () -> DarwinBoolean
@@ -159,7 +154,6 @@ public var stderr : UnsafeMutablePointer<FILE> {
 // fcntl.h
 //===----------------------------------------------------------------------===//
 
-@warn_unused_result
 @_silgen_name("_swift_Platform_open")
 func _swift_Platform_open(
   _ path: UnsafePointer<CChar>,
@@ -167,7 +161,6 @@ func _swift_Platform_open(
   _ mode: mode_t
 ) -> CInt
 
-@warn_unused_result
 @_silgen_name("_swift_Platform_openat")
 func _swift_Platform_openat(
   _ fd: CInt,
@@ -176,7 +169,6 @@ func _swift_Platform_openat(
   _ mode: mode_t
 ) -> CInt
 
-@warn_unused_result
 public func open(
   _ path: UnsafePointer<CChar>,
   _ oflag: CInt
@@ -184,7 +176,6 @@ public func open(
   return _swift_Platform_open(path, oflag, 0)
 }
 
-@warn_unused_result
 public func open(
   _ path: UnsafePointer<CChar>,
   _ oflag: CInt,
@@ -193,7 +184,6 @@ public func open(
   return _swift_Platform_open(path, oflag, mode)
 }
 
-@warn_unused_result
 public func openat(
   _ fd: CInt,
   _ path: UnsafePointer<CChar>,
@@ -202,7 +192,6 @@ public func openat(
   return _swift_Platform_openat(fd, path, oflag, 0)
 }
 
-@warn_unused_result
 public func openat(
   _ fd: CInt,
   _ path: UnsafePointer<CChar>,
@@ -212,7 +201,6 @@ public func openat(
   return _swift_Platform_openat(fd, path, oflag, mode)
 }
 
-@warn_unused_result
 @_silgen_name("_swift_Platform_fcntl")
 internal func _swift_Platform_fcntl(
   _ fd: CInt,
@@ -220,7 +208,6 @@ internal func _swift_Platform_fcntl(
   _ value: CInt
 ) -> CInt
 
-@warn_unused_result
 @_silgen_name("_swift_Platform_fcntlPtr")
 internal func _swift_Platform_fcntlPtr(
   _ fd: CInt,
@@ -228,7 +215,6 @@ internal func _swift_Platform_fcntlPtr(
   _ ptr: UnsafeMutablePointer<Void>
 ) -> CInt
 
-@warn_unused_result
 public func fcntl(
   _ fd: CInt,
   _ cmd: CInt
@@ -236,7 +222,6 @@ public func fcntl(
   return _swift_Platform_fcntl(fd, cmd, 0)
 }
 
-@warn_unused_result
 public func fcntl(
   _ fd: CInt,
   _ cmd: CInt,
@@ -245,7 +230,6 @@ public func fcntl(
   return _swift_Platform_fcntl(fd, cmd, value)
 }
 
-@warn_unused_result
 public func fcntl(
   _ fd: CInt,
   _ cmd: CInt,
@@ -357,14 +341,12 @@ public var SEM_FAILED: UnsafeMutablePointer<sem_t>? {
 #endif
 }
 
-@warn_unused_result
 @_silgen_name("_swift_Platform_sem_open2")
 internal func _swift_Platform_sem_open2(
   _ name: UnsafePointer<CChar>,
   _ oflag: CInt
 ) -> UnsafeMutablePointer<sem_t>?
 
-@warn_unused_result
 @_silgen_name("_swift_Platform_sem_open4")
 internal func _swift_Platform_sem_open4(
   _ name: UnsafePointer<CChar>,
@@ -373,7 +355,6 @@ internal func _swift_Platform_sem_open4(
   _ value: CUnsignedInt
 ) -> UnsafeMutablePointer<sem_t>?
 
-@warn_unused_result
 public func sem_open(
   _ name: UnsafePointer<CChar>,
   _ oflag: CInt
@@ -381,7 +362,6 @@ public func sem_open(
   return _swift_Platform_sem_open2(name, oflag)
 }
 
-@warn_unused_result
 public func sem_open(
   _ name: UnsafePointer<CChar>,
   _ oflag: CInt,
@@ -397,7 +377,6 @@ public func sem_open(
 
 // FreeBSD defines extern char **environ differently than Linux.
 #if os(FreeBSD)
-@warn_unused_result
 @_silgen_name("_swift_FreeBSD_getEnv")
 func _swift_FreeBSD_getEnv(
 ) -> UnsafeMutablePointer<UnsafeMutablePointer<UnsafeMutablePointer<CChar>?>>

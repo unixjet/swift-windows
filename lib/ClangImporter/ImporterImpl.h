@@ -20,6 +20,7 @@
 #include "ImportEnumInfo.h"
 #include "SwiftLookupTable.h"
 #include "swift/ClangImporter/ClangImporter.h"
+#include "swift/ClangImporter/ClangModule.h"
 #include "swift/AST/ASTContext.h"
 #include "swift/AST/LazyResolver.h"
 #include "swift/AST/Module.h"
@@ -65,7 +66,6 @@ class TypedefNameDecl;
 namespace swift {
 
 class ASTContext;
-class ClangModuleUnit;
 class ClassDecl;
 class ConstructorDecl;
 class Decl;
@@ -780,8 +780,7 @@ public:
 
   /// Determine the imported CF type for the given typedef-name, or the empty
   /// string if this is not an imported CF type name.
-  static StringRef getCFTypeName(const clang::TypedefNameDecl *decl,
-                                 StringRef *secondaryName = nullptr);
+  static StringRef getCFTypeName(const clang::TypedefNameDecl *decl);
 
   /// Retrieve the type name of a Clang type for the purposes of
   /// omitting unneeded words.
@@ -836,10 +835,6 @@ public:
   struct ImportedName {
     /// The imported name.
     DeclName Imported;
-
-    /// An additional alias to the imported name, which should be
-    /// recorded in name lookup tables as well.
-    DeclName Alias;
 
     /// Whether this name was explicitly specified via a Clang
     /// swift_name attribute.
@@ -912,9 +907,6 @@ public:
       }
     }
 
-    /// Print this imported name as a string suitable for the swift_name
-    /// attribute.
-    void printSwiftName(llvm::raw_ostream &os) const;
   };
 
   /// Flags that control the import of names in importFullName.
@@ -942,6 +934,9 @@ public:
   Identifier importMacroName(const clang::IdentifierInfo *clangIdentifier,
                              const clang::MacroInfo *macro,
                              clang::ASTContext &clangCtx);
+
+  /// Print an imported name as a string suitable for the swift_name attribute.
+  void printSwiftName(ImportedName, llvm::raw_ostream &os);
 
   /// Retrieve the property type as determined by the given accessor.
   static clang::QualType
@@ -1100,6 +1095,10 @@ public:
                             ConstantConvertKind convertKind,
                             bool isStatic,
                             ClangNode ClangN);
+
+  /// Determine whether the given declaration is considered
+  /// 'unavailable' in Swift.
+  bool isUnavailableInSwift(const clang::Decl *decl);
 
   /// \brief Add "Unavailable" annotation to the swift declaration.
   void markUnavailable(ValueDecl *decl, StringRef unavailabilityMsg);
@@ -1473,6 +1472,12 @@ public:
   static bool isNSString(const clang::Type *);
   static bool isNSString(clang::QualType);
 
+  /// Whether the given declaration was exported from Swift.
+  ///
+  /// Note that this only checks the immediate declaration being passed.
+  /// For things like methods and properties that are nested in larger types,
+  /// it's the top-level declaration that should be checked.
+  static bool hasNativeSwiftDecl(const clang::Decl *decl);
 };
 
 }

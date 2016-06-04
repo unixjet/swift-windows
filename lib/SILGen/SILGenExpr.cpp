@@ -198,6 +198,7 @@ namespace {
     RValue visitObjectLiteralExpr(ObjectLiteralExpr *E, SGFContext C);
     RValue visitEditorPlaceholderExpr(EditorPlaceholderExpr *E, SGFContext C);
     RValue visitObjCSelectorExpr(ObjCSelectorExpr *E, SGFContext C);
+    RValue visitObjCKeyPathExpr(ObjCKeyPathExpr *E, SGFContext C);
     RValue visitMagicIdentifierLiteralExpr(MagicIdentifierLiteralExpr *E,
                                            SGFContext C);
     RValue visitCollectionExpr(CollectionExpr *E, SGFContext C);
@@ -233,6 +234,8 @@ namespace {
     RValue visitPointerToPointerExpr(PointerToPointerExpr *E, SGFContext C);
     RValue visitForeignObjectConversionExpr(ForeignObjectConversionExpr *E,
                                             SGFContext C);
+    RValue visitUnevaluatedInstanceExpr(UnevaluatedInstanceExpr *E,
+                                        SGFContext C);
   };
 }
 
@@ -442,57 +445,9 @@ emitRValueForDecl(SILLocation loc, ConcreteDeclRef declRef, Type ncRefType,
   }
 
   auto silDeclRef = SILDeclRef(decl, ResilienceExpansion::Minimal, uncurryLevel);
-  auto constantInfo = getConstantInfo(silDeclRef);
 
-  ManagedValue result = emitFunctionRef(loc, silDeclRef, constantInfo);
-
-  // Get the lowered AST types:
-  //  - the original type
-  auto origLoweredFormalType =
-      AbstractionPattern(constantInfo.LoweredInterfaceType);
-  if (hasLocalCaptures) {
-    // Get the unlowered formal type of the constant, stripping off
-    // the first level of function application, which applies captures.
-    origLoweredFormalType =
-      AbstractionPattern(constantInfo.FormalInterfaceType)
-          .getFunctionResultType();
-
-    // Lower it, being careful to use the right generic signature.
-    origLoweredFormalType =
-      AbstractionPattern(
-          origLoweredFormalType.getGenericSignature(),
-          SGM.Types.getLoweredASTFunctionType(
-              cast<FunctionType>(origLoweredFormalType.getType()),
-              0, silDeclRef));
-  }
-
-  // - the substituted type
-  auto substFormalType = cast<AnyFunctionType>(refType);
-  auto substLoweredFormalType =
-    SGM.Types.getLoweredASTFunctionType(substFormalType, 0, silDeclRef);
-
-  // If the declaration reference is specialized, create the partial
-  // application.
-  if (declRef.isSpecialized()) {
-    // Substitute the function type.
-    auto origFnType = result.getType().castTo<SILFunctionType>();
-    auto substFnType = origFnType->substGenericArgs(
-                                                    SGM.M, SGM.SwiftModule,
-                                                    declRef.getSubstitutions());
-    auto closureType = adjustFunctionType(substFnType,
-                                        SILFunctionType::Representation::Thick);
-
-    SILValue spec = B.createPartialApply(loc, result.forward(*this),
-                                SILType::getPrimitiveObjectType(substFnType),
-                                         declRef.getSubstitutions(),
-                                         { },
-                                SILType::getPrimitiveObjectType(closureType));
-    result = emitManagedRValueWithCleanup(spec);
-  }
-
-  // Generalize if necessary.
-  result = emitOrigToSubstValue(loc, result, origLoweredFormalType,
-                                substLoweredFormalType);
+  ManagedValue result = emitClosureValue(loc, silDeclRef, refType,
+                                         declRef.getSubstitutions());
   return RValue(*this, loc, refType, result);
 }
 
@@ -1450,7 +1405,6 @@ ManagedValue SILGenFunction::getManagedValue(SILLocation loc,
 
 RValue RValueEmitter::visitForcedCheckedCastExpr(ForcedCheckedCastExpr *E,
                                                  SGFContext C) {
-  SGF.checkForImportedUsedConformances(E);
   return emitUnconditionalCheckedCast(SGF, E, E->getSubExpr(), E->getType(),
                                       E->getCastKind(), C);
 }
@@ -1459,14 +1413,12 @@ RValue RValueEmitter::visitForcedCheckedCastExpr(ForcedCheckedCastExpr *E,
 RValue RValueEmitter::
 visitConditionalCheckedCastExpr(ConditionalCheckedCastExpr *E,
                                 SGFContext C) {
-  SGF.checkForImportedUsedConformances(E);
   ManagedValue operand = SGF.emitRValueAsSingleValue(E->getSubExpr());
   return emitConditionalCheckedCast(SGF, E, operand, E->getSubExpr()->getType(),
                                     E->getType(), E->getCastKind(), C);
 }
 
 RValue RValueEmitter::visitIsExpr(IsExpr *E, SGFContext C) {
-  SGF.checkForImportedUsedConformances(E);
   SILValue isa = emitIsa(SGF, E, E->getSubExpr(),
                          E->getCastTypeLoc().getType(), E->getCastKind());
 
@@ -1480,7 +1432,6 @@ RValue RValueEmitter::visitIsExpr(IsExpr *E, SGFContext C) {
 }
 
 RValue RValueEmitter::visitCoerceExpr(CoerceExpr *E, SGFContext C) {
-  SGF.checkForImportedUsedConformances(E);
   return visit(E->getSubExpr(), C);
 }
 
@@ -1966,9 +1917,16 @@ RValue RValueEmitter::visitAbstractClosureExpr(AbstractClosureExpr *e,
   // Emit the closure body.
   SGF.SGM.emitClosure(e);
 
+  ArrayRef<Substitution> subs;
+  if (e->getCaptureInfo().hasGenericParamCaptures())
+    subs = SGF.getForwardingSubstitutions();
+
   // Generate the closure value (if any) for the closure expr's function
   // reference.
-  return RValue(SGF, e, SGF.emitClosureValue(e, SILDeclRef(e), e));
+  auto refType = e->getType()->getCanonicalType();
+  ManagedValue result = SGF.emitClosureValue(e, SILDeclRef(e),
+                                             refType, subs);
+  return RValue(SGF, e, refType, result);
 }
 
 RValue RValueEmitter::
@@ -2025,6 +1983,10 @@ RValue RValueEmitter::visitObjCSelectorExpr(ObjCSelectorExpr *e, SGFContext C) {
   // Wrap that up in a Selector and return it.
   auto selectorValue = SGF.B.createStruct(e, loweredSelectorTy, { ptrValue });
   return RValue(SGF, e, ManagedValue::forUnmanaged(selectorValue));
+}
+
+RValue RValueEmitter::visitObjCKeyPathExpr(ObjCKeyPathExpr *E, SGFContext C) {
+  return visit(E->getSemanticExpr(), C);
 }
 
 static StringRef
@@ -2296,25 +2258,16 @@ RValue RValueEmitter::visitRebindSelfInConstructorExpr(
 static bool isNullableTypeInC(SILModule &M, Type ty) {
   ty = ty->getLValueOrInOutObjectType()->getReferenceStorageReferent();
 
+  // Functions, class instances, and @objc existentials are all nullable.
   if (ty->hasReferenceSemantics())
     return true;
-  
-  auto &C = ty->getASTContext();
-  auto nom = ty->getAnyNominal();
-  if (!nom)
-    return false;
 
-  if (nom == C.getUnsafePointerDecl()
-      || nom == C.getUnsafeMutablePointerDecl()
-      || nom == C.getAutoreleasingUnsafeMutablePointerDecl()
-      || nom == C.getOpaquePointerDecl())
-    return true;
-  
-  auto selectorTy = M.Types.getSelectorType();
-  if (selectorTy && ty->isEqual(selectorTy))
-    return true;
-  
-  return false;
+  // Other types like UnsafePointer can also be nullable.
+  const DeclContext *DC = M.getAssociatedContext();
+  if (!DC)
+    DC = M.getSwiftModule();
+  ty = OptionalType::get(ty);
+  return ty->isTriviallyRepresentableIn(ForeignLanguage::C, DC);
 }
 
 /// Determine whether the given declaration returns a non-optional object that
@@ -2396,14 +2349,19 @@ static bool mayLieAboutNonOptionalReturn(SILModule &M, Expr *expr) {
     // or having a C-derived convention.
     ValueDecl *method = nullptr;
     if (auto selfApply = dyn_cast<ApplyExpr>(apply->getFn())) {
-      if (auto methodRef = dyn_cast<DeclRefExpr>(selfApply->getFn()))
+      if (auto methodRef = dyn_cast<DeclRefExpr>(selfApply->getFn())) {
         method = methodRef->getDecl();
+      }
     } else if (auto force = dyn_cast<ForceValueExpr>(apply->getFn())) {
       method = getFuncDeclFromDynamicMemberLookup(force->getSubExpr());
     } else if (auto bind = dyn_cast<BindOptionalExpr>(apply->getFn())) {
       method = getFuncDeclFromDynamicMemberLookup(bind->getSubExpr());
     } else if (auto fnRef = dyn_cast<DeclRefExpr>(apply->getFn())) {
-      method = fnRef->getDecl();
+      // Only consider a full application of a method. Partial applications
+      // never lie.
+      if (auto func = dyn_cast<AbstractFunctionDecl>(fnRef->getDecl()))
+        if (func->getParameterLists().size() == 1)
+          method = fnRef->getDecl();
     }
     if (method && mayLieAboutNonOptionalReturn(M, method))
       return true;
@@ -3448,6 +3406,11 @@ RValue RValueEmitter::visitForeignObjectConversionExpr(
                         SGF.getLoweredType(E->getType())),
                       orig.getCleanup());
   return RValue(SGF, E, E->getType()->getCanonicalType(), result);
+}
+
+RValue RValueEmitter::visitUnevaluatedInstanceExpr(UnevaluatedInstanceExpr *E,
+                                                   SGFContext C) {
+  llvm_unreachable("unevaluated_instance expression can never be evaluated");
 }
 
 RValue SILGenFunction::emitRValue(Expr *E, SGFContext C) {

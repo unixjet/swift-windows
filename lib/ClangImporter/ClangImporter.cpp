@@ -326,7 +326,6 @@ getNormalInvocationArguments(std::vector<std::string> &invocationArgStrs,
     // Don't emit LLVM IR.
     "-fsyntax-only",
 
-    "-femit-all-decls",
     SHIMS_INCLUDE_FLAG, searchPathOpts.RuntimeResourcePath,
     "-fretain-comments-from-system-headers",
     "-fmodules-validate-system-headers",
@@ -364,10 +363,13 @@ getNormalInvocationArguments(std::vector<std::string> &invocationArgStrs,
       "-DSWIFT_SDK_OVERLAY2_SPRITEKIT_EPOCH=1",
 
       // Request new APIs from CoreImage.
-      "-DSWIFT_SDK_OVERLAY_COREIMAGE_EPOCH=1",
+      "-DSWIFT_SDK_OVERLAY_COREIMAGE_EPOCH=2",
 
       // Request new APIs from libdispatch.
       "-DSWIFT_SDK_OVERLAY_DISPATCH_EPOCH=0",
+
+      // Request new APIs from libpthread
+      "-DSWIFT_SDK_OVERLAY_PTHREAD_EPOCH=1",
     });
 
     // Get the version of this compiler and pass it to
@@ -453,7 +455,7 @@ getNormalInvocationArguments(std::vector<std::string> &invocationArgStrs,
     invocationArgStrs.push_back("-fmodules-cache-path=");
     invocationArgStrs.back().append(moduleCachePath);
   }
-  
+
   if (importerOpts.DetailedPreprocessingRecord) {
     invocationArgStrs.insert(invocationArgStrs.end(), {
       "-Xclang", "-detailed-preprocessing-record",
@@ -776,13 +778,27 @@ void ClangImporter::Implementation::addEntryToLookupTable(
   // Determine whether this declaration is suppressed in Swift.
   if (shouldSuppressDeclImport(named)) return;
 
+  // Leave incomplete struct/enum/union types out of the table; Swift only
+  // handles pointers to them.
+  // FIXME: At some point we probably want to be importing incomplete types,
+  // so that pointers to different incomplete types themselves have distinct
+  // types. At that time it will be necessary to make the decision of whether
+  // or not to import an incomplete type declaration based on whether it's
+  // actually the struct backing a CF type:
+  //
+  //    typedef struct CGColor *CGColorRef;
+  //
+  // The best way to do this is probably to change CFDatabase.def to include
+  // struct names when relevant, not just pointer names. That way we can check
+  // both CFDatabase.def and the objc_bridge attribute and cover all our bases.
+  if (auto *tagDecl = dyn_cast<clang::TagDecl>(named)) {
+    if (!tagDecl->getDefinition())
+      return;
+  }
+
   // If we have a name to import as, add this entry to the table.
   if (auto importedName = importFullName(named, None, &clangSema)) {
     table.addEntry(importedName.Imported, named, importedName.EffectiveContext);
-
-    // Also add the alias, if needed.
-    if (importedName.Alias)
-      table.addEntry(importedName.Alias, named, importedName.EffectiveContext);
 
     // Also add the subscript entry, if needed.
     if (importedName.isSubscriptAccessor())
@@ -831,7 +847,7 @@ void ClangImporter::Implementation::addMacrosToLookupTable(
       // Check whether we have a macro defined in this module.
       auto info = pp.getMacroInfo(macro.first);
       if (!info || info->isFromASTFile() || info->isBuiltinMacro()) continue;
-      
+
       // Only interested in macro definitions.
       auto *defMD = dyn_cast<clang::DefMacroDirective>(MD);
       if (!defMD) continue;
@@ -909,7 +925,7 @@ bool ClangImporter::Implementation::importHeader(
   // Force the import to occur.
   pp.LookAhead(0);
 
-  SmallVector<clang::DeclGroupRef, 16> allParsedDecls;  
+  SmallVector<clang::DeclGroupRef, 16> allParsedDecls;
   auto handleParsed = [&](clang::DeclGroupRef parsed) {
     if (trackParsedSymbols) {
       for (auto *D : parsed) {
@@ -1655,30 +1671,7 @@ static bool hasErrorMethodNameCollision(ClangImporter::Implementation &importer,
   // been marked NS_SWIFT_UNAVAILABLE, because it's actually marked unavailable,
   // or because it was deprecated before our API sunset. We can handle
   // "conflicts" where one form is unavailable.
-  // FIXME: Somewhat duplicated from Implementation::importAttributes.
-  clang::AvailabilityResult availability = conflict->getAvailability();
-  if (availability != clang::AR_Unavailable &&
-      importer.DeprecatedAsUnavailableFilter) {
-    for (auto *attr : conflict->specific_attrs<clang::AvailabilityAttr>()) {
-      if (attr->getPlatform()->getName() == "swift") {
-        availability = clang::AR_Unavailable;
-        break;
-      }
-      if (importer.PlatformAvailabilityFilter &&
-          !importer.PlatformAvailabilityFilter(attr->getPlatform()->getName())){
-        continue;
-      }
-      clang::VersionTuple version = attr->getDeprecated();
-      if (version.empty())
-        continue;
-      if (importer.DeprecatedAsUnavailableFilter(version.getMajor(),
-                                                 version.getMinor())) {
-        availability = clang::AR_Unavailable;
-        break;
-      }
-    }
-  }
-  return availability != clang::AR_Unavailable;
+  return !importer.isUnavailableInSwift(conflict);
 }
 
 /// Determine the optionality of the given Objective-C method.
@@ -1898,12 +1891,48 @@ namespace {
   typedef ClangImporter::Implementation::ImportedName ImportedName;
 }
 
-void ClangImporter::Implementation::ImportedName::printSwiftName(
-       llvm::raw_ostream &os) const {
+/// Will recursively print out the fully qualified context for the given name.
+/// Ends with a trailing "."
+static void
+printFullContextPrefix(ClangImporter::Implementation::ImportedName name,
+                       llvm::raw_ostream &os,
+                       ClangImporter::Implementation &Impl) {
+  const clang::NamedDecl *newDeclContextNamed = nullptr;
+  switch (name.EffectiveContext.getKind()) {
+  case EffectiveClangContext::UnresolvedContext:
+    os << name.EffectiveContext.getUnresolvedName() << ".";
+    // And we're done!
+    return;
+
+  case EffectiveClangContext::DeclContext: {
+    auto namedDecl =
+        dyn_cast<clang::NamedDecl>(name.EffectiveContext.getAsDeclContext());
+    if (!namedDecl) {
+      // We're done
+      return;
+    }
+    newDeclContextNamed = cast<clang::NamedDecl>(namedDecl);
+    break;
+  }
+
+  case EffectiveClangContext::TypedefContext:
+    newDeclContextNamed = name.EffectiveContext.getTypedefName();
+    break;
+  }
+
+  // Now, let's print out the parent
+  assert(newDeclContextNamed && "should of been set");
+  auto parentName = Impl.importFullName(newDeclContextNamed);
+  printFullContextPrefix(parentName, os, Impl);
+  os << parentName.Imported << ".";
+}
+
+void ClangImporter::Implementation::printSwiftName(ImportedName name,
+                                                   llvm::raw_ostream &os) {
   // Property accessors.
   bool isGetter = false;
   bool isSetter = false;
-  switch (AccessorKind) {
+  switch (name.AccessorKind) {
   case ImportedAccessorKind::None:
     break;
 
@@ -1922,43 +1951,27 @@ void ClangImporter::Implementation::ImportedName::printSwiftName(
 
   // If we're importing a global as a member, we need to provide the
   // effective context.
-  if (ImportAsMember) {
-    switch (EffectiveContext.getKind()) {
-    case EffectiveClangContext::DeclContext:
-      os << SwiftLookupTable::translateDeclContext(
-              EffectiveContext.getAsDeclContext())->second;
-      break;
-
-    case EffectiveClangContext::TypedefContext:
-      os << EffectiveContext.getTypedefName()->getName();
-      break;
-
-    case EffectiveClangContext::UnresolvedContext:
-      os << EffectiveContext.getUnresolvedName();
-      break;
-    }
-
-    os << ".";
-  }
+  if (name.ImportAsMember)
+    printFullContextPrefix(name, os, *this);
 
   // Base name.
-  os << Imported.getBaseName().str();
+  os << name.Imported.getBaseName().str();
 
   // Determine the number of argument labels we'll be producing.
-  auto argumentNames = Imported.getArgumentNames();
+  auto argumentNames = name.Imported.getArgumentNames();
   unsigned numArguments = argumentNames.size();
-  if (SelfIndex) ++numArguments;
+  if (name.SelfIndex) ++numArguments;
   if (isSetter) ++numArguments;
 
   // If the result is a simple name that is not a getter, we're done.
-  if (numArguments == 0 && Imported.isSimpleName() && !isGetter) return;
+  if (numArguments == 0 && name.Imported.isSimpleName() && !isGetter) return;
 
   // We need to produce a function name.
   os << "(";
   unsigned currentArgName = 0;
   for (unsigned i = 0; i != numArguments; ++i) {
     // The "self" parameter.
-    if (SelfIndex && *SelfIndex == i) {
+    if (name.SelfIndex && *name.SelfIndex == i) {
       os << "self:";
       continue;
     }
@@ -2362,6 +2375,7 @@ auto ClangImporter::Implementation::importFullName(
   // Import onto a swift_newtype if present
   } else if (auto newtypeDecl = findSwiftNewtype(D, clangSema, swift2Name)) {
     result.EffectiveContext = newtypeDecl;
+    result.ImportAsMember = true;
   // Everything else goes into its redeclaration context.
   } else {
     result.EffectiveContext = dc->getRedeclContext();
@@ -2785,19 +2799,11 @@ auto ClangImporter::Implementation::importFullName(
   // Typedef declarations might be CF types that will drop the "Ref"
   // suffix.
   clang::ASTContext &clangCtx = clangSema.Context;
-  bool aliasIsFunction = false;
-  bool aliasIsInitializer = false;
-  StringRef aliasBaseName;
-  SmallVector<StringRef, 4> aliasArgumentNames;
-  if (auto typedefNameDecl = dyn_cast<clang::TypedefNameDecl>(D)) {
-    auto swiftName = getCFTypeName(typedefNameDecl, &aliasBaseName);
-    if (!swiftName.empty()) {
-      if (!aliasBaseName.empty() &&
-          hasConflict(&clangCtx.Idents.get(swiftName), typedefNameDecl)) {
-        // Use the alias name (the "Ref" name), only.
-        baseName = aliasBaseName;
-        aliasBaseName = StringRef();
-      } else {
+  if (!swift2Name) {
+    if (auto typedefNameDecl = dyn_cast<clang::TypedefNameDecl>(D)) {
+      auto swiftName = getCFTypeName(typedefNameDecl);
+      if (!swiftName.empty() &&
+          !hasConflict(&clangCtx.Idents.get(swiftName), typedefNameDecl)) {
         // Adopt the requested name.
         baseName = swiftName;
       }
@@ -2822,7 +2828,8 @@ auto ClangImporter::Implementation::importFullName(
         (isa<clang::TypeDecl>(D) ||
          (isa<clang::ObjCInterfaceDecl>(D) &&
           !hasOrInheritsSwiftBridgeAttr(cast<clang::ObjCInterfaceDecl>(D))) ||
-         isa<clang::ObjCProtocolDecl>(D))) {
+         isa<clang::ObjCProtocolDecl>(D)) &&
+        !isUnavailableInSwift(D)) {
       // Find the original declaration, from which we can determine
       // the owning module.
       const clang::Decl *owningD = D->getCanonicalDecl();
@@ -2927,7 +2934,6 @@ auto ClangImporter::Implementation::importFullName(
   // If this declaration has the swift_private attribute, prepend "__" to the
   // appropriate place.
   SmallString<16> swiftPrivateScratch;
-  SmallString<16> swiftPrivateAliasScratch;
   if (hasSwiftPrivate(D)) {
     // Make the given name private.
     //
@@ -2967,19 +2973,10 @@ auto ClangImporter::Implementation::importFullName(
     if (makeNamePrivate(isInitializer, baseName, argumentNames,
                         result.InitKind, swiftPrivateScratch))
       return result;
-
-    // If we have an alias name, make it private as well.
-    if (!aliasBaseName.empty()) {
-      (void)makeNamePrivate(aliasIsInitializer, aliasBaseName,
-                            aliasArgumentNames, CtorInitializerKind::Designated,
-                            swiftPrivateAliasScratch);
-    }
   }
 
   result.Imported = formDeclName(SwiftContext, baseName, argumentNames,
                                  isFunction);
-  result.Alias = formDeclName(SwiftContext, aliasBaseName, aliasArgumentNames,
-                              aliasIsFunction);
   return result;
 }
 
@@ -3144,7 +3141,7 @@ isAccessibilityConformingContext(const clang::DeclContext *ctx) {
       return true;
   }
   return false;
-  
+
 }
 
 /// Determine whether the given method potentially conflicts with the
@@ -3168,9 +3165,47 @@ isPotentiallyConflictingSetter(const clang::ObjCProtocolDecl *proto,
   return false;
 }
 
+bool
+ClangImporter::Implementation::hasNativeSwiftDecl(const clang::Decl *decl) {
+  for (auto annotation : decl->specific_attrs<clang::AnnotateAttr>()) {
+    if (annotation->getAnnotation() == SWIFT_NATIVE_ANNOTATION_STRING) {
+      return true;
+    }
+  }
+
+  if (auto *category = dyn_cast<clang::ObjCCategoryDecl>(decl)) {
+    clang::SourceLocation categoryNameLoc = category->getCategoryNameLoc();
+    if (categoryNameLoc.isMacroID()) {
+      // Climb up to the top-most macro invocation.
+      clang::ASTContext &clangCtx = category->getASTContext();
+      clang::SourceManager &SM = clangCtx.getSourceManager();
+
+      clang::SourceLocation macroCaller =
+          SM.getImmediateMacroCallerLoc(categoryNameLoc);
+      while (macroCaller.isMacroID()) {
+        categoryNameLoc = macroCaller;
+        macroCaller = SM.getImmediateMacroCallerLoc(categoryNameLoc);
+      }
+
+      StringRef macroName =
+          clang::Lexer::getImmediateMacroName(categoryNameLoc, SM,
+                                              clangCtx.getLangOpts());
+      if (macroName == "SWIFT_EXTENSION")
+        return true;
+    }
+  }
+
+  return false;
+}
+
 bool ClangImporter::Implementation::shouldSuppressDeclImport(
        const clang::Decl *decl) {
   if (auto objcMethod = dyn_cast<clang::ObjCMethodDecl>(decl)) {
+    // First check if we're actually in a Swift class.
+    auto dc = decl->getDeclContext();
+    if (hasNativeSwiftDecl(cast<clang::ObjCContainerDecl>(dc)))
+      return true;
+
     // If this member is a method that is a getter or setter for a
     // property, don't add it into the table. property names and
     // getter names (by choosing to only have a property).
@@ -3186,13 +3221,19 @@ bool ClangImporter::Implementation::shouldSuppressDeclImport(
 
     // If the method was declared within a protocol, check that it
     // does not conflict with the setter of a property.
-    if (auto proto = dyn_cast<clang::ObjCProtocolDecl>(decl->getDeclContext()))
+    if (auto proto = dyn_cast<clang::ObjCProtocolDecl>(dc))
       return isPotentiallyConflictingSetter(proto, objcMethod);
+
 
     return false;
   }
 
   if (auto objcProperty = dyn_cast<clang::ObjCPropertyDecl>(decl)) {
+    // First check if we're actually in a Swift class.
+    auto dc = objcProperty->getDeclContext();
+    if (hasNativeSwiftDecl(cast<clang::ObjCContainerDecl>(dc)))
+      return true;
+
     // Suppress certain accessibility properties; they're imported as
     // getter/setter pairs instead.
     if (isAccessibilityDecl(objcProperty))
@@ -3201,7 +3242,6 @@ bool ClangImporter::Implementation::shouldSuppressDeclImport(
     // Check whether there is a superclass method for the getter that
     // is *not* suppressed, in which case we will need to suppress
     // this property.
-    auto dc = objcProperty->getDeclContext();
     auto objcClass = dyn_cast<clang::ObjCInterfaceDecl>(dc);
     if (!objcClass) {
       if (auto objcCategory = dyn_cast<clang::ObjCCategoryDecl>(dc)) {
@@ -3864,7 +3904,7 @@ static bool isVisibleClangEntry(clang::ASTContext &ctx,
   // Check whether the macro is defined.
   auto clangMacro = entry.get<clang::MacroInfo *>();
   if (auto moduleID = clangMacro->getOwningModuleID()) {
-    if (auto module = ctx.getExternalSource()->getModule(moduleID)) 
+    if (auto module = ctx.getExternalSource()->getModule(moduleID))
       return module->NameVisibility == clang::Module::AllVisible;
   }
 
@@ -3933,7 +3973,8 @@ void ClangImporter::loadObjCMethods(
   SmallVector<clang::ObjCMethodDecl *, 4> objcMethods;
   auto &sema = Impl.Instance->getSema();
   sema.CollectMultipleMethodsInGlobalPool(clangSelector, objcMethods,
-                                          isInstanceMethod);
+                                          isInstanceMethod,
+                                          /*CheckTheOther=*/false);
 
   // Check whether this method is in the class we care about.
   SmallVector<AbstractFunctionDecl *, 4> foundMethods;
@@ -4011,10 +4052,12 @@ void ClangModuleUnit::lookupObjCMethods(
   auto &clangSema = owner.Impl.getClangSema();
   clangSema.CollectMultipleMethodsInGlobalPool(clangSelector,
                                                objcMethods,
-                                               /*instance=*/true);
+                                               /*instance=*/true,
+                                               /*CheckTheOther=*/false);
   clangSema.CollectMultipleMethodsInGlobalPool(clangSelector,
                                                objcMethods,
-                                               /*instance=*/false);
+                                               /*instance=*/false,
+                                               /*CheckTheOther=*/false);
 
   // Import the methods.
   auto &clangCtx = clangSema.getASTContext();
@@ -4059,7 +4102,7 @@ void ClangModuleUnit::collectLinkLibraries(
       kind = LibraryKind::Framework;
     else
       kind = LibraryKind::Library;
-    
+
     callback(LinkLibrary(clangLinkLib.Library, kind));
   }
 }
@@ -4651,7 +4694,7 @@ EffectiveClangContext ClangImporter::Implementation::getEffectiveClangContext(
 
         /// FIXME: Other type declarations should also be okay?
       }
-    }    
+    }
   }
 
   return EffectiveClangContext();

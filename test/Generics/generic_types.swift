@@ -28,6 +28,7 @@ a.f(1,b: 2)
 var b : Int = SInt.f(1)
 
 struct S2<T> {
+  @discardableResult
   static func f() -> T {
     S2.f()
   }
@@ -62,9 +63,9 @@ struct formattedTestS<T : MyFormattedPrintable> {
   }
 }
 
-struct GenericReq<
-  T : IteratorProtocol, U : IteratorProtocol where T.Element == U.Element
-> {}
+struct GenericReq<T : IteratorProtocol, U : IteratorProtocol>
+  where T.Element == U.Element {
+}
 
 func getFirst<R : IteratorProtocol>(_ r: R) -> R.Element {
   var r = r
@@ -137,11 +138,8 @@ var d2 : Dictionary<String, Int>
 d1["hello"] = d2["world"]
 i = d2["blarg"]
 
-struct RangeOfPrintables<
-  R : Sequence
-  where
-  R.Iterator.Element : MyFormattedPrintable
-> {
+struct RangeOfPrintables<R : Sequence>
+  where R.Iterator.Element : MyFormattedPrintable {
   var r : R
 
   func format() -> String {
@@ -191,7 +189,7 @@ func useNested(_ ii: Int, hni: HasNested<Int>,
   typealias InnerF = HasNested<Float>.Inner
   var innerF : InnerF = innerI // expected-error{{cannot convert value of type 'InnerI' (aka 'HasNested<Int>.Inner') to specified type 'InnerF' (aka 'HasNested<Float>.Inner')}}
 
-  innerI.identity(i)
+  _ = innerI.identity(i)
   i = innerI.identity(i)
 
   // Generic function in a generic class
@@ -306,15 +304,13 @@ struct X4 : P, Q {
   typealias AssocQ = String
 }
 
-struct X5<T, U where T: P, T: Q, T.AssocP == T.AssocQ> { } // expected-note{{requirement specified as 'T.AssocP' == 'T.AssocQ' [with T = X4]}}
+struct X5<T, U> where T: P, T: Q, T.AssocP == T.AssocQ { } // expected-note{{requirement specified as 'T.AssocP' == 'T.AssocQ' [with T = X4]}}
 
 var y: X5<X4, Int> // expected-error{{'X5' requires the types 'AssocP' (aka 'Int') and 'AssocQ' (aka 'String') be equivalent}}
 
 // Recursive generic signature validation.
 class Top {}
-class Bottom<T : Bottom<Top>> {} // expected-error 2{{type may not reference itself as a requirement}}
-// expected-error@-1{{Bottom' requires that 'Top' inherit from 'Bottom<Top>'}}
-// expected-note@-2{{requirement specified as 'T' : 'Bottom<Top>' [with T = Top]}}
+class Bottom<T : Bottom<Top>> {} // expected-error {{type may not reference itself as a requirement}}
 
 class X6<T> {
   let d: D<T>
@@ -335,4 +331,4 @@ struct UnsolvableInheritance2<T : U.A, U : T.A> {}
 // expected-error@-1 {{inheritance from non-protocol, non-class type 'U.A'}}
 // expected-error@-2 {{inheritance from non-protocol, non-class type 'T.A'}}
 
-enum X7<T where X7.X : G> { case X } // expected-error{{'X' is not a member type of 'X7<T>'}}
+enum X7<T> where X7.X : G { case X } // expected-error{{'X' is not a member type of 'X7<T>'}}

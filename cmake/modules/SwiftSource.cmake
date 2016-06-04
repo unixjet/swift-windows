@@ -79,6 +79,11 @@ function(handle_swift_sources
     # <rdar://problem/15972329>
     list(APPEND swift_compile_flags "-force-single-frontend-invocation")
 
+    # FIXME: Apply this on all platforms where the linker supports it.
+    if(SWIFTSOURCES_IS_STDLIB_CORE AND "${CMAKE_SYSTEM_NAME}" STREQUAL "Darwin")
+      list(APPEND swift_compile_flags "-Xcc" "-D__SWIFT_CURRENT_DYLIB=swiftCore")
+    endif()
+
     _compile_swift_files(
         dependency_target
         OUTPUT ${swift_obj}
@@ -221,14 +226,6 @@ function(_compile_swift_files dependency_target_out_var_name)
     list(APPEND swift_flags "-Xfrontend" "-enable-resilience")
   endif()
 
-  if(SWIFT_STDLIB_ENABLE_REFLECTION_METADATA AND SWIFTFILE_IS_STDLIB)
-    list(APPEND swift_flags "-Xfrontend" "-enable-reflection-metadata")
-  endif()
-
-  if(SWIFT_STDLIB_ENABLE_REFLECTION_NAMES AND SWIFTFILE_IS_STDLIB)
-    list(APPEND swift_flags "-Xfrontend" "-enable-reflection-names")
-  endif()
-
   if(SWIFT_EMIT_SORTED_SIL_OUTPUT)
     list(APPEND swift_flags "-Xfrontend" "-emit-sorted-sil")
   endif()
@@ -237,8 +234,6 @@ function(_compile_swift_files dependency_target_out_var_name)
   if(SWIFTFILE_IS_STDLIB_CORE)
     list(APPEND swift_flags
         "-nostdimport" "-parse-stdlib" "-module-name" "Swift")
-    list(APPEND swift_flags
-        "-Xfrontend" "-enable-reflection-builtins")
     list(APPEND swift_flags "-Xfrontend" "-group-info-path"
                             "-Xfrontend" "${GROUP_INFO_JSON_FILE}")
     if (NOT SWIFT_STDLIB_ENABLE_RESILIENCE)
@@ -369,6 +364,10 @@ function(_compile_swift_files dependency_target_out_var_name)
   if (SWIFTFILE_EMIT_SIB)
     # Change the command to emit-sib if we are asked to emit sib
     set(main_command "-emit-sib")
+  endif()
+
+  if (SWIFT_CHECK_INCREMENTAL_COMPILATION)
+    set(swift_compiler_tool "${SWIFT_SOURCE_DIR}/utils/check-incremental" "${swift_compiler_tool}")
   endif()
 
   add_custom_command_target(
