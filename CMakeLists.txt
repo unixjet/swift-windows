@@ -425,6 +425,8 @@ else()
     set(SWIFT_HOST_VARIANT_SDK_default "CYGWIN")
   elseif("${CMAKE_SYSTEM_NAME}" STREQUAL "Darwin")
     set(SWIFT_HOST_VARIANT_SDK_default "OSX")
+  elseif("${CMAKE_SYSTEM_NAME}" STREQUAL "Windows")
+    set(SWIFT_HOST_VARIANT_SDK_default "WINDOWS")
   else()
     message(FATAL_ERROR "Unable to detect SDK for host system: ${CMAKE_SYSTEM_NAME}")
   endif()
@@ -574,18 +576,15 @@ elseif("${SWIFT_HOST_VARIANT_SDK}" STREQUAL "CYGWIN")
   set(SWIFT_PRIMARY_VARIANT_SDK_default  "${SWIFT_HOST_VARIANT_SDK}")
   set(SWIFT_PRIMARY_VARIANT_ARCH_default "x86_64")
 
-elseif("${SWIFT_HOST_VARIANT_SDK}" STREQUAL "Windows")
-  configure_sdk_unix(WINDOWS "Windows" "windows" "msvc" "x86_64" "x86_64-pc-windows-msvc")
+elseif("${SWIFT_HOST_VARIANT_SDK}" STREQUAL "WINDOWS")
+  configure_sdk_unix(WINDOWS "Windows" "windows" "msvc" "x86_64" "x86_64-pc-windows-msvc" "/")
 
 #  set(CMAKE_EXECUTABLE_FORMAT "ELF")
 
   set(SWIFT_HOST_VARIANT "windows" CACHE STRING
       "Deployment OS for Swift host tools (the compiler) [windows].")
-
-  set(SWIFT_HOST_VARIANT_SDK "WINDOWS")
-  set(SWIFT_HOST_VARIANT_ARCH "x86_64")
   
-  set(SWIFT_PRIMARY_VARIANT_SDK_default "WINDOWS")
+  set(SWIFT_PRIMARY_VARIANT_SDK_default "${SWIFT_HOST_VARIANT_SDK}")
   set(SWIFT_PRIMARY_VARIANT_ARCH_default "x86_64")
 elseif("${SWIFT_HOST_VARIANT_SDK}" MATCHES "(OSX|IOS*|TVOS*|WATCHOS*)")
 
