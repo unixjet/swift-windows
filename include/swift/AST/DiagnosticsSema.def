@@ -130,8 +130,12 @@ ERROR(expression_too_complex,none,
       "expression was too complex to be solved in reasonable time; "
       "consider breaking up the expression into distinct sub-expressions", ())
 
-ERROR(comparison_with_nil_illegal,none,
-      "value of type %0 can never be nil, comparison isn't allowed",
+ERROR(value_type_comparison_with_nil_illegal_did_you_mean,none,
+      "value of type %0 cannot be compared by reference; "
+      "did you mean to compare by value?",
+      (Type))
+ERROR(value_type_comparison_with_nil_illegal,none,
+      "type %0 is not optional, value can never be nil",
       (Type))
 
 ERROR(cannot_match_expr_pattern_with_value,none,
@@ -753,6 +757,9 @@ ERROR(instance_member_use_on_type,none,
 ERROR(instance_member_in_initializer,none,
       "cannot use instance member %0 within property initializer; "
       "property initializers run before 'self' is available", (DeclName))
+
+ERROR(invalid_initialization_parameter_same_type,none,
+      "invalid initializer call with same type %0 as parameter", (Type))
 
 ERROR(missing_argument_named,none,
       "missing argument for parameter %0 in call", (Identifier))
@@ -2128,6 +2135,18 @@ ERROR(transitive_capture_before_declaration,none,
 NOTE(transitive_capture_through_here,none,
      "%0, declared here, captures %1",
      (Identifier, Identifier))
+
+ERROR(closure_implicit_capture_without_noescape,none,
+      "closure cannot implicitly capture an inout parameter unless @noescape",
+      ())
+ERROR(closure_implicit_capture_mutating_self,none,
+      "closure cannot implicitly capture a mutating self parameter",
+      ())
+ERROR(nested_function_with_implicit_capture_argument,none,
+      "nested function with %select{an |}0implicitly captured inout "
+      "parameter%select{|s}0 can only be used as a @noescape argument", (bool))
+ERROR(nested_function_escaping_inout_capture,none,
+      "nested function cannot capture inout parameter and escape", ())
 
 WARNING(recursive_accessor_reference,none,
         "attempting to %select{access|modify}1 %0 within its own "

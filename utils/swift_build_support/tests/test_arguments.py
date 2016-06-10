@@ -14,8 +14,17 @@ import argparse
 import os
 import sys
 import unittest
+try:
+    # py2
+    from StringIO import StringIO
+except ImportError:
+    # py3
+    from io import StringIO
 
-from swift_build_support.arguments import type as argtype
+from swift_build_support.arguments import (
+    action as argaction,
+    type as argtype,
+)
 
 
 class ArgumentsTypeTestCase(unittest.TestCase):
@@ -87,3 +96,82 @@ class ArgumentsTypeTestCase(unittest.TestCase):
         self.assertRaises(
             argparse.ArgumentTypeError,
             argtype.executable, "../example-command-not-exist")
+
+
+class ArgumentsActionTestCase(unittest.TestCase):
+
+    def test_unavailable(self):
+        orig_stderr = sys.stderr
+
+        parser = argparse.ArgumentParser()
+        parser.add_argument("--foo")
+        parser.add_argument(
+            "--do-not-use",
+            "--never-ever",
+            action=argaction.unavailable)
+
+        args, unknown_args = parser.parse_known_args(
+            ['--foo', 'bar', '--baz', 'qux'])
+
+        self.assertEqual(args.foo, 'bar')
+        self.assertEqual(unknown_args, ['--baz', 'qux'])
+        self.assertFalse(hasattr(args, 'sentinel'))
+
+        stderr = StringIO()
+        sys.stderr = stderr
+        self.assertRaises(
+            SystemExit,
+            parser.parse_known_args,
+            ['--foo', 'bar', '--do-not-use', 'baz'])
+        self.assertIn('--do-not-use', stderr.getvalue())
+
+        stderr = StringIO()
+        sys.stderr = stderr
+        self.assertRaises(
+            SystemExit,
+            parser.parse_known_args,
+            ['--foo', 'bar', '--never-ever=baz'])
+        self.assertIn('--never-ever', stderr.getvalue())
+
+        sys.stderr = orig_stderr
+
+    def test_concat(self):
+        # Has default
+        parser = argparse.ArgumentParser()
+        parser.add_argument(
+            "--str-opt",
+            action=argaction.concat,
+            default="def")
+        parser.add_argument(
+            "--list-opt",
+            action=argaction.concat,
+            type=argtype.shell_split,
+            default=["def"])
+
+        self.assertEqual(
+            parser.parse_args(['--str-opt', '12', '--str-opt=42']),
+            argparse.Namespace(str_opt="def1242", list_opt=["def"]))
+
+        self.assertEqual(
+            parser.parse_args(['--list-opt', 'foo 12', '--list-opt=bar 42']),
+            argparse.Namespace(
+                str_opt="def", list_opt=["def", "foo", "12", "bar", "42"]))
+
+        # Default less
+        parser = argparse.ArgumentParser()
+        parser.add_argument(
+            "--str-opt",
+            action=argaction.concat)
+        parser.add_argument(
+            "--list-opt",
+            action=argaction.concat,
+            type=argtype.shell_split)
+
+        self.assertEqual(
+            parser.parse_args(['--str-opt', '12', '--str-opt=42']),
+            argparse.Namespace(str_opt="1242", list_opt=None))
+
+        self.assertEqual(
+            parser.parse_args(['--list-opt', 'foo 12', '--list-opt=bar 42']),
+            argparse.Namespace(
+                str_opt=None, list_opt=["foo", "12", "bar", "42"]))

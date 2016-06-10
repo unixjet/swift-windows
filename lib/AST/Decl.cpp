@@ -283,18 +283,17 @@ llvm::raw_ostream &swift::operator<<(llvm::raw_ostream &OS,
   llvm_unreachable("bad StaticSpellingKind");
 }
 
-DeclContext *Decl::getInnermostDeclContext() {
+DeclContext *Decl::getInnermostDeclContext() const {
   if (auto func = dyn_cast<AbstractFunctionDecl>(this))
-    return func;
+    return const_cast<AbstractFunctionDecl*>(func);
   if (auto nominal = dyn_cast<NominalTypeDecl>(this))
-    return nominal;
+    return const_cast<NominalTypeDecl*>(nominal);
   if (auto ext = dyn_cast<ExtensionDecl>(this))
-    return ext;
+    return const_cast<ExtensionDecl*>(ext);
   if (auto topLevel = dyn_cast<TopLevelCodeDecl>(this))
-    return topLevel;
+    return const_cast<TopLevelCodeDecl*>(topLevel);
 
   return getDeclContext();
-
 }
 
 DeclContext *Decl::getDeclContextForModule() const {
@@ -424,6 +423,9 @@ bool Decl::isPrivateStdlibDecl(bool whitelistProtocols) const {
   auto hasInternalParameter = [](const ParameterList *params) -> bool {
     for (auto param : *params) {
       if (param->hasName() && param->getNameStr().startswith("_"))
+        return true;
+      auto argName = param->getArgumentName();
+      if (!argName.empty() && argName.str().startswith("_"))
         return true;
     }
     return false;
@@ -2334,7 +2336,7 @@ static StringRef mangleObjCRuntimeName(const NominalTypeDecl *nominal,
 
     NominalTypeDecl *NTD = const_cast<NominalTypeDecl*>(nominal);
     if (isa<ClassDecl>(nominal)) {
-      mangler.mangleNominalType(NTD, Mangle::Mangler::BindGenerics::None);
+      mangler.mangleNominalType(NTD);
     } else {
       mangler.mangleProtocolDecl(cast<ProtocolDecl>(NTD));
     }
@@ -4598,11 +4600,18 @@ ConstructorDecl::getDelegatingOrChainedInitKind(DiagnosticEngine *diags,
       return false;
     }
 
+    bool walkToDeclPre(class Decl *D) override {
+      // Don't walk into further nominal decls.
+      if (isa<NominalTypeDecl>(D))
+        return false;
+      return true;
+    }
+    
     std::pair<bool, Expr*> walkToExprPre(Expr *E) override {
       // Don't walk into closures.
       if (isa<ClosureExpr>(E))
         return { false, E };
-
+      
       // Look for calls of a constructor on self or super.
       auto apply = dyn_cast<ApplyExpr>(E);
       if (!apply)
@@ -4674,7 +4683,7 @@ ConstructorDecl::getDelegatingOrChainedInitKind(DiagnosticEngine *diags,
   if (Kind == BodyInitKind::None && getAttrs().hasAttribute<ConvenienceAttr>())
     Kind = BodyInitKind::Delegating;
 
-  // If wes till don't know, check whether we have a class with a superclass: it
+  // If we still don't know, check whether we have a class with a superclass: it
   // gets an implicit chained initializer.
   if (Kind == BodyInitKind::None) {
     if (auto classDecl = getDeclContext()->getAsClassOrClassExtensionContext()) {

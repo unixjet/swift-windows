@@ -357,7 +357,7 @@ int reflectExistential(SwiftReflectionContextRef RC,
          instance);
 
   swift_typeref_t InstanceTypeRef;
-  addr_t StartOfInstanceData = 0;
+  swift_addr_t StartOfInstanceData = 0;
 
   if (!swift_reflection_projectExistential(RC, instance, MockExistentialTR,
                                            &InstanceTypeRef,

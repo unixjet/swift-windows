@@ -26,6 +26,10 @@
 extern "C" {
 #endif
 
+// They would think the type 'addr_t' is defined in the standard library
+// because it has the same name format with the types in <cstdint>. In
+// addition, the definition conflicts in Cygwin which defines it differently
+// in the system library, so we use 'swift_addr_t'.
 typedef uint64_t swift_addr_t;
 
 typedef uint8_t (*PointerSizeFunction)(void *reader_context);

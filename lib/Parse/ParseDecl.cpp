@@ -2175,7 +2175,12 @@ ParserStatus Parser::parseDecl(ParseDeclOptions Flags,
       break;
     }
     case tok::kw_typealias:
-      DeclResult = parseDeclTypeAlias(Flags, Attributes);
+      if (Flags.contains(PD_InProtocol) &&
+          !Context.LangOpts.EnableProtocolTypealiases) {
+        DeclResult = parseDeclAssociatedType(Flags, Attributes);
+      } else {
+        DeclResult = parseDeclTypeAlias(Flags, Attributes);
+      }
       Status = DeclResult;
       break;
     case tok::kw_associatedtype:
@@ -2523,6 +2528,28 @@ ParserStatus Parser::parseInheritance(SmallVectorImpl<TypeLoc> &Inherited,
 
       // Record the location of the 'class' keyword.
       *classRequirementLoc = classLoc;
+      continue;
+    }
+
+    // Provide a nice error if protocol composition is used.
+    if (Tok.is(tok::kw_protocol) && startsWithLess(peekToken())) {
+      auto compositionResult = parseTypeComposition();
+      Status |= compositionResult;
+      if (auto composition = compositionResult.getPtrOrNull()) {
+        // Record the protocols inside the composition.
+        Inherited.append(composition->getProtocols().begin(),
+                         composition->getProtocols().end());
+
+        // Provide fixits to remove the composition, leaving the types intact.
+        auto angleRange = composition->getAngleBrackets();
+        diagnose(composition->getProtocolLoc(),
+                 diag::disallowed_protocol_composition)
+            .fixItRemove({composition->getProtocolLoc(), angleRange.Start})
+            .fixItRemove(startsWithGreater(L->getTokenAt(angleRange.End))
+                             ? angleRange.End
+                             : SourceLoc());
+      }
+
       continue;
     }
 
@@ -3028,7 +3055,10 @@ ParserResult<TypeDecl> Parser::parseDeclAssociatedType(Parser::ParseDeclOptions 
   // ask us to fix up leftover Swift 2 code intending to be an associatedtype.
   if (Tok.is(tok::kw_typealias)) {
     AssociatedTypeLoc = consumeToken(tok::kw_typealias);
-    diagnose(AssociatedTypeLoc, diag::typealias_inside_protocol_without_type)
+    auto diagnosis = Context.LangOpts.EnableProtocolTypealiases ?
+      diag::typealias_inside_protocol_without_type :
+      diag::typealias_in_protocol_deprecated;
+    diagnose(AssociatedTypeLoc, diagnosis)
         .fixItReplace(AssociatedTypeLoc, "associatedtype");
   } else {
     AssociatedTypeLoc = consumeToken(tok::kw_associatedtype);

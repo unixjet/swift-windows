@@ -3093,10 +3093,14 @@ static bool isLiteralConvertibleType(Type fromType,
   return false;
 }
 
-/// Return true if the given type conforms to RawRepresentable, with an
-/// underlying type conforming to the given known protocol.
+static bool isIntegerType(Type fromType, ConstraintSystem *CS) {
+  return isLiteralConvertibleType(fromType,
+                                  KnownProtocolKind::IntegerLiteralConvertible,
+                                  CS);
+}
+
+/// Return true if the given type conforms to RawRepresentable.
 static Type isRawRepresentable(Type fromType,
-                               KnownProtocolKind kind,
                                ConstraintSystem *CS) {
   auto rawReprType =
     CS->TC.getProtocol(SourceLoc(), KnownProtocolKind::RawRepresentable);
@@ -3113,6 +3117,15 @@ static Type isRawRepresentable(Type fromType,
                                                          conformance,
                                   CS->getASTContext().getIdentifier("RawValue"),
                                                          &CS->TC);
+  return rawTy;
+}
+
+/// Return true if the given type conforms to RawRepresentable, with an
+/// underlying type conforming to the given known protocol.
+static Type isRawRepresentable(Type fromType,
+                               KnownProtocolKind kind,
+                               ConstraintSystem *CS) {
+  Type rawTy = isRawRepresentable(fromType, CS);
   if (!rawTy || !isLiteralConvertibleType(rawTy, kind, CS))
     return Type();
 
@@ -3141,11 +3154,42 @@ static bool isIntegerToStringIndexConversion(Type fromType, Type toType,
 /// This helps migration with SDK changes.
 static void tryRawRepresentableFixIts(InFlightDiagnostic &diag,
                                       ConstraintSystem *CS,
-                                      Diag<Type, Type> diagID,
                                       Type fromType,
                                       Type toType,
                                       KnownProtocolKind kind,
                                       Expr *expr) {
+  // The following fixes apply for optional destination types as well.
+  bool toTypeIsOptional = !toType->getAnyOptionalObjectType().isNull();
+  toType = toType->lookThroughAllAnyOptionalTypes();
+
+  Type fromTypeUnwrapped = fromType->getAnyOptionalObjectType();
+  bool fromTypeIsOptional = !fromTypeUnwrapped.isNull();
+  if (fromTypeIsOptional)
+    fromType = fromTypeUnwrapped;
+
+  auto fixIt = [&](StringRef convWrapBefore, StringRef convWrapAfter) {
+    SourceRange exprRange = expr->getSourceRange();
+    if (fromTypeIsOptional && toTypeIsOptional) {
+      // Use optional's map function to convert conditionally, like so:
+      //   expr.map{ T(rawValue: $0) }
+      bool needsParens = !expr->canAppendCallParentheses();
+      std::string mapCodeFix;
+      if (needsParens) {
+        diag.fixItInsert(exprRange.Start, "(");
+        mapCodeFix += ")";
+      }
+      mapCodeFix += ".map { ";
+      mapCodeFix += convWrapBefore;
+      mapCodeFix += "$0";
+      mapCodeFix += convWrapAfter;
+      mapCodeFix += " }";
+      diag.fixItInsertAfter(exprRange.End, mapCodeFix);
+    } else if (!fromTypeIsOptional) {
+      diag.fixItInsert(exprRange.Start, convWrapBefore);
+      diag.fixItInsertAfter(exprRange.End, convWrapAfter);
+    }
+  };
+
   if (isLiteralConvertibleType(fromType, kind, CS)) {
     if (auto rawTy = isRawRepresentable(toType, kind, CS)) {
       // Produce before/after strings like 'Result(rawValue: RawType(<expr>))'
@@ -3158,9 +3202,7 @@ static void tryRawRepresentableFixIts(InFlightDiagnostic &diag,
         convWrapBefore += "(";
         convWrapAfter += ")";
       }
-      SourceRange exprRange = expr->getSourceRange();
-      diag.fixItInsert(exprRange.Start, convWrapBefore);
-      diag.fixItInsertAfter(exprRange.End, convWrapAfter);
+      fixIt(convWrapBefore, convWrapAfter);
       return;
     }
   }
@@ -3174,12 +3216,58 @@ static void tryRawRepresentableFixIts(InFlightDiagnostic &diag,
         convWrapBefore += "(";
         convWrapAfter += ")";
       }
-      SourceRange exprRange = expr->getSourceRange();
-      diag.fixItInsert(exprRange.Start, convWrapBefore);
-      diag.fixItInsertAfter(exprRange.End, convWrapAfter);
+      fixIt(convWrapBefore, convWrapAfter);
       return;
     }
   }
+}
+
+/// Attempts to add fix-its for these two mistakes:
+///
+/// - Passing an integer with the right type but which is getting wrapped with a
+///   different integer type unnecessarily. The fixit removes the cast.
+///
+/// - Passing an integer but expecting different integer type. The fixit adds
+///   a wrapping cast.
+///
+/// This helps migration with SDK changes.
+static void tryIntegerCastFixIts(InFlightDiagnostic &diag,
+                                 ConstraintSystem *CS,
+                                 Type fromType,
+                                 Type toType,
+                                 Expr *expr) {
+  if (!isIntegerType(fromType, CS) || !isIntegerType(toType, CS))
+    return;
+
+  auto getInnerCastedExpr = [&]() -> Expr* {
+    CallExpr *CE = dyn_cast<CallExpr>(expr);
+    if (!CE)
+      return nullptr;
+    if (!isa<ConstructorRefCallExpr>(CE->getFn()))
+      return nullptr;
+    ParenExpr *parenE = dyn_cast<ParenExpr>(CE->getArg());
+    if (!parenE)
+      return nullptr;
+    return parenE->getSubExpr();
+  };
+
+  if (Expr *innerE = getInnerCastedExpr()) {
+    Type innerTy = innerE->getType();
+    if (CS->TC.isConvertibleTo(innerTy, toType, CS->DC)) {
+      // Remove the unnecessary cast.
+      diag.fixItRemoveChars(expr->getLoc(), innerE->getStartLoc())
+        .fixItRemove(expr->getEndLoc());
+      return;
+    }
+  }
+
+  // Add a wrapping integer cast.
+  std::string convWrapBefore = toType.getString();
+  convWrapBefore += "(";
+  std::string convWrapAfter = ")";
+  SourceRange exprRange = expr->getSourceRange();
+  diag.fixItInsert(exprRange.Start, convWrapBefore);
+  diag.fixItInsertAfter(exprRange.End, convWrapAfter);
 }
 
 bool FailureDiagnosis::diagnoseContextualConversionError() {
@@ -3420,12 +3508,13 @@ bool FailureDiagnosis::diagnoseContextualConversionError() {
   case CTP_ArrayElement:
   case CTP_DictionaryKey:
   case CTP_DictionaryValue:
-    tryRawRepresentableFixIts(diag, CS, diagID, exprType, contextualType,
+    tryRawRepresentableFixIts(diag, CS, exprType, contextualType,
                               KnownProtocolKind::IntegerLiteralConvertible,
                               expr);
-    tryRawRepresentableFixIts(diag, CS, diagID, exprType, contextualType,
+    tryRawRepresentableFixIts(diag, CS, exprType, contextualType,
                               KnownProtocolKind::StringLiteralConvertible,
                               expr);
+    tryIntegerCastFixIts(diag, CS, exprType, contextualType, expr);
     break;
 
   default:
@@ -3744,6 +3833,43 @@ static bool diagnoseSingleCandidateFailures(CalleeCandidateInfo &CCI,
           .highlight(UDE->getBase()->getSourceRange());
         return true;
       }
+  }
+
+  // Check the case where a raw-representable type is constructed from an
+  // argument with the same type:
+  //
+  //    MyEnumType(MyEnumType.foo)
+  //
+  // This is missing 'rawValue:' label, but a better fix is to just remove the
+  // unnecessary constructor call:
+  //
+  //    MyEnumType.foo
+  //
+  if (params.size() == 1 && args.size() == 1 &&
+      candidate.getDecl() && isa<ConstructorDecl>(candidate.getDecl()) &&
+      candidate.level == 1) {
+    CallArgParam &arg = args[0];
+    auto resTy = candidate.getResultType()->lookThroughAllAnyOptionalTypes();
+    auto rawTy = isRawRepresentable(resTy, CCI.CS);
+    if (rawTy && resTy->getCanonicalType() == arg.Ty.getCanonicalTypeOrNull()) {
+      auto getInnerExpr = [](Expr *E) -> Expr* {
+        ParenExpr *parenE = dyn_cast<ParenExpr>(E);
+        if (!parenE)
+          return nullptr;
+        return parenE->getSubExpr();
+      };
+      Expr *innerE = getInnerExpr(argExpr);
+
+      InFlightDiagnostic diag = TC.diagnose(fnExpr->getLoc(),
+          diag::invalid_initialization_parameter_same_type, resTy);
+      diag.highlight((innerE ? innerE : argExpr)->getSourceRange());
+      if (innerE) {
+        // Remove the unnecessary constructor call.
+        diag.fixItRemoveChars(fnExpr->getLoc(), innerE->getStartLoc())
+          .fixItRemove(argExpr->getEndLoc());
+      }
+      return true;
+    }
   }
 
   // We only handle structural errors here.
@@ -4311,8 +4437,25 @@ bool FailureDiagnosis::visitApplyExpr(ApplyExpr *callExpr) {
     if (isa<NilLiteralExpr>(rhsExpr->getValueProvidingExpr()) &&
         !isUnresolvedOrTypeVarType(lhsType)) {
       if (isNameOfStandardComparisonOperator(overloadName)) {
-        diagnose(callExpr->getLoc(), diag::comparison_with_nil_illegal, lhsType)
-          .highlight(lhsExpr->getSourceRange());
+        // Regardless of whether the type has reference or value semantics,
+        // comparison with nil is illegal, albeit for different reasons spelled
+        // out by the diagnosis.
+        if (lhsType->getAnyOptionalObjectType() &&
+                   (overloadName == "!==" || overloadName == "===")) {
+          auto revisedName = overloadName;
+          revisedName.pop_back();
+          // If we made it here, then we're trying to perform a comparison with
+          // reference semantics rather than value semantics.  The fixit will
+          // lop off the extra '=' in the operator.
+          diagnose(callExpr->getLoc(),
+                   diag::value_type_comparison_with_nil_illegal_did_you_mean,
+                   lhsType)
+            .fixItReplace(callExpr->getLoc(), revisedName);
+        } else {
+          diagnose(callExpr->getLoc(),
+                   diag::value_type_comparison_with_nil_illegal, lhsType)
+            .highlight(lhsExpr->getSourceRange());
+        }
         return true;
       }
     }

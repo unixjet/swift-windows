@@ -28,17 +28,15 @@ from SwiftBuildSupport import (
     HOME,
     SWIFT_BUILD_ROOT,
     SWIFT_SOURCE_ROOT,
-    check_call,
     get_all_preset_names,
     get_preset_options,
-    print_with_argv0,
-    quote_shell_command,
 )  # noqa (E402 module level import not at top of file)
 
 sys.path.append(os.path.join(os.path.dirname(__file__), 'swift_build_support'))
 
 # E402 means module level import not at top of file
 from swift_build_support import arguments  # noqa (E402)
+from swift_build_support import diagnostics  # noqa (E402)
 from swift_build_support.toolchain import host_toolchain  # noqa (E402)
 import swift_build_support.debug      # noqa (E402)
 from swift_build_support import migration  # noqa (E402)
@@ -50,6 +48,21 @@ from swift_build_support.targets import StdlibDeploymentTarget  # noqa (E402)
 from swift_build_support.cmake import CMake  # noqa (E402)
 from swift_build_support.workspace import Workspace  # noqa(E402)
 from swift_build_support.workspace import compute_build_subdir  # noqa(E402)
+
+
+def call_without_sleeping(command, dry_run=False):
+    """
+    Execute a command during which system sleep is disabled.
+
+    By default, this ignores the state of the `shell.dry_run` flag.
+    """
+
+    # Disable system sleep, if possible.
+    if platform.system() == 'Darwin':
+        # Don't mutate the caller's copy of the arguments.
+        command = ["caffeinate"] + list(command)
+
+    shell.call(command, dry_run=dry_run, echo=False)
 
 
 # Main entry point for the preset mode.
@@ -103,8 +116,7 @@ def main_preset():
         return 0
 
     if not args.preset:
-        print_with_argv0("Missing --preset option")
-        return 1
+        diagnostics.fatal("missing --preset option")
 
     args.preset_substitutions = {}
 
@@ -122,11 +134,11 @@ def main_preset():
     if args.distcc:
         build_script_args += ["--distcc"]
 
-    print_with_argv0(
+    diagnostics.note(
         "using preset '" + args.preset + "', which expands to \n\n" +
-        quote_shell_command(build_script_args) + "\n")
+        shell.quote_command(build_script_args) + "\n")
 
-    check_call(build_script_args, disable_sleep=True)
+    call_without_sleeping(build_script_args)
 
     return 0
 
@@ -943,7 +955,7 @@ details of the setups of other systems or automated environments.""")
         help="Pass through extra options to CMake in the form of comma "
              "separated options '-DCMAKE_VAR1=YES,-DCMAKE_VAR2=/tmp'. Can be "
              "called multiple times to add multiple such options.",
-        action="append",
+        action=arguments.action.concat,
         type=arguments.type.shell_split,
         default=[])
 
@@ -963,6 +975,13 @@ details of the setups of other systems or automated environments.""")
         type=arguments.type.bool,
         default=False,
         const=True)
+
+    parser.add_argument(
+        # Explicitly unavailable options here.
+        "--build-jobs",
+        "--common-cmake-options",
+        "--only-execute",
+        action=arguments.action.unavailable)
 
     args = migration.parse_args(parser, sys.argv[1:])
 
@@ -996,27 +1015,22 @@ details of the setups of other systems or automated environments.""")
         toolchain.cmake = args.cmake
 
     if toolchain.cc is None or toolchain.cxx is None:
-        print_with_argv0(
-            "Can't find clang. Please install clang-3.5 or a later version.")
-        return 1
+        diagnostics.fatal(
+            "can't find clang (please install clang-3.5 or a later version)")
 
     if toolchain.cmake is None:
-        print_with_argv0("Can't find CMake. Please install CMake.")
-        return 1
+        diagnostics.fatal("can't find CMake (please install CMake)")
 
     if args.distcc:
         if toolchain.distcc is None:
-            print_with_argv0(
-                "Can't find distcc. Please install distcc")
-            return 1
+            diagnostics.fatal(
+                "can't find distcc (please install distcc)")
         if toolchain.distcc_pump is None:
-            print_with_argv0(
-                "Can't find distcc-pump. Please install distcc-pump")
-            return 1
+            diagnostics.fatal(
+                "can't find distcc-pump (please install distcc-pump)")
 
     if args.host_target is None or args.stdlib_deployment_targets is None:
-        print_with_argv0("Unknown operating system.")
-        return 1
+        diagnostics.fatal("unknown operating system")
 
     if args.symbols_package:
         if not os.path.isabs(args.symbols_package):
@@ -1025,10 +1039,9 @@ details of the setups of other systems or automated environments.""")
                 '(was \'{}\')'.format(args.symbols_package))
             return 1
         if not args.install_symroot:
-            print_with_argv0(
+            diagnostics.fatal(
                 "--install-symroot is required when specifying "
                 "--symbols-package.")
-            return 1
 
     if args.android:
         if args.android_ndk is None or \
@@ -1037,12 +1050,11 @@ details of the setups of other systems or automated environments.""")
                 args.android_icu_uc_include is None or \
                 args.android_icu_i18n is None or \
                 args.android_icu_i18n_include is None:
-            print_with_argv0("When building for Android, --android-ndk, "
-                             "--android-ndk-version, --android-icu-uc, "
-                             "--android-icu-uc-include, --android-icu-i18n, "
-                             "and --android-icu-i18n-include must be "
-                             "specified.")
-            return 1
+            diagnostics.fatal("when building for Android, --android-ndk, "
+                              "--android-ndk-version, --android-icu-uc, "
+                              "--android-icu-uc-include, --android-icu-i18n, "
+                              "and --android-icu-i18n-include must be "
+                              "specified")
 
     # Build cmark if any cmark-related options were specified.
     if (args.cmark_build_variant is not None):
@@ -1214,9 +1226,8 @@ details of the setups of other systems or automated environments.""")
 
     if args.build_ninja:
         if not os.path.exists(workspace.source_dir("ninja")):
-            print_with_argv0("Can't find source directory for ninja "
-                             "(tried %s)" % (workspace.source_dir("ninja")))
-            return 1
+            diagnostics.fatal("can't find source directory for ninja "
+                              "(tried %s)" % (workspace.source_dir("ninja")))
 
     os.umask(0o022)
 
@@ -1233,7 +1244,7 @@ details of the setups of other systems or automated environments.""")
     if args.show_sdks:
         swift_build_support.debug.print_xcodebuild_versions()
 
-    # Clean build direcotry if requested.
+    # Clean build directory if requested.
     if args.clean:
         shell.rmtree(workspace.build_root)
 
@@ -1425,13 +1436,10 @@ details of the setups of other systems or automated environments.""")
 
     # If we have extra_cmake_options, combine all of them together and then add
     # them as one command.
-    # Note that args.extra_cmake_options is a list of lists of options.
     if args.extra_cmake_options:
         build_script_impl_args += [
             "--extra-cmake-options=%s" % ' '.join(
-                pipes.quote(opt)
-                for options in args.extra_cmake_options
-                for opt in options)
+                pipes.quote(opt) for opt in args.extra_cmake_options)
         ]
 
     build_script_impl_args += args.build_script_impl_args
@@ -1439,8 +1447,7 @@ details of the setups of other systems or automated environments.""")
     if args.dry_run:
         build_script_impl_args += ["--dry-run"]
 
-    check_call([build_script_impl] + build_script_impl_args,
-               disable_sleep=True)
+    call_without_sleeping([build_script_impl] + build_script_impl_args)
 
     if args.symbols_package:
         print('--- Creating symbols package ---')
@@ -1465,17 +1472,15 @@ details of the setups of other systems or automated environments.""")
 
 def main():
     if not SWIFT_SOURCE_ROOT:
-        print_with_argv0(
-            "Could not infer source root directory.  " +
-            "Forgot to set $SWIFT_SOURCE_ROOT environment variable?")
-        return 1
+        diagnostics.fatal(
+            "could not infer source root directory " +
+            "(forgot to set $SWIFT_SOURCE_ROOT environment variable?)")
 
     if not os.path.isdir(SWIFT_SOURCE_ROOT):
-        print_with_argv0(
-            "Source root directory \'" + SWIFT_SOURCE_ROOT +
-            "\' does not exist.  " +
-            "Forgot to set $SWIFT_SOURCE_ROOT environment variable?")
-        return 1
+        diagnostics.fatal(
+            "source root directory \'" + SWIFT_SOURCE_ROOT +
+            "\' does not exist " +
+            "(forgot to set $SWIFT_SOURCE_ROOT environment variable?)")
 
     # Determine if we are invoked in the preset mode and dispatch accordingly.
     if any([(opt.startswith("--preset") or opt == "--show-presets")

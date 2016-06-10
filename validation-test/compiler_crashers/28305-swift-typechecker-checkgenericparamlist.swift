@@ -6,9 +6,4 @@
 // See http://swift.org/CONTRIBUTORS.txt for the list of Swift project authors
 
 // RUN: not --crash %target-swift-frontend %s -parse
-struct S:P{var f:a
-var _=f
-struct a{}
-}
-{
-}protocol P{protocol a:var f:a
+protocol b{let:e{}func e where h:e

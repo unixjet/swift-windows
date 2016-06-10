@@ -16,15 +16,14 @@
 
 #include "swift/Runtime/Config.h"
 #include "swift/Runtime/Debug.h"
-#include <cstdint>
 #include <cstdarg>
+#include <cstdint>
 #include <stdio.h>
 #include <stdlib.h>
 
 using namespace swift;
 
-static int swift_asprintf(char **strp, const char *fmt, ...)
-{
+static int swift_asprintf(char **strp, const char *fmt, ...) {
   va_list args;
   va_start(args, fmt);
 #if defined(_MSC_VER)
@@ -84,8 +83,8 @@ _swift_stdlib_reportFatalError(const char *prefix,
                                uint32_t flags) {
   char *log;
   swift_asprintf(&log, "%.*s: %.*s\n", (int)prefixLength, prefix,
-           (int)messageLength, message);
-  
+                 (int)messageLength, message);
+
   swift_reportError(flags, log);
   free(log);
 }
@@ -101,9 +100,10 @@ _swift_stdlib_reportUnimplementedInitializerInFile(
          uintptr_t line, uintptr_t column, uint32_t flags) {
   char *log;
   swift_asprintf(&log, "%.*s: %zu: %zu: fatal error: use of unimplemented "
-           "initializer '%.*s' for class '%.*s'\n",
-           (int)fileLength, file, (size_t)line, (size_t)column,
-           (int)initNameLength, initName, (int)classNameLength, className);
+                       "initializer '%.*s' for class '%.*s'\n",
+                 (int)fileLength, file, (size_t)line, (size_t)column,
+                 (int)initNameLength, initName, (int)classNameLength,
+                 className);
 
   swift_reportError(flags, log);
   free(log);
@@ -121,8 +121,9 @@ _swift_stdlib_reportUnimplementedInitializer(const char *className,
                                              uint32_t flags) {
   char *log;
   swift_asprintf(&log, "fatal error: use of unimplemented "
-           "initializer '%.*s' for class '%.*s'\n",
-           (int)initNameLength, initName, (int)classNameLength, className);
+                       "initializer '%.*s' for class '%.*s'\n",
+                 (int)initNameLength, initName, (int)classNameLength,
+                 className);
 
   swift_reportError(flags, log);
   free(log);

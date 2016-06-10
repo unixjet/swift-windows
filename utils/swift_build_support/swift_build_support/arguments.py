@@ -10,7 +10,7 @@
 #
 # ----------------------------------------------------------------------------
 """
-argparse suppliments
+argparse supplements
 """
 # ----------------------------------------------------------------------------
 
@@ -22,7 +22,8 @@ import re
 import shlex
 
 __all__ = [
-    "type"
+    "action",
+    "type",
 ]
 
 
@@ -34,6 +35,7 @@ def _register(registry, name, value):
     setattr(registry, name, value)
 
 
+# Types ----------------------------------------------------------------------
 type = _Registry()
 
 
@@ -99,3 +101,43 @@ def type_executable(string):
         "%r is not executable" % string)
 
 _register(type, 'executable', type_executable)
+
+# Actions --------------------------------------------------------------------
+action = _Registry()
+
+
+class _UnavailableAction(argparse.Action):
+    def __init__(self,
+                 option_strings,
+                 dest=argparse.SUPPRESS,
+                 default=argparse.SUPPRESS,
+                 nargs='?',
+                 help=None):
+        super(_UnavailableAction, self).__init__(
+            option_strings=option_strings,
+            dest=dest,
+            default=default,
+            nargs=nargs,
+            help=help)
+
+    def __call__(self, parser, namespace, values, option_string=None):
+        if option_string is not None:
+            arg = option_string
+        else:
+            arg = str(values)
+        parser.error('unknown argument: %s' % arg)
+
+_register(action, 'unavailable', _UnavailableAction)
+
+
+class _ConcatAction(argparse.Action):
+
+    def __call__(self, parser, namespace, values, option_string=None):
+        old_val = getattr(namespace, self.dest)
+        if old_val is None:
+            val = values
+        else:
+            val = old_val + values
+        setattr(namespace, self.dest, val)
+
+_register(action, 'concat', _ConcatAction)
