@@ -2411,14 +2411,14 @@ public:
     return GenericSig;
   }
   
-  void setIsValidatingGenericSignature(bool ivgs = true) {
-    ValidatingGenericSignature = ivgs;
+  void setIsValidatingGenericSignature(bool validating=true) {
+    ValidatingGenericSignature = validating;
   }
   
   bool isValidatingGenericSignature() const {
     return ValidatingGenericSignature;
   }
-  
+
   // Resolve ambiguity due to multiple base classes.
   using TypeDecl::getASTContext;
   using DeclContext::operator new;
@@ -2771,18 +2771,12 @@ protected:
   Type DeclaredTy;
   Type DeclaredTyInContext;
 
-  void setDeclaredType(Type declaredTy) {
-    assert(DeclaredTy.isNull() && "Already set declared type");
-    DeclaredTy = declaredTy;
-  }
-
   NominalTypeDecl(DeclKind K, DeclContext *DC, Identifier name,
                   SourceLoc NameLoc,
                   MutableArrayRef<TypeLoc> inherited,
                   GenericParamList *GenericParams) :
     GenericTypeDecl(K, DC, name, NameLoc, inherited, GenericParams),
-    IterableDeclContext(IterableDeclContextKind::NominalTypeDecl),
-    DeclaredTy(nullptr)
+    IterableDeclContext(IterableDeclContextKind::NominalTypeDecl)
   {
     setGenericParams(GenericParams);
     NominalTypeDeclBits.HasDelayedMembers = false;
@@ -2853,12 +2847,15 @@ public:
     return SearchedForFailableInits;
   }
 
-  /// getDeclaredType - Retrieve the type declared by this entity.
-  Type getDeclaredType() const { return DeclaredTy; }
-
-  /// Compute the type (and declared type) of this nominal type.
+  /// Compute the type of this nominal type.
   void computeType();
 
+  /// getDeclaredType - Retrieve the type declared by this entity, without
+  /// any generic parameters bound if this is a generic type.
+  Type getDeclaredType() const;
+
+  /// getDeclaredType - Retrieve the type declared by this entity, with
+  /// context archetypes bound if this is a generic type.
   Type getDeclaredTypeInContext() const;
 
   /// Get the "interface" type of the given nominal type, which is the
@@ -3443,7 +3440,8 @@ public:
   bool inheritsFrom(const ProtocolDecl *Super) const;
   
   ProtocolType *getDeclaredType() const {
-    return reinterpret_cast<ProtocolType *>(DeclaredTy.getPointer());
+    return reinterpret_cast<ProtocolType *>(
+      NominalTypeDecl::getDeclaredType().getPointer());
   }
   
   SourceLoc getStartLoc() const { return ProtocolLoc; }
@@ -3670,6 +3668,10 @@ enum class AccessStrategy : unsigned char {
   /// The decl is a VarDecl with its own backing storage; evaluate its
   /// address directly.
   Storage,
+  
+  /// The decl is a VarDecl with storage defined by a property behavior;
+  /// this access may initialize or reassign the storage based on dataflow.
+  BehaviorStorage,
 
   /// The decl has addressors; call the appropriate addressor for the
   /// access kind.  These calls are currently always direct.
@@ -3699,6 +3701,12 @@ struct BehaviorRecord {
   // Storage declaration and initializer for use by definite initialization.
   VarDecl *StorageDecl = nullptr;
   ConcreteDeclRef InitStorageDecl = nullptr;
+  
+  bool needsInitialization() const {
+    assert((bool)StorageDecl == (bool)InitStorageDecl
+           && "DI state not consistent");
+    return StorageDecl != nullptr;
+  }
   
   BehaviorRecord(TypeRepr *ProtocolName,
                  Expr *Param)
@@ -4144,6 +4152,15 @@ public:
   /// Does the storage use a behavior?
   bool hasBehavior() const {
     return BehaviorInfo.getPointer() != nullptr;
+  }
+  
+  /// Does the storage use a behavior, and require definite initialization
+  /// analysis.
+  bool hasBehaviorNeedingInitialization() const {
+    if (auto behavior = getBehavior()) {
+      return behavior->needsInitialization();
+    }
+    return false;
   }
   
   /// Get the behavior info.

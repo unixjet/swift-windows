@@ -2810,6 +2810,11 @@ namespace {
     Type visitOpenExistentialExpr(OpenExistentialExpr *expr) {
       llvm_unreachable("Already type-checked");
     }
+    
+    Type visitEnumIsCaseExpr(EnumIsCaseExpr *expr) {
+      // Should already be type-checked.
+      return expr->getType();
+    }
 
     Type visitEditorPlaceholderExpr(EditorPlaceholderExpr *E) {
       if (E->getTypeLoc().isNull()) {
@@ -3302,6 +3307,8 @@ bool swift::isExtensionApplied(DeclContext &DC, Type BaseTy,
     CreatedTC.reset(new TypeChecker(DC.getASTContext()));
     TC = CreatedTC.get();
   }
+  if (ED->getAsProtocolExtensionContext())
+    return TC->isProtocolExtensionUsable(&DC, BaseTy, const_cast<ExtensionDecl*>(ED));
   ConstraintSystem CS(*TC, &DC, Options);
   auto Loc = CS.getConstraintLocator(nullptr);
   std::vector<Identifier> Scratch;
@@ -3455,7 +3462,7 @@ void swift::collectDefaultImplementationForProtocolMembers(ProtocolDecl *PD,
                                                     VD->getFullName());
     if (Result.OtherViables.empty())
       continue;
-    if (!Result.Favored->getDeclContext()->isGenericTypeContext())
+    if (!Result.Favored->getDeclContext()->isGenericContext())
       continue;
     for (ValueDecl *Default : Result.OtherViables) {
       if (Default->getDeclContext()->isExtensionContext()) {

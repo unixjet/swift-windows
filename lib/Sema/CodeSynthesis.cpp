@@ -1274,7 +1274,7 @@ void TypeChecker::completePropertyBehaviorStorage(VarDecl *VD,
   
   // Add the witnesses to the conformance.
   ArrayRef<Substitution> MemberSubs;
-  if (DC->isGenericTypeContext()) {
+  if (DC->isGenericContext()) {
     MemberSubs = DC->getGenericParamsOfContext()
                    ->getForwardingSubstitutions(Context);
   }
@@ -1448,7 +1448,7 @@ void TypeChecker::completePropertyBehaviorParameter(VarDecl *VD,
 
   // Add the witnesses to the conformance.
   ArrayRef<Substitution> MemberSubs;
-  if (DC->isGenericTypeContext()) {
+  if (DC->isGenericContext()) {
     MemberSubs = DC->getGenericParamsOfContext()
     ->getForwardingSubstitutions(Context);
   }
@@ -1693,6 +1693,8 @@ void swift::maybeAddAccessorsToVariable(VarDecl *var, TypeChecker &TC) {
   if (var->getGetter() || var->isBeingTypeChecked())
     return;
 
+  auto *dc = var->getDeclContext();
+
   assert(!var->hasAccessorFunctions());
 
   // Introduce accessors for a property with behaviors.
@@ -1707,7 +1709,6 @@ void swift::maybeAddAccessorsToVariable(VarDecl *var, TypeChecker &TC) {
     var->setIsBeingTypeChecked();
 
     auto behavior = var->getMutableBehavior();
-    auto dc = var->getDeclContext();
     NormalProtocolConformance *conformance = nullptr;
     VarDecl *valueProp = nullptr;
 
@@ -1753,9 +1754,9 @@ void swift::maybeAddAccessorsToVariable(VarDecl *var, TypeChecker &TC) {
       behavior->ValueDecl = valueProp;
       var->setIsBeingTypeChecked(false);
 
-      addMemberToContextIfNeeded(getter, var->getDeclContext());
+      addMemberToContextIfNeeded(getter, dc);
       if (setter)
-        addMemberToContextIfNeeded(setter, var->getDeclContext());
+        addMemberToContextIfNeeded(setter, dc);
     };
 
     // Try to resolve the behavior to a protocol.
@@ -1845,7 +1846,7 @@ void swift::maybeAddAccessorsToVariable(VarDecl *var, TypeChecker &TC) {
 
     auto *getter = createGetterPrototype(var, TC);
     // lazy getters are mutating on an enclosing value type.
-    if (!var->getDeclContext()->getAsClassOrClassExtensionContext())
+    if (!dc->getAsClassOrClassExtensionContext())
       getter->setMutating();
     getter->setAccessibility(var->getFormalAccess());
 
@@ -1858,33 +1859,43 @@ void swift::maybeAddAccessorsToVariable(VarDecl *var, TypeChecker &TC) {
     TC.validateDecl(getter);
     TC.validateDecl(setter);
 
-    addMemberToContextIfNeeded(getter, var->getDeclContext());
-    addMemberToContextIfNeeded(setter, var->getDeclContext());
+    addMemberToContextIfNeeded(getter, dc);
+    addMemberToContextIfNeeded(setter, dc);
     return;
   }
 
   // Local variables don't otherwise get accessors.
-  if (var->getDeclContext()->isLocalContext())
+  if (dc->isLocalContext())
     return;
 
   // Implicit properties don't get accessors.
   if (var->isImplicit())
     return;
 
-  auto nominal = var->getDeclContext()
-                    ->getAsNominalTypeOrNominalTypeExtensionContext();
-  if (!nominal) {
+  if (!dc->isTypeContext()) {
     // Fixed-layout global variables don't get accessors.
     if (var->hasFixedLayout())
       return;
 
-  // Stored properties in protocols are converted to computed
-  // elsewhere.
-  } else if (isa<ProtocolDecl>(nominal)) {
+  // In a protocol context, variables written as just "var x : Int" or
+  // "let x : Int" are errors and recovered by building a computed property
+  // with just a getter. Diagnose this and create the getter decl now.
+  } else if (isa<ProtocolDecl>(dc)) {
+    if (var->hasStorage()) {
+      if (var->isLet())
+        TC.diagnose(var->getLoc(),
+                    diag::protocol_property_must_be_computed_var);
+      else
+        TC.diagnose(var->getLoc(), diag::protocol_property_must_be_computed);
+
+      var->setIsBeingTypeChecked();
+      convertStoredVarInProtocolToComputed(var, TC);
+      var->setIsBeingTypeChecked(false);
+    }
     return;
 
   // NSManaged properties on classes require special handling.
-  } else if (isa<ClassDecl>(nominal)) {
+  } else if (dc->getAsClassOrClassExtensionContext()) {
     if (var->getAttrs().hasAttribute<NSManagedAttr>()) {
       var->setIsBeingTypeChecked();
       convertNSManagedStoredVarToComputed(var, TC);
@@ -1893,13 +1904,13 @@ void swift::maybeAddAccessorsToVariable(VarDecl *var, TypeChecker &TC) {
     }
 
   // Stored properties imported from Clang don't get accessors.
-  } else if (isa<StructDecl>(nominal)) {
-    if (nominal->hasClangNode())
+  } else if (auto *structDecl = dyn_cast<StructDecl>(dc)) {
+    if (structDecl->hasClangNode())
       return;
   }
 
   // Stored properties in SIL mode don't get accessors.
-  if (auto sourceFile = var->getDeclContext()->getParentSourceFile())
+  if (auto sourceFile = dc->getParentSourceFile())
     if (sourceFile->Kind == SourceFileKind::SIL)
       return;
 
@@ -2079,7 +2090,7 @@ swift::createDesignatedInitOverride(TypeChecker &tc,
   //
   // We might have to apply substitutions, if for example we have a declaration
   // like 'class A : B<Int>'.
-  if (superclassDecl->isGenericTypeContext()) {
+  if (superclassDecl->isGenericContext()) {
     if (auto *superclassSig = superclassDecl->getGenericSignatureOfContext()) {
       auto *moduleDecl = classDecl->getParentModule();
       auto subs = superclassTy->gatherAllSubstitutions(
@@ -2127,7 +2138,7 @@ swift::createDesignatedInitOverride(TypeChecker &tc,
   auto selfType = configureImplicitSelf(tc, ctor);
 
   // Set the interface type of the initializer.
-  if (classDecl->isGenericTypeContext()) {
+  if (classDecl->isGenericContext()) {
     ctor->setGenericSignature(classDecl->getGenericSignatureOfContext());
     tc.configureInterfaceType(ctor);
   }
@@ -2155,7 +2166,7 @@ swift::createDesignatedInitOverride(TypeChecker &tc,
 
   // Wire up the overrides.
   ctor->getAttrs().add(new (tc.Context) OverrideAttr(/*Implicit=*/true));
-  checkOverrides(tc, ctor);
+  ctor->setOverriddenDecl(superclassCtor);
 
   if (kind == DesignatedInitKind::Stub) {
     // Make this a stub implementation.

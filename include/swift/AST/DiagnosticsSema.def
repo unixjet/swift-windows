@@ -572,10 +572,6 @@ NOTE(object_literal_resolve_import,none,
      "import %0 to use '%1' as the default %2 literal type",
      (StringRef, StringRef, StringRef))
 
-ERROR(use_non_type_value,none,
-      "%0 is not a type", (Identifier))
-NOTE(use_non_type_value_prev,none,
-     "%0 declared here", (Identifier))
 ERROR(use_local_before_declaration,none,
       "use of local variable %0 before its declaration", (DeclName))
 ERROR(unsupported_existential_type,none,
@@ -665,8 +661,12 @@ ERROR(init_not_instance_member,none,
       "a new object of the same dynamic type", ())
 ERROR(super_initializer_not_in_initializer,none,
       "'super.init' cannot be called outside of an initializer", ())
+
 WARNING(isa_is_always_true,none, "'%0' test is always true",
         (StringRef))
+WARNING(isa_is_foreign_check,none,
+      "'is' test is always true because %0 is a Core Foundation type",
+      (Type))
 WARNING(conditional_downcast_coercion,none,
       "conditional cast from %0 to %1 always succeeds",
       (Type, Type))
@@ -888,7 +888,7 @@ ERROR(invalid_ibdesignable_extension,none,
       "@IBDesignable can only be applied to classes and extensions "
       "of classes", ())
 ERROR(invalid_ibinspectable,none,
-      "only instance properties can be declared @IBInspectable", ())
+      "only instance properties can be declared @%0", (StringRef))
 ERROR(invalid_ibaction_decl,none,
       "only instance methods can be declared @IBAction", ())
 ERROR(invalid_ibaction_result,none,
@@ -1053,14 +1053,26 @@ ERROR(pattern_binds_no_variables,none,
 
 // Generic types
 ERROR(unsupported_generic_nested_in_type,none,
-      "generic type %0 nested in type %1 is not allowed",
-      (Identifier, Type))
-ERROR(unsupported_type_nested_in_generic_type,none,
-      "type %0 nested in generic type %1 is not allowed",
-      (Identifier, Type))
-ERROR(unsupported_type_nested_in_generic_function,none,
-      "type %0 nested in generic function %1 is not allowed",
+      "generic type %0 cannot be nested in type %1",
       (Identifier, Identifier))
+ERROR(unsupported_type_nested_in_generic_type,none,
+      "type %0 cannot be nested in generic type %1",
+      (Identifier, Identifier))
+ERROR(unsupported_type_nested_in_generic_extension,none,
+      "type %0 cannot be nested in extension of generic type %1",
+      (Identifier, Identifier))
+ERROR(unsupported_type_nested_in_generic_function,none,
+      "type %0 cannot be nested in generic function %1",
+      (Identifier, Identifier))
+ERROR(unsupported_type_nested_in_protocol,none,
+      "type %0 cannot be nested in protocol %1",
+      (Identifier, Identifier))
+ERROR(unsupported_type_nested_in_protocol_extension,none,
+      "type %0 cannot be nested in protocol extension of %1",
+      (Identifier, Identifier))
+ERROR(unsupported_nested_protocol,none,
+      "protocol %0 cannot be nested inside another declaration",
+      (Identifier))
 
 // Type aliases
 ERROR(circular_type_alias,none,
@@ -1111,8 +1123,6 @@ ERROR(extension_constrained_inheritance,none,
       "inheritance clause", (Type))
 ERROR(extension_protocol_inheritance,none,
       "extension of protocol %0 cannot have an inheritance clause", (Type))
-ERROR(extension_protocol_type_definition,none,
-      "type %0 cannot be defined within a protocol extension", (DeclName))
 ERROR(extension_protocol_via_typealias,none,
       "protocol %0 in the module being compiled cannot be extended via a "
       "typealias", (Type))
@@ -1347,6 +1357,9 @@ NOTE(optional_req_near_match_accessibility,none,
 // Protocols and existentials
 ERROR(assoc_type_outside_of_protocol,none,
       "cannot use associated type %0 outside of its protocol", (Identifier))
+ERROR(typealias_to_assoc_type_outside_of_protocol,none,
+      "cannot use typealias %0 of associated type %1 outside of its protocol",
+      (Identifier, TypeLoc))
 
 ERROR(circular_protocol_def,none,
       "circular protocol inheritance %0", (StringRef))
@@ -1842,12 +1855,6 @@ ERROR(lazy_not_observable,none,
 ERROR(attr_for_debugger_support_only,none,
       "@LLDBDebuggerSupport may only be used when debugger support is on", ())
 
-// warn_unused_result
-ERROR(attr_warn_unused_result_mutable_variable,none,
-      "'mutable_variant' parameter of 'warn_unused_result' attribute does not "
-      "make sense on a %select{non-function|non-method|non-instance method|"
-      "method of a class|mutating method}0", (unsigned))
-
 //------------------------------------------------------------------------------
 // Type Check Expressions
 //------------------------------------------------------------------------------
@@ -2167,6 +2174,8 @@ ERROR(value_of_module_type,none,
 
 ERROR(value_of_metatype_type,none,
       "expected member name or constructor call after type name", ())
+WARNING(warn_value_of_metatype_missing_self,none,
+      "missing '.self' for reference to metatype of type %0", (Type))
 
 NOTE(add_parens_to_type,none,
      "add arguments after the type to construct a value of the type", ())

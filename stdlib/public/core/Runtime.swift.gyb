@@ -350,11 +350,26 @@ func _float${bits}ToStringImpl(
 
 func _float${bits}ToString(_ value: Float${bits}, debug: Bool) -> String {
 
-  if value.isInfinite {
-    return value.sign == .minus ? "-inf" : "inf"
-  }
-  if value.isNaN {
-    return "nan"
+  if !value.isFinite {
+    let significand = value.significandBitPattern
+    if significand == 0 {
+      // Infinity
+      return value.sign == .minus ? "-inf" : "inf"
+    }
+    else {
+      // NaN
+      if !debug {
+        return "nan"
+      }
+      let isSignaling = (significand & Float${bits}._quietNaNMask) == 0
+      let payload = significand & ((Float${bits}._quietNaNMask >> 1) - 1)
+      // FIXME(performance): Inefficient String manipulation. We could move
+      // this to C function.
+      return
+        (value.sign == .minus ? "-" : "")
+        + (isSignaling ? "snan" : "nan")
+        + (payload == 0 ? "" : ("(0x" + String(payload, radix: 16) + ")"))
+    }
   }
 
   _sanityCheck(sizeof(_Buffer32.self) == 32)
@@ -459,7 +474,7 @@ func _rawPointerToString(_ value: Builtin.RawPointer) -> String {
       radix: 16,
       uppercase: false
     )
-  for _ in 0..<(2 * sizeof(UnsafePointer<Void>) - result.utf16.count) {
+  for _ in 0..<(2 * sizeof(UnsafePointer<Void>.self) - result.utf16.count) {
     result = "0" + result
   }
   return "0x" + result
@@ -484,6 +499,16 @@ class _SwiftNativeNSSet {}
 
 @objc @_swift_native_objc_runtime_base(_SwiftNativeNSEnumeratorBase)
 class _SwiftNativeNSEnumerator {}
+
+@objc @_swift_native_objc_runtime_base(_SwiftNativeNSDataBase)
+public class _SwiftNativeNSData {
+  public init() {}
+}
+
+@objc @_swift_native_objc_runtime_base(_SwiftNativeNSCharacterSetBase)
+public class _SwiftNativeNSCharacterSet {
+  public init() {}
+}
 
 //===----------------------------------------------------------------------===//
 // Support for reliable testing of the return-autoreleased optimization

@@ -112,7 +112,7 @@ struct TwoWordPair {
 #else
   enum class Return : unsigned long long {};
 #endif
-  
+
   operator Return() const {
     union {
       TwoWordPair value;

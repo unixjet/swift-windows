@@ -1019,6 +1019,12 @@ public:
                       std::function<bool(ArchetypeBuilder &)> inferRequirements,
                       bool &invalid);
 
+  /// Finalize the given generic parameter list, assigning archetypes to
+  /// the generic parameters.
+  void finalizeGenericParamList(ArchetypeBuilder &builder,
+                                GenericParamList *genericParams,
+                                DeclContext *dc);
+
   /// Validate the signature of a generic type.
   ///
   /// \param nominal The generic type.
@@ -1208,6 +1214,9 @@ public:
   ///
   /// \param expr The expression to type-check.
   ///
+  /// \param referencedDecl Will be set to the declaration that is referenced by
+  /// the expression.
+  ///
   /// \param allowFreeTypeVariables Whether free type variables are allowed in
   /// the solution, and what to do with them.
   ///
@@ -1219,6 +1228,7 @@ public:
   /// FIXME: expr may still be modified...
   Optional<Type> getTypeOfExpressionWithoutApplying(
       Expr *&expr, DeclContext *dc,
+      ConcreteDeclRef &referencedDecl,
       FreeTypeVariableBinding allowFreeTypeVariables =
                               FreeTypeVariableBinding::Disallow,
       ExprTypeCheckListener *listener = nullptr);
@@ -1831,8 +1841,7 @@ public:
   /// Checks an "ignored" expression to see if it's okay for it to be ignored.
   ///
   /// An ignored expression is one that is not nested within a larger
-  /// expression or statement. The warning from the \@warn_unused_result
-  /// attribute is produced here.
+  /// expression or statement.
   void checkIgnoredExpr(Expr *E);
 
   // Emits a diagnostic, if necessary, for a reference to a declaration

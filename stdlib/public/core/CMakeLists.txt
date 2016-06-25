@@ -160,8 +160,6 @@ else()
   find_package(ICU REQUIRED COMPONENTS uc i18n)
   list(APPEND swift_core_private_link_libraries
       ${ICU_UC_LIBRARY} ${ICU_I18N_LIBRARY})
-  include_directories(
-      ${ICU_UC_INCLUDE_DIR} ${ICU_I18N_INCLUDE_DIR})
 endif()
 
 if(CMAKE_SYSTEM_NAME STREQUAL "CYGWIN")
@@ -186,12 +184,12 @@ if(SWIFT_STDLIB_SIL_DEBUGGING)
 endif()
 
 if(SWIFT_CHECK_ESSENTIAL_STDLIB)
-  add_swift_library(swift_stdlib_essential SHARED IS_STDLIB IS_STDLIB_CORE
+  add_swift_library(swift_stdlib_essential ${SWIFT_STDLIB_LIBRARY_BUILD_TYPES} IS_STDLIB IS_STDLIB_CORE
       ${SWIFTLIB_ESSENTIAL})
   target_link_libraries(swift_stdlib_essential ${RUNTIME_DEPENDENCY})
 endif()
 
-add_swift_library(swiftCore SHARED IS_STDLIB IS_STDLIB_CORE
+add_swift_library(swiftCore ${SWIFT_STDLIB_LIBRARY_BUILD_TYPES} IS_STDLIB IS_STDLIB_CORE
   ${SWIFTLIB_SOURCES}
   # The copy_shim_headers target dependency is required to let the
   # build system know that there's a rule to produce the shims

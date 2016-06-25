@@ -1891,7 +1891,7 @@ llvm::Value *MetadataPath::followComponent(IRGenFunction &IGF,
 
     auto argIndex =
       getDependentTypeIndex(generics, *module, requirement.TypeParameter);
-    Substitution sub = generic->getSubstitutions(module, nullptr)[argIndex];
+    Substitution sub = generic->gatherAllSubstitutions(module, nullptr)[argIndex];
 
     // In either case, we need to change the type.
     sourceKey.Type = sub.getReplacement()->getCanonicalType();
@@ -2621,9 +2621,9 @@ irgen::emitWitnessMethodValue(IRGenFunction &IGF,
                               ProtocolConformanceRef conformance,
                               Explosion &out) {
   auto fn = cast<AbstractFunctionDecl>(member.getDecl());
-
-  assert(cast<ProtocolDecl>(fn->getDeclContext())
-           == conformance.getRequirement());
+  auto fnProto = cast<ProtocolDecl>(fn->getDeclContext());
+  
+  conformance = conformance.getInherited(fnProto);
 
   // Find the witness table.
   // FIXME conformance for concrete type

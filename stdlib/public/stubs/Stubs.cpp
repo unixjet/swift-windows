@@ -21,6 +21,7 @@
 #endif
 
 #if defined(_MSC_VER)
+#define WIN32_LEAN_AND_MEAN
 // Avoid defining macro max(), min() which conflict with std::max(), std::min()
 #define NOMINMAX
 #include <windows.h>
@@ -191,7 +192,7 @@ static uint64_t swift_floatingPointToString(char *Buffer, size_t BufferLength,
   if (Debug) {
     Precision = std::numeric_limits<T>::max_digits10;
   }
-  
+
 #if defined(__CYGWIN__) || defined(_MSC_VER)
   // Cygwin does not support uselocale(), but we can use the locale feature 
   // in stringstream object.
@@ -265,7 +266,7 @@ ssize_t swift::swift_stdlib_readLine_stdin(char **LinePtr) {
   if (LinePtr == nullptr)
     return -1;
 
-  int Capacity = 0;
+  ssize_t Capacity = 0;
   ssize_t Pos = 0;
   char *ReadBuf = nullptr;
 

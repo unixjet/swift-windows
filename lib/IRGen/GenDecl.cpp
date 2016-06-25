@@ -1216,19 +1216,46 @@ bool LinkEntity::isAvailableExternally(IRGenModule &IGM) const {
   llvm_unreachable("bad link entity kind");
 }
 
+bool LinkEntity::isFragile(IRGenModule &IGM) const {
+  switch (getKind()) {
+    case Kind::SILFunction:
+      return getSILFunction()->isFragile();
+      
+    case Kind::SILGlobalVariable:
+      return getSILGlobalVariable()->isFragile();
+      
+    case Kind::DirectProtocolWitnessTable: {
+      if (auto wt = IGM.getSILModule().lookUpWitnessTable(
+              getProtocolConformance())) {
+        return wt->isFragile();
+      } else {
+        return false;
+      }
+    }
+      
+    default:
+      break;
+  }
+  return false;
+}
+
+
 using IRLinkageTuple = std::tuple<llvm::GlobalValue::LinkageTypes,
                                   llvm::GlobalValue::VisibilityTypes,
                                   llvm::GlobalValue::DLLStorageClassTypes>;
-static IRLinkageTuple getIRLinkage(IRGenModule &IGM, SILLinkage linkage,
-                                   ForDefinition_t isDefinition,
-                                   bool isWeakImported) {
+static IRLinkageTuple getIRLinkage(IRGenModule &IGM,
+             SILLinkage linkage, bool isFragile, bool isSILOnly,
+             ForDefinition_t isDefinition,
+             bool isWeakImported) {
+  
 #define RESULT(LINKAGE, VISIBILITY, DLL_STORAGE)                               \
   IRLinkageTuple {                                                             \
     llvm::GlobalValue::LINKAGE##Linkage,                                       \
     llvm::GlobalValue::VISIBILITY##Visibility,                                 \
     llvm::GlobalValue::DLL_STORAGE##StorageClass                               \
   }
-
+  // Public visibility depends on the target object format.
+  
   const auto ObjFormat = IGM.TargetInfo.OutputObjectFormat;
 
   // Use protected visibility for public symbols we define on ELF.  ld.so
@@ -1247,32 +1274,71 @@ static IRLinkageTuple getIRLinkage(IRGenModule &IGM, SILLinkage linkage,
           ? llvm::GlobalValue::DLLImportStorageClass
           : llvm::GlobalValue::DefaultStorageClass;
 
+  if (isFragile) {
+    // Fragile functions/globals must be visible from outside, regardless of
+    // their accessibility. If a caller is also fragile and inlined into another
+    // module it must be able to access this (not-inlined) function/global.
+    switch (linkage) {
+    case SILLinkage::Hidden:
+    case SILLinkage::Private:
+      linkage = SILLinkage::Public;
+      break;
+
+    case SILLinkage::Public:
+    case SILLinkage::Shared:
+    case SILLinkage::HiddenExternal:
+    case SILLinkage::PrivateExternal:
+    case SILLinkage::PublicExternal:
+    case SILLinkage::SharedExternal:
+      break;
+    }
+  }
+  
   switch (linkage) {
   case SILLinkage::Public:
+    // Don't code-gen transparent functions. Internal linkage
+    // will enable llvm to delete transparent functions except
+    // they are referenced from somewhere (i.e. the function pointer
+    // is taken).
+    if (isSILOnly &&
+        // In case we are generating multiple LLVM modules, we still have to
+        // use ExternalLinkage so that modules can cross-reference transparent
+        // functions.
+        !IGM.IRGen.hasMultipleIGMs() &&
+        
+        // TODO: In non-whole-module-opt the generated swiftmodules are "linked"
+        // and this strips all serialized transparent functions. So we have to
+        // code-gen transparent functions in non-whole-module-opt.
+        IGM.getSILModule().isWholeModule()) {
+      return RESULT(Internal, Default);
+    }
     return IRLinkageTuple{llvm::GlobalValue::ExternalLinkage,
                           PublicDefinitionVisibility, ExportedStorage};
   case SILLinkage::Shared:
-  case SILLinkage::SharedExternal:
-    return RESULT(LinkOnceODR, Hidden, Default);
-  case SILLinkage::Hidden:
-    return RESULT(External, Hidden, Default);
+  case SILLinkage::SharedExternal: return RESULT(LinkOnceODR, Hidden, Default);
+  case SILLinkage::Hidden: return RESULT(External, Hidden, Default);
   case SILLinkage::Private:
-    // In case of multiple llvm modules (in multi-threaded compilation) all
-    // private decls must be visible from other files.
-    if (IGM.IRGen.hasMultipleIGMs())
+    if (IGM.IRGen.hasMultipleIGMs()) {
+      // In case of multiple llvm modules (in multi-threaded compilation) all
+      // private decls must be visible from other files.
       return RESULT(External, Hidden, Default);
+    }
     return RESULT(Internal, Default, Default);
-  case SILLinkage::PublicExternal: {
-    auto linkage = isDefinition
-                       ? llvm::GlobalValue::AvailableExternallyLinkage
-                       : isWeakImported ? llvm::GlobalValue::ExternalWeakLinkage
-                                        : llvm::GlobalValue::ExternalLinkage;
-    return IRLinkageTuple{linkage, llvm::GlobalValue::DefaultVisibility,
-                          ImportedStorage};
-  }
+  case SILLinkage::PublicExternal:
+    if (isDefinition) {
+      if (isSILOnly) {
+        // Transparent function are not available externally.
+        return RESULT(LinkOnceODR, Hidden, Imported);
+      }
+      return RESULT(AvailableExternally, Default, Imported);
+    }
+
+    if (isWeakImported)
+      return RESULT(ExternalWeak, Default, Imported);
+    return RESULT(External, Default, Imported);
   case SILLinkage::HiddenExternal:
   case SILLinkage::PrivateExternal: {
-    auto visibility = ObjFormat == llvm::Triple::COFF
+    auto visibility = (ifFragile || ObjFormat == llvm::Triple::COFF)
                           ? llvm::GlobalValue::DefaultVisibility
                           : llvm::GlobalValue::HiddenVisibility;
     auto linkage = isDefinition ? llvm::GlobalValue::AvailableExternallyLinkage
@@ -1290,8 +1356,12 @@ static void updateLinkageForDefinition(IRGenModule &IGM,
                                        const LinkEntity &entity) {
   // TODO: there are probably cases where we can avoid redoing the
   // entire linkage computation.
-  auto linkage =
-      getIRLinkage(IGM, entity.getLinkage(IGM, ForDefinition), ForDefinition,
+  auto linkage = getIRLinkage(
+                   IGM,
+                   entity.getLinkage(IGM, ForDefinition),
+                   entity.isFragile(IGM),
+                   entity.isSILOnly(),
+                   ForDefinition,
                    entity.isWeakImported(IGM.getSwiftModule()));
   global->setLinkage(std::get<0>(linkage));
   global->setVisibility(std::get<1>(linkage));
@@ -1315,9 +1385,12 @@ LinkInfo LinkInfo::get(IRGenModule &IGM, const LinkEntity &entity,
 
   entity.mangle(result.Name);
 
-  std::tie(result.Linkage, result.Visibility, result.DLLStorageClass) =
-      getIRLinkage(IGM, entity.getLinkage(IGM, isDefinition), isDefinition,
-                   entity.isWeakImported(IGM.getSwiftModule()));
+  std::tie(result.Linkage, result.Visibility) =
+    getIRLinkage(IGM, entity.getLinkage(IGM, isDefinition),
+                 entity.isFragile(IGM),
+                 entity.isSILOnly(),
+                 isDefinition,
+                 entity.isWeakImported(IGM.getSwiftModule()));
 
   result.ForDefinition = isDefinition;
 
@@ -1428,7 +1501,7 @@ llvm::GlobalVariable *LinkInfo::createVariable(IRGenModule &IGM,
   if (IGM.DebugInfo && !DbgTy.isNull() && ForDefinition)
     IGM.DebugInfo->emitGlobalVariableDeclaration(
         var, DebugName.empty() ? getName() : DebugName, getName(), DbgTy,
-        DebugLoc);
+        var->hasInternalLinkage(), DebugLoc);
 
   return var;
 }

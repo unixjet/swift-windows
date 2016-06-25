@@ -402,10 +402,12 @@ void Mangler::mangleDeclName(const ValueDecl *decl) {
         return false;
       }
 
-      auto nominal = dyn_cast<NominalTypeDecl>(DC);
-      if (!nominal)
-        nominal = cast<ExtensionDecl>(DC)->getExtendedType()->getAnyNominal();
-      return nominal->getFormalAccess() == Accessibility::Private;
+      auto declaredType = DC->getDeclaredTypeOfContext();
+      if (!declaredType || declaredType->is<ErrorType>())
+        return false;
+
+      return (declaredType->getAnyNominal()->getFormalAccess()
+              == Accessibility::Private);
     };
 
     if (!isWithinPrivateNominal(decl)) {
@@ -1719,4 +1721,20 @@ void Mangler::mangleGlobalInit(const VarDecl *decl, int counter,
   mangleIdentifier(discriminator);
   Buffer << (isInitFunc ? "_func" : "_token");
   Buffer << counter;
+}
+
+void Mangler::mangleBehaviorInitThunk(const VarDecl *decl) {
+  auto topLevelContext = decl->getDeclContext()->getModuleScopeContext();
+  auto fileUnit = cast<FileUnit>(topLevelContext);
+  Identifier discriminator = fileUnit->getDiscriminatorForPrivateValue(decl);
+  assert(!discriminator.empty());
+  assert(!isNonAscii(discriminator.str()) &&
+         "discriminator contains non-ASCII characters");
+  assert(!clang::isDigit(discriminator.str().front()) &&
+         "not a valid identifier");
+  
+  Buffer << "_TTB";
+  mangleIdentifier(discriminator);
+  mangleContextOf(decl);
+  mangleIdentifier(decl->getName());
 }

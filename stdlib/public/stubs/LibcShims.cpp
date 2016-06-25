@@ -20,8 +20,8 @@
 #include <stdlib.h>
 #include <stdio.h>
 #include <string.h>
-#include "llvm/Support/DataTypes.h"
 #include "../SwiftShims/LibcShims.h"
+#include "llvm/Support/DataTypes.h"
 
 using namespace swift;
 

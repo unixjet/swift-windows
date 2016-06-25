@@ -1,5 +1,11 @@
 # All libraries in this directory tree are overlays that depend on Darwin SDK.
 
+# FIXME: Make it possible to build *only* static libraries for the SDK overlays.
+set(SWIFT_SDK_OVERLAY_LIBRARY_BUILD_TYPES SHARED)
+if(SWIFT_BUILD_STATIC_STDLIB)
+  list(APPEND SWIFT_SDK_OVERLAY_LIBRARY_BUILD_TYPES STATIC)
+endif()
+
 # Please keep this list sorted.
 add_subdirectory(AppKit)
 add_subdirectory(AVFoundation)
@@ -21,11 +27,13 @@ add_subdirectory(GameplayKit)
 add_subdirectory(GLKit)
 add_subdirectory(HomeKit)
 add_subdirectory(IOKit)
+add_subdirectory(Intents)
 add_subdirectory(LocalAuthentication)
 add_subdirectory(MultipeerConnectivity)
 add_subdirectory(ObjectiveC)
 add_subdirectory(OpenCL)
 add_subdirectory(PassKit)
+add_subdirectory(SafariServices)
 add_subdirectory(SceneKit)
 add_subdirectory(simd)
 add_subdirectory(SpriteKit)
@@ -34,4 +42,5 @@ add_subdirectory(WatchConnectivity)
 add_subdirectory(WatchKit)
 add_subdirectory(WebKit)
 add_subdirectory(XCTest)
+add_subdirectory(XPC)
 

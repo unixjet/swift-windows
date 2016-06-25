@@ -1807,15 +1807,21 @@ static Substitution getArchetypeSubstitution(TypeChecker &tc,
   SmallVector<ProtocolConformanceRef, 4> conformances;
 
   bool isError = replacement->is<ErrorType>();
-  for (auto proto : archetype->getConformsTo()) {
-    ProtocolConformance *conformance = nullptr;
-    bool conforms = tc.conformsToProtocol(replacement, proto, dc, None,
-                                          &conformance);
-    assert((conforms || isError) &&
-           "Conformance should already have been verified");
-    (void)isError;
-    (void)conforms;
-    conformances.push_back(ProtocolConformanceRef(proto, conformance));
+  assert((archetype != nullptr || isError) &&
+         "Should have built archetypes already");
+
+  // FIXME: Turn the nullptr check into an assertion
+  if (archetype != nullptr) {
+    for (auto proto : archetype->getConformsTo()) {
+      ProtocolConformance *conformance = nullptr;
+      bool conforms = tc.conformsToProtocol(replacement, proto, dc, None,
+                                            &conformance);
+      assert((conforms || isError) &&
+             "Conformance should already have been verified");
+      (void)isError;
+      (void)conforms;
+      conformances.push_back(ProtocolConformanceRef(proto, conformance));
+    }
   }
 
   return Substitution{
@@ -3648,6 +3654,10 @@ void ConformanceChecker::checkConformance() {
     if (isa<TypeAliasDecl>(requirement))
       continue;
 
+    // Nominal types nested inside protocols are not requirements.
+    if (isa<NominalTypeDecl>(requirement))
+      continue;
+
     /// Local function to finalize the witness.
     auto finalizeWitness = [&] {
       // Find the witness.
@@ -4874,9 +4884,9 @@ bool TypeChecker::isProtocolExtensionUsable(DeclContext *dc, Type type,
   llvm::DenseMap<CanType, TypeVariableType *> replacements;
   auto genericSig = protocolExtension->getGenericSignature();
   
-  cs.openGeneric(protocolExtension, genericSig->getGenericParams(),
+  cs.openGeneric(protocolExtension, protocolExtension,
+                 genericSig->getGenericParams(),
                  genericSig->getRequirements(), false,
-                 protocolExtension->getGenericTypeContextDepth(),
                  ConstraintLocatorBuilder(nullptr), replacements);
 
   // Bind the 'Self' type variable to the provided type.

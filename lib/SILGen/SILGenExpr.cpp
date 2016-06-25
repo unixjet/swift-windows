@@ -216,6 +216,7 @@ namespace {
     
     RValue visitDefaultValueExpr(DefaultValueExpr *E, SGFContext C);
     RValue visitAssignExpr(AssignExpr *E, SGFContext C);
+    RValue visitEnumIsCaseExpr(EnumIsCaseExpr *E, SGFContext C);
 
     RValue visitBindOptionalExpr(BindOptionalExpr *E, SGFContext C);
     RValue visitOptionalEvaluationExpr(OptionalEvaluationExpr *E,
@@ -283,6 +284,10 @@ ManagedValue SILGenFunction::emitLValueForDecl(SILLocation loc, VarDecl *var,
   case AccessStrategy::DirectToAccessor:
   case AccessStrategy::DispatchToAccessor:
     return ManagedValue();
+    
+  case AccessStrategy::BehaviorStorage:
+    // TODO: Behaviors aren't supported on non-instance properties yet.
+    llvm_unreachable("not implemented");
   }
   llvm_unreachable("bad access strategy");
 }
@@ -461,6 +466,9 @@ static SILDeclRef getRValueAccessorDeclRef(SILGenFunction &SGF,
                                            AbstractStorageDecl *storage,
                                            AccessStrategy strategy) {
   switch (strategy) {
+  case AccessStrategy::BehaviorStorage:
+    llvm_unreachable("shouldn't load an rvalue via behavior storage!");
+  
   case AccessStrategy::Storage:
     llvm_unreachable("should already have been filtered out!");
 
@@ -490,6 +498,9 @@ emitRValueWithAccessor(SILGenFunction &SGF, SILLocation loc,
   bool isDirectUse = (strategy == AccessStrategy::DirectToAccessor);
 
   switch (strategy) {
+  case AccessStrategy::BehaviorStorage:
+    llvm_unreachable("shouldn't load an rvalue via behavior storage!");
+  
   case AccessStrategy::Storage:
     llvm_unreachable("should already have been filtered out!");
 
@@ -803,6 +814,8 @@ RValue RValueEmitter::visitStringLiteralExpr(StringLiteralExpr *E,
 }
 
 RValue RValueEmitter::visitLoadExpr(LoadExpr *E, SGFContext C) {
+  // Any writebacks here are tightly scoped.
+  WritebackScope writeback(SGF);
   LValue lv = SGF.emitLValue(E->getSubExpr(), AccessKind::Read);
   return SGF.emitLoadOfLValue(E, std::move(lv), C);
 }
@@ -1050,8 +1063,10 @@ visitCollectionUpcastConversionExpr(CollectionUpcastConversionExpr *E,
   }
   
   auto fnArcheTypes = fn->getGenericParams()->getPrimaryArchetypes();
-  auto fromSubsts = fromCollection->getSubstitutions(SGF.SGM.SwiftModule,nullptr);
-  auto toSubsts = toCollection->getSubstitutions(SGF.SGM.SwiftModule,nullptr);
+  auto fromSubsts = fromCollection->gatherAllSubstitutions(
+      SGF.SGM.SwiftModule, nullptr);
+  auto toSubsts = toCollection->gatherAllSubstitutions(
+      SGF.SGM.SwiftModule, nullptr);
   assert(fnArcheTypes.size() == fromSubsts.size() + toSubsts.size() &&
          "wrong number of generic collection parameters");
   (void) fnArcheTypes;
@@ -1423,10 +1438,38 @@ RValue RValueEmitter::visitIsExpr(IsExpr *E, SGFContext C) {
                          E->getCastTypeLoc().getType(), E->getCastKind());
 
   // Call the _getBool library intrinsic.
-  ASTContext &ctx = SGF.SGM.M.getASTContext();
+  ASTContext &ctx = SGF.getASTContext();
   auto result =
     SGF.emitApplyOfLibraryIntrinsic(E, ctx.getGetBoolDecl(nullptr), {},
                                     ManagedValue::forUnmanaged(isa),
+                                    C);
+  return result;
+}
+
+RValue RValueEmitter::visitEnumIsCaseExpr(EnumIsCaseExpr *E,
+                                          SGFContext C) {
+  ASTContext &ctx = SGF.getASTContext();
+  // Get the enum value.
+  auto subExpr = SGF.emitRValueAsSingleValue(E->getSubExpr(),
+                                SGFContext(SGFContext::AllowImmediatePlusZero));
+  // Test its case.
+  auto i1Ty = SILType::getBuiltinIntegerType(1, SGF.getASTContext());
+  auto t = SGF.B.createIntegerLiteral(E, i1Ty, 1);
+  auto f = SGF.B.createIntegerLiteral(E, i1Ty, 0);
+  
+  SILValue selected;
+  if (subExpr.getType().isAddress()) {
+    selected = SGF.B.createSelectEnumAddr(E, subExpr.getValue(), i1Ty, f,
+                                          {{E->getEnumElement(), t}});
+  } else {
+    selected = SGF.B.createSelectEnum(E, subExpr.getValue(), i1Ty, f,
+                                      {{E->getEnumElement(), t}});
+  }
+  
+  // Call the _getBool library intrinsic.
+  auto result =
+    SGF.emitApplyOfLibraryIntrinsic(E, ctx.getGetBoolDecl(nullptr), {},
+                                    ManagedValue::forUnmanaged(selected),
                                     C);
   return result;
 }
@@ -2002,7 +2045,7 @@ getMagicFunctionString(SILGenFunction &gen) {
 
 RValue RValueEmitter::
 visitMagicIdentifierLiteralExpr(MagicIdentifierLiteralExpr *E, SGFContext C) {
-  ASTContext &Ctx = SGF.SGM.M.getASTContext();
+  ASTContext &Ctx = SGF.getASTContext();
   SILType Ty = SGF.getLoweredLoadableType(E->getType());
   SourceLoc Loc;
   
@@ -3088,14 +3131,11 @@ RValue RValueEmitter::emitForceValue(SILLocation loc, Expr *E,
     return SGF.emitRValue(injection->getSubExpr(), C);
   }
 
-  // Otherwise, emit the value into memory and use the optional intrinsic.
+  // Otherwise, emit the optional and force its value out.
   const TypeLowering &optTL = SGF.getTypeLowering(E->getType());
-  auto optTemp = SGF.emitTemporary(E, optTL);
-  SGF.emitExprInto(E, optTemp.get());
-
+  ManagedValue opt = SGF.emitRValueAsSingleValue(E);
   ManagedValue V =
-    SGF.emitCheckedGetOptionalValueFrom(loc,
-                                        optTemp->getManagedAddress(), optTL, C);
+    SGF.emitCheckedGetOptionalValueFrom(loc, opt, optTL, C);
   return RValue(SGF, loc, valueType->getCanonicalType(), V);
 }
 
@@ -3436,6 +3476,7 @@ void SILGenFunction::emitIgnoredExpr(Expr *E) {
   FullExpr scope(Cleanups, CleanupLocation(E));
   if (!E->getType()->isMaterializable()) {
     // Emit the l-value, but don't perform an access.
+    WritebackScope scope(*this);
     emitLValue(E, AccessKind::Read);
     return;
   }
@@ -3443,6 +3484,7 @@ void SILGenFunction::emitIgnoredExpr(Expr *E) {
   // If this is a load expression, we try hard not to actually do the load
   // (which could materialize a potentially expensive value with cleanups).
   if (auto *LE = dyn_cast<LoadExpr>(E)) {
+    WritebackScope scope(*this);
     LValue lv = emitLValue(LE->getSubExpr(), AccessKind::Read);
     // If the lvalue is purely physical, then it won't have any side effects,
     // and we don't need to drill into it.

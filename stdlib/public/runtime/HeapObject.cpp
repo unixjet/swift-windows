@@ -28,6 +28,7 @@
 #include <cstring>
 #include <cstdio>
 #include <cstdlib>
+#include <thread>
 #include "../SwiftShims/RuntimeShims.h"
 #if SWIFT_OBJC_INTEROP
 # include <objc/NSObject.h>
@@ -766,11 +767,7 @@ HeapObject *swift::swift_weakLoadStrong(WeakReference *ref) {
     short c = 0;
     while (__atomic_load_n(&ref->Value, __ATOMIC_RELAXED) & WR_READING) {
       if (++c == WR_SPINLIMIT) {
-#if defined(_MSC_VER)
-        Sleep(0);
-#else
-        sched_yield();
-#endif
+        std::this_thread::yield();
         c -= 1;
       }
     }
@@ -819,11 +816,7 @@ void swift::swift_weakCopyInit(WeakReference *dest, WeakReference *src) {
     short c = 0;
     while (__atomic_load_n(&src->Value, __ATOMIC_RELAXED) & WR_READING) {
       if (++c == WR_SPINLIMIT) {
-#if defined(_MSC_VER)
-        Sleep(0);
-#else
-        sched_yield();
-#endif
+        std::this_thread::yield();
         c -= 1;
       }
     }
