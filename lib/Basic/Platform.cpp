@@ -103,6 +103,9 @@ StringRef swift::getPlatformNameForTriple(const llvm::Triple &triple) {
   if (triple.isWindowsCygwinEnvironment())
     return  "cygwin";
 
+  if (triple.isWindowsGNUEnvironment())
+    return  "mingw";
+
   return "";
 }
 

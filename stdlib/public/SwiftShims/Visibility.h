@@ -59,7 +59,7 @@
 # define SWIFT_RUNTIME_EXPORT __attribute__((__visibility__("default")))
 #endif
 
-#elif __CYGWIN__
+#elif __CYGWIN__ || __MINGW32__
 # define SWIFT_RUNTIME_EXPORT 
 #elif _MSC_VER
 # define SWIFT_RUNTIME_EXPORT  __declspec(dllexport)

@@ -481,7 +481,7 @@ struct ScalarTraits<uint32_t> {
   static bool mustQuote(StringRef) { return false; }
 };
 
-#if defined(_MSC_VER)
+#if defined(_MSC_VER) || __MINGW32__
 // In MSVC, 'unsigned long' is 32bit size and different from uint32_t,
 // and it is used to define swift::sys::ProcessId.
 template<>

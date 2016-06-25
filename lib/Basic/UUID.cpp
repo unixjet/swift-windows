@@ -14,7 +14,7 @@
 // sane value semantics and operators.
 //
 //===----------------------------------------------------------------------===//
-#if defined(_MSC_VER)
+#if defined(_MSC_VER) || __MINGW32__
 // Avoid defining macro max(), min() which conflict with std::max(), std::min()
 #define NOMINMAX
 #include <Rpc.h>
@@ -27,7 +27,7 @@
 using namespace swift;
 
 swift::UUID::UUID(FromRandom_t) {
-#if defined(_MSC_VER)
+#if defined(_MSC_VER) || __MINGW32__
   UuidCreate((_GUID *)&Value);
 #else
   uuid_generate_random(Value);
@@ -35,7 +35,7 @@ swift::UUID::UUID(FromRandom_t) {
 }
 
 swift::UUID::UUID(FromTime_t) {
-#if defined(_MSC_VER)
+#if defined(_MSC_VER) || __MINGW32__
   UuidCreate((_GUID *)&Value);
 #else
   uuid_generate_time(Value);
@@ -43,7 +43,7 @@ swift::UUID::UUID(FromTime_t) {
 }
 
 swift::UUID::UUID() {
-#if defined(_MSC_VER)
+#if defined(_MSC_VER) || __MINGW32__
   UuidCreateNil((_GUID *)&Value);
 #else
   uuid_clear(Value);
@@ -52,7 +52,7 @@ swift::UUID::UUID() {
 
 Optional<swift::UUID> swift::UUID::fromString(const char *s) {
   swift::UUID result;
-#if defined(_MSC_VER)
+#if defined(_MSC_VER) || __MINGW32__
   if (UuidFromString(RPC_CSTR(s), (_GUID *)&result) != RPC_S_OK)
 #else
   if (uuid_parse(s, result.Value))
@@ -63,9 +63,9 @@ Optional<swift::UUID> swift::UUID::fromString(const char *s) {
 
 void swift::UUID::toString(llvm::SmallVectorImpl<char> &out) const {
   out.resize(UUID::StringBufferSize);
-#if defined(_MSC_VER)
+#if defined(_MSC_VER) || __MINGW32__
   RPC_CSTR  UUIDString;
-  UuidToString((const GUID *)Value, &UUIDString);
+  UuidToString((GUID *)Value, &UUIDString);
   memcpy(out.data(), UUIDString, StringBufferSize);
   RpcStringFree(&UUIDString);
 #else
@@ -77,7 +77,7 @@ void swift::UUID::toString(llvm::SmallVectorImpl<char> &out) const {
 }
 
 int swift::UUID::compare(swift::UUID y) const {
-#if defined(_MSC_VER)
+#if defined(_MSC_VER) || __MINGW32__
   RPC_STATUS status;
   return UuidCompare((GUID *)Value, (GUID *)&y, &status);
 #else

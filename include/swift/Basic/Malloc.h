@@ -29,7 +29,7 @@ namespace swift {
 
 // FIXME: Use C11 aligned_alloc if available.
 inline void *AlignedAlloc(size_t size, size_t align) {
-#if defined(_MSC_VER)
+#if defined(_MSC_VER) || __MINGW32__
   void *r = _aligned_malloc(size, align);
   assert(r != NULL && "_aligned_malloc failed");
   return r;

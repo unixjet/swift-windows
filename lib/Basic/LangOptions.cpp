@@ -131,6 +131,8 @@ std::pair<bool, bool> LangOptions::setTarget(llvm::Triple triple) {
     addPlatformConditionValue("os", "Windows");
   else if (triple.isWindowsCygwinEnvironment())
     addPlatformConditionValue("os", "Cygwin");
+  else if (triple.isWindowsGNUEnvironment())
+    addPlatformConditionValue("os", "MinGW");
   else {
     UnsupportedOS = true;
   }

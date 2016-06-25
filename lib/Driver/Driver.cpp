@@ -2066,6 +2066,8 @@ const ToolChain *Driver::getToolChain(const ArgList &Args) const {
         TC = new toolchains::Windows(*this, Target);
       else if (Target.isWindowsCygwinEnvironment())
         TC = new toolchains::Cygwin(*this, Target);
+      else if (Target.isWindowsGNUEnvironment())
+        TC = new toolchains::Cygwin(*this, Target);
       else
         TC = nullptr;
       break;
