@@ -12,7 +12,7 @@
 
 #if os(OSX) || os(iOS) || os(watchOS) || os(tvOS)
 import Darwin
-#elseif os(Linux) || os(FreeBSD) || os(Android)
+#elseif os(Linux) || os(FreeBSD) || os(Android) || os(Cygwin)
 import Glibc
 #endif
 
@@ -43,8 +43,13 @@ public var _stdlib_PTHREAD_BARRIER_SERIAL_THREAD: CInt {
 }
 
 public struct _stdlib_pthread_barrier_t {
+#if os(Cygwin)
+  var mutex: UnsafeMutablePointer<pthread_mutex_t?>? = nil
+  var cond: UnsafeMutablePointer<pthread_cond_t?>? = nil
+#else
   var mutex: UnsafeMutablePointer<pthread_mutex_t>? = nil
   var cond: UnsafeMutablePointer<pthread_cond_t>? = nil
+#endif
 
   /// The number of threads to synchronize.
   var count: CUnsignedInt = 0

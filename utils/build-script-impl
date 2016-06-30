@@ -376,7 +376,7 @@ function set_build_options_for_host() {
             SWIFT_HOST_VARIANT_ARCH="x86_64"
             ;;
         cygwin-x86_64)
-            SWIFT_HOST_VARIANT="windows"
+            SWIFT_HOST_VARIANT="cygwin"
             SWIFT_HOST_VARIANT_SDK="CYGWIN"
             SWIFT_HOST_VARIANT_ARCH="x86_64"
             ;;

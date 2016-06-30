@@ -17,7 +17,7 @@
 
 #if os(OSX) || os(iOS) || os(watchOS) || os(tvOS)
 import Darwin
-#elseif os(Linux) || os(FreeBSD) || os(Android)
+#elseif os(Linux) || os(FreeBSD) || os(Android) || os(Cygwin)
 import Glibc
 #endif
 
@@ -59,12 +59,19 @@ internal func invokeBlockContext(
   return context.run()
 }
 
+#if os(Cygwin)
+public typealias _stdlib_pthread_attr_t = UnsafePointer<pthread_attr_t?>
+#else
+public typealias _stdlib_pthread_attr_t = UnsafePointer<pthread_attr_t>
+#endif
+
 /// Block-based wrapper for `pthread_create`.
 public func _stdlib_pthread_create_block<Argument, Result>(
-  _ attr: UnsafePointer<pthread_attr_t>?,
+  _ attr: _stdlib_pthread_attr_t?,
   _ start_routine: (Argument) -> Result,
   _ arg: Argument
-) -> (CInt, pthread_t?) {
+) -> (CInt, pthread_t?) 
+{
   let context = PthreadBlockContextImpl(block: start_routine, arg: arg)
   // We hand ownership off to `invokeBlockContext` through its void context
   // argument.

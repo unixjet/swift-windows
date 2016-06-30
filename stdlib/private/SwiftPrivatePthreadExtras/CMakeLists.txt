@@ -3,7 +3,8 @@ set(swift_private_pthread_extras_module_depends)
 if(SWIFT_HOST_VARIANT MATCHES "${SWIFT_DARWIN_VARIANTS}")
   list(APPEND swift_private_pthread_extras_module_depends
     Darwin)
-elseif(SWIFT_HOST_VARIANT STREQUAL "linux" OR SWIFT_HOST_VARIANT STREQUAL "freebsd")
+elseif(SWIFT_HOST_VARIANT STREQUAL "linux" OR SWIFT_HOST_VARIANT STREQUAL "freebsd" OR
+       SWIFT_HOST_VARIANT STREQUAL "cygwin")
   list(APPEND swift_private_pthread_extras_module_depends
     Glibc)
 endif()

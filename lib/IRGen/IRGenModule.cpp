@@ -901,7 +901,7 @@ void IRGenModule::emitAutolinkInfo() {
   switch (TargetInfo.OutputObjectFormat) {
   case llvm::Triple::UnknownObjectFormat:
     llvm_unreachable("unknown object format");
-  case llvm::Triple::COFF:
+//  case llvm::Triple::COFF:
   case llvm::Triple::MachO: {
     llvm::LLVMContext &ctx = Module.getContext();
 
@@ -920,6 +920,7 @@ void IRGenModule::emitAutolinkInfo() {
     }
     break;
   }
+  case llvm::Triple::COFF:
   case llvm::Triple::ELF: {
     // Merge the entries into null-separated string.
     llvm::SmallString<64> EntriesString;

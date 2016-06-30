@@ -44,8 +44,6 @@ inline void *AlignedAlloc(size_t size, size_t align) {
   (void)res; // Silence the unused variable warning.
 #endif
   return r;
-#endif
-}
 }
 
 inline void AlignedFree(void *p) {
