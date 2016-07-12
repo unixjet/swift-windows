@@ -1,20 +1,20 @@
 
-Install cygwin64 2.5.1
+Install cygwin64 2.5.2
 ----------------------
 ```
- Devel/cmake              3.3.2-1
-      /clang              3.7.1-1 
-      /gcc-core           5.3.0-5
-      /gcc-g++            5.3.0-5
-      /git                2.8.0-1
+ Devel/clang              3.7.1-1 
+      /cmake              3.3.2-1
+      /gcc-core           5.4.0-1
+      /gcc-g++            5.4.0-1
+      /git                2.8.3-1
       /pkg-config         0.29-1
       /swig               3.0.7-1
   Libs/libedit-devel      20130712-1
       /libiconv-devel     1.14-3
       /libicu-devel       57.1-1
-      /libncurses-devel   6.0-4.20160305
-      /libsqlite3_0       3.12.2-1
-      /libstdc++6         5.3.0-5
+      /libncurses-devel   6.0-5.20160423
+      /libsqlite3_0       3.13.0-1
+      /libstdc++6         5.4.0-1
       /libuuid-devel      2.25.2-2
       /libxml2-devel      2.9.3-1
 ```
@@ -22,15 +22,22 @@ Install cygwin64 2.5.1
 Patch gcc header
 ----------------
   
-  The header file 'c++config.h' must be modified.
+ - The header file **`c++config.h`** should be modified. (insert 3 lines)
 ```
-  Edit /usr/lib/gcc/x86_64-pc-cygwin/5.3.0/include/c++/x86_64-pc-cygwin/bits/c++config.h Line 980
+  Edit /usr/lib/gcc/x86_64-pc-cygwin/5.4.0/include/c++/x86_64-pc-cygwin/bits/c++config.h Line 980
     Insert three lines which undefine _GLIBCXX_HAVE_TLS as follows
       #define _GLIBCXX_HAVE_TLS 1
 ->    #if defined (__clang__)
 ->    #undef _GLIBCXX_HAVE_TLS
 ->    #endif
 ``` 
+ - The header file **`sys/unistd.h`** should be modified. (avoid use of keyword '__block')
+```
+  Edit /usr/include/sys/unistd.h Line 53
+    Change the string '__block' to 'block'
+-void    _EXFUN(encrypt, (char *__block, int __edflag)); 
++void    _EXFUN(encrypt, (char *block, int __edflag));
+```
 
 Patch clang header
 ------------------
@@ -71,12 +78,15 @@ Download sources
   git clone https://github.com/tinysun212/swift-windows.git swift
   git clone https://github.com/tinysun212/swift-llvm-cygwin.git llvm
   git clone https://github.com/tinysun212/swift-clang-cygwin.git clang
+  git clone https://github.com/tinysun212/swift-corelibs-foundation.git swift-corelibs-foundation
   git clone https://github.com/apple/swift-cmark.git cmark
   git clone https://github.com/ninja-build/ninja.git
 
-  cd swift; git checkout swift-cygwin-20160515 ; cd ..
-  cd llvm; git checkout swift-cygwin-20160515 ; cd ..
-  cd clang; git checkout swift-cygwin-20160515 ; cd ..
+  # You should replace the YYYYMMDD to proper value. 
+  cd swift; git checkout swift-cygwin-YYYYMMDD ; cd ..
+  cd llvm; git checkout swift-cygwin-YYYYMMDD ; cd ..
+  cd clang; git checkout swift-cygwin-YYYYMMDD ; cd ..
+  cd swift-corelibs-foundation; git checkout swift-cygwin-YYYYMMDD ; cd ..
   cd cmark; git checkout 6873b; cd ..
   cd ninja; git checkout 2eb1cc9; cd ..
 ```
@@ -85,21 +95,6 @@ Build
 -----
 ```
   cd $WORK_DIR/swift
-  utils/build-script -R
+  utils/build-script -R --build-swift-static-stdlib --foundation
 ```
-  
-Build Static libraries
-----------------------
-```
-  cd $WORK_DIR/build/Ninja-ReleaseAssert/swift-cygwin-x86_64
-  
-  mkdir -p lib/swift_static/cygwin
-  ar rvs lib/swift_static/cygwin/libswiftSwiftOnoneSupport.a stdlib/public/SwiftOnoneSupport/cygwin/x86_64/SwiftOnoneSupport.o
 
-  mkdir tmp_coreobj
-  cd tmp_coreobj
-  ar -x ../lib/swift/cygwin/x86_64/libswiftRuntime.a
-  ar -x ../lib/swift/cygwin/x86_64/libswiftStdlibStubs.a
-  ar rvs ../lib/swift_static/cygwin/libswiftCore.a *.o ../stdlib/public/core/cygwin/x86_64/Swift.o
-  cd ..
-```
