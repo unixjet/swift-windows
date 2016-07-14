@@ -23,19 +23,12 @@ pacman -S mingw-w64-x86_64-cmake-3.4.1-1
 pacman -S mingw-w64-x86_64-ninja-1.6.0-1
 pacman -S mingw-w64-x86_64-dlfcn-1.0.0-2
 pacman -S mingw-w64-x86_64-clang-3.8.0-3
-pacman -S mingw-w64-x86_64-icu-56.1-1
-pacman -S mingw-w64-x86_64-libxml2-2.9.3-2
+pacman -S mingw-w64-x86_64-icu-57.1-1
+pacman -S mingw-w64-x86_64-libxml2-2.9.4-1
 
 Install Python 2.7.11
   1) Download from https://www.python.org/downloads/
   2) set PATH=%PATH%;C:\Python27
-
-Install libxml2-2.9.3
-  1) Download
-	http://xmlsoft.org/sources/win32/64bit/libxml2-2.9.3-win32-x86_64.7z
-  2) Extract and check directory structure 
-        %WORKDIR%\libxml2\include\libxml2\libxml
-		%WORKDIR%\libxml2\lib
 
 Install pkg-config_0.26-1
   1) Download 3 files
@@ -49,15 +42,6 @@ Install pkg-config_0.26-1
   3) set PKG_CONFIG_PATH=c:/pkg-config/conf
   (referenced: http://stackoverflow.com/questions/1710922/how-to-install-pkg-config-in-windows)
 
-Install icu4c-56
-  1) Download
-    http://site.icu-project.org/download/56#TOC-ICU4C-Download
-	choose icu4c-56_1-Win64-msvc10.zip
-  2) Extract and check directory structure 
-	  %WORKDIR%\icu\bin64
-	  %WORKDIR%\icu\include
-	  %WORKDIR%\icu\lib64
-  
 ```
 
 Patch gcc header
