@@ -84,12 +84,6 @@ Install utils.zip (Python invoker)
      %WORKDIR%\swift\utils\line-directive.exe
      (source is included - %WORKDIR%/swift/misc/gyb.cpp)
 
-Prepare Cygwin Tool and Swift Cygwin port.
-  - You will need BASH shell to run sed.
-  - You will need dlltool.exe in Cygwin.
-  - You will need Cygwin version swiftc.exe.
-  (*) swiftc.exe for MSVC will be built, but we should use Cygwin version to build the standard library.
-	 
 Prepare Favorate Hexa Editor.
   - HxD will be good if you don't have other. ( https://mh-nexus.de/en/hxd )
 ```
@@ -98,8 +92,8 @@ Patch cmake
 -----------
 Overwrite ```Windows-Clang.cmake```
 ```
-Copy %WORKDIR%/swift/misc/MinGW-Clang.cmake in repository
-  to C:\Program Files (x86)\CMake\share\cmake-3.5\Modules\Platform\Windows-Clang.cmake
+Copy  $WORKDIR/swift/misc/MinGW-Clang.cmake in repository
+  to /mingw64/share/cmake-3.4/Modules/Platform/Windows-Clang.cmake
 ```
 
 Build cmark
