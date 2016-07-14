@@ -25,10 +25,7 @@ pacman -S mingw-w64-x86_64-dlfcn-1.0.0-2
 pacman -S mingw-w64-x86_64-clang-3.8.0-3
 pacman -S mingw-w64-x86_64-icu-57.1-1
 pacman -S mingw-w64-x86_64-libxml2-2.9.4-1
-
-Install Python 2.7.11
-  1) Download from https://www.python.org/downloads/
-  2) set PATH=%PATH%;C:\Python27
+pacman -S python-3.4.3-3
 
 Install pkg-config_0.26-1
   1) Download 3 files
@@ -102,9 +99,6 @@ Build cmark
 mkdir -p $WORKDIR/build/NinjaMinGW/cmark
 cd $WORKDIR/build/NinjaMinGW/cmark
 cmake -G Ninja -D CMAKE_BUILD_TYPE=RELEASE -DCMAKE_C_COMPILER=clang  -DCMAKE_CXX_COMPILER=clang++ ../../../cmark
-  (You may ignore the following messages)
-    -- Could NOT find PythonInterp: Found unsuitable version "2.7.11", but required is at least "3" (found C:/Python27/python.exe)
-    *** A python 3 interpreter is required to run the spec tests.
 ninja
 // FIXME: REMOVE THIS
 cd src
