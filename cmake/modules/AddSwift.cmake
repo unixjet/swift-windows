@@ -275,6 +275,8 @@ function(_add_variant_link_flags)
     # NO extra libraries required.
   elseif("${LFLAGS_SDK}" STREQUAL "WINDOWS")
     # No extra libraries required.
+  elseif("${LFLAGS_SDK}" STREQUAL "MINGW")
+    list(APPEND result "-lpthread" "-ldl")
   elseif("${LFLAGS_SDK}" STREQUAL "ANDROID")
     list(APPEND result
         "-ldl"
