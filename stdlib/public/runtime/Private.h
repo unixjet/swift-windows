@@ -172,7 +172,7 @@ namespace swift {
       dest = newValue;
   }
 
-#if defined(__CYGWIN__) || defined(_MSC_VER)
+#if defined(__CYGWIN__) || defined(_MSC_VER) || defined(__MINGW32__)
   struct dl_phdr_info {
     void *dlpi_addr;
     const char *dlpi_name;
@@ -184,7 +184,7 @@ namespace swift {
   uint8_t *_swift_getSectionDataPE(void *handle, const char *sectionName,
                                    unsigned long *sectionSize);
 #endif
-#if defined(__CYGWIN__)
+#if defined(__CYGWIN__) || defined(__MINGW32__)
   void _swift_once_f(uintptr_t *predicate, void *context,
                      void (*function)(void *));
 #endif

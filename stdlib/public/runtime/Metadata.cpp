@@ -28,7 +28,7 @@
 #include <condition_variable>
 #include <new>
 #include <cctype>
-#if defined(_MSC_VER)
+#if defined(_MSC_VER) || defined(__MINGW32__)
 #define WIN32_LEAN_AND_MEAN
 // Avoid defining macro max(), min() which conflict with std::max(), std::min()
 #define NOMINMAX
@@ -66,7 +66,7 @@ using namespace metadataimpl;
 static uintptr_t swift_pageSize() {
 #if defined(__APPLE__)
   return vm_page_size;
-#elif defined(_MSC_VER)
+#elif defined(_MSC_VER) || defined(__MINGW32__)
   SYSTEM_INFO SystemInfo;
   GetSystemInfo(&SystemInfo);
   return SystemInfo.dwPageSize;
@@ -79,7 +79,7 @@ static uintptr_t swift_pageSize() {
 static void *swift_allocateMetadataRoundingToPage(size_t size) {
   const uintptr_t PageSizeMask = SWIFT_LAZY_CONSTANT(swift_pageSize()) - 1;
   size = (size + PageSizeMask) & ~PageSizeMask;
-#if defined(_MSC_VER)
+#if defined(_MSC_VER) || defined(__MINGW32__)
   auto mem = VirtualAlloc(
       nullptr, size, MEM_TOP_DOWN | MEM_RESERVE | MEM_COMMIT, PAGE_READWRITE);
 #else
@@ -93,7 +93,7 @@ static void *swift_allocateMetadataRoundingToPage(size_t size) {
 
 // free memory allocated by swift_allocateMetadataRoundingToPage()
 static void swift_freeMetadata(void *addr, size_t size) {
-#if defined(_MSC_VER)
+#if defined(_MSC_VER) || defined(__MINGW32__)
   // On success, VirtualFree() returns nonzero, on failure 0 
   int result = VirtualFree(addr, 0, MEM_RELEASE);
   if (result == 0)

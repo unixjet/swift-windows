@@ -19,9 +19,15 @@ endif()
 
 set(swift_runtime_port_sources)
 if("${CMAKE_SYSTEM_NAME}" STREQUAL "Windows")
-  set(swift_runtime_port_sources
-      MutexWin32.cpp
-      CygwinPort.cpp)
+  if("${MINGW}" STREQUAL "1")
+    set(swift_runtime_port_sources
+        MutexPThread.cpp
+        CygwinPort.cpp)
+  else()
+    set(swift_runtime_port_sources
+        MutexWin32.cpp
+        CygwinPort.cpp)
+  endif()
 elseif("${CMAKE_SYSTEM_NAME}" STREQUAL "CYGWIN")
   set(swift_runtime_port_sources
       MutexPThread.cpp

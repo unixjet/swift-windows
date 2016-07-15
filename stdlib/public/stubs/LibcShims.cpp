@@ -33,7 +33,7 @@ void swift::_swift_stdlib_free(void *ptr) {
 }
 
 int swift::_swift_stdlib_putchar_unlocked(int c) {
-#if defined(_MSC_VER)
+#if defined(_MSC_VER) || defined(__MINGW32__)
   return _putc_nolock(c, stdout);
 #else
   return putchar_unlocked(c);
@@ -91,7 +91,7 @@ size_t swift::_swift_stdlib_malloc_size(const void *ptr) {
 size_t swift::_swift_stdlib_malloc_size(const void *ptr) {
   return malloc_usable_size(const_cast<void *>(ptr));
 }
-#elif defined(_MSC_VER)
+#elif defined(_MSC_VER) || defined(__MINGW32__)
 #include <malloc.h>
 size_t swift::_swift_stdlib_malloc_size(const void *ptr) {
   return _msize(const_cast<void *>(ptr));

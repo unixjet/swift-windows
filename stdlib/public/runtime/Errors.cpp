@@ -14,7 +14,8 @@
 //
 //===----------------------------------------------------------------------===//
 
-#if defined(__CYGWIN__) || defined(__ANDROID__) || defined(_MSC_VER)
+#if defined(__CYGWIN__) || defined(__ANDROID__) || defined(_MSC_VER) ||        \
+    defined(__MINGW32__)
 #  define SWIFT_SUPPORTS_BACKTRACE_REPORTING 0
 #else
 #  define SWIFT_SUPPORTS_BACKTRACE_REPORTING 1
@@ -229,7 +230,7 @@ void swift::swift_reportError(uint32_t flags,
 }
 
 static int swift_vasprintf(char **strp, const char *fmt, va_list ap) {
-#if defined(_MSC_VER)
+#if defined(_MSC_VER) || defined(__MINGW32__)
   int len = _vscprintf(fmt, ap);
   if (len < 0)
     return -1;

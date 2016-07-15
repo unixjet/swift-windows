@@ -26,7 +26,7 @@ using namespace swift;
 static int swift_asprintf(char **strp, const char *fmt, ...) {
   va_list args;
   va_start(args, fmt);
-#if defined(_MSC_VER)
+#if defined(_MSC_VER) || defined(__MINGW32__)
   int len = _vscprintf(fmt, args);
   if (len < 0) {
     va_end(args);
