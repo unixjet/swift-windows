@@ -26,6 +26,7 @@ pacman -S mingw-w64-x86_64-clang-3.8.0-3
 pacman -S mingw-w64-x86_64-icu-57.1-1
 pacman -S mingw-w64-x86_64-libxml2-2.9.4-1
 pacman -S python-3.4.3-3
+pacman -S python2-2.7.11-1
 
 Install pkg-config_0.26-1
   1) Download 3 files
@@ -133,19 +134,16 @@ Build Swift
 // set PATH=%WORKDIR%\build\NinjaMinGW\llvm\bin;%PATH%;C:\Program Files (x86)\CMake\bin;c:\mingw64\bin;c:\Tool
 // set PKG_CONFIG_PATH=c:/pkg-config/conf
 
+// Workaround for cmark
 cp -p $WORKDIR/build/NinjaMinGW/cmark/src/libcmark.a $WORKDIR/swift
 mkdir -p $WORKDIR/build/NinjaMinGW/swift/bin		
- Following DLL's must be copied to $WORKDIR/build/NinjaMinGW/swift/bin		
-   libcmark.dll  (can be found at $WORKDIR/build/NinjaMinGW/cmark/src)		
+cp $WORKDIR/build/NinjaMinGW/cmark/src/libcmark.dll $WORKDIR/build/NinjaMinGW/swift/bin		
 
 cd $WORKDIR/build/NinjaMinGW/swift
 
-cmake -G Ninja ../../../swift -DCMAKE_BUILD_TYPE=Release -DCMAKE_C_COMPILER=clang  -DCMAKE_CXX_COMPILER=clang++ -DPKG_CONFIG_EXECUTABLE=/c/pkg-config/bin/pkg-config.exe -DICU_UC_INCLUDE_DIR=$WORKDIR/icu/include -DICU_UC_LIBRARY=$WORKDIR/icu/lib64/icuuc.lib -DICU_I18N_INCLUDE_DIR=$WORKDIR/icu/include -DICU_I18N_LIBRARY=$WORKDIR/icu/lib64/icuin.lib -DSWIFT_INCLUDE_DOCS=FALSE -DSWIFT_PATH_TO_CMARK_BUILD=$WORKDIR/build/NinjaMinGW/cmark -DSWIFT_PATH_TO_CMARK_SOURCE=$WORKDIR/cmark  ../../../swift
+cmake -G "MSYS Makefiles" ../../../swift -DCMAKE_BUILD_TYPE=Release -DCMAKE_C_COMPILER=clang  -DCMAKE_CXX_COMPILER=clang++ -DPKG_CONFIG_EXECUTABLE=/c/pkg-config/bin/pkg-config.exe -DICU_UC_INCLUDE_DIR=$WORKDIR/icu/include -DICU_UC_LIBRARY=$WORKDIR/icu/lib64/icuuc.lib -DICU_I18N_INCLUDE_DIR=$WORKDIR/icu/include -DICU_I18N_LIBRARY=$WORKDIR/icu/lib64/icuin.lib -DSWIFT_INCLUDE_DOCS=FALSE -DSWIFT_PATH_TO_CMARK_BUILD=$WORKDIR/build/NinjaMinGW/cmark -DSWIFT_PATH_TO_CMARK_SOURCE=$WORKDIR/cmark  ../../../swift
 
-(In Cygwin64 Terminal)
-// change to the same directory
-//   export WORKDIR=<Your working directory>
-//   cd $WORKDIR/build/NinjaMinGW/swift
+// patch build.ninja
 sed -e 's;swift/libcmark.a;build/NinjaMinGW/cmark/src/libcmark.a;g' \
     -e 's;swift swiftc;swift.exe swiftc.exe;' \
     -e 's;swift swift-autolink-extract;swift.exe swift-autolink-extract.exe;' \
