@@ -25,6 +25,7 @@ pacman -S mingw-w64-x86_64-dlfcn-1.0.0-2
 pacman -S mingw-w64-x86_64-clang-3.8.0-3
 pacman -S mingw-w64-x86_64-icu-57.1-1
 pacman -S mingw-w64-x86_64-libxml2-2.9.4-1
+pacman -S mingw-w64-x86_64-wineditline-2.101-4
 pacman -S python-3.4.3-3
 pacman -S python2-2.7.11-1
 
