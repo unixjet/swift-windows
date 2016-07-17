@@ -21,7 +21,6 @@ Install Packages
 ```
 pacman -S mingw-w64-x86_64-cmake-3.4.1-1
 pacman -S mingw-w64-x86_64-ninja-1.6.0-1
-pacman -S mingw-w64-x86_64-dlfcn-1.0.0-2
 pacman -S mingw-w64-x86_64-clang-3.8.0-3
 pacman -S mingw-w64-x86_64-icu-57.1-1
 pacman -S mingw-w64-x86_64-libxml2-2.9.4-1
