@@ -4,10 +4,8 @@ Environment
 ----------------
 
 1. Microsoft Windows 10 (64bit)
-2. Visual Studio Community 2015 Update 2
-3. Most command run in "VS2015 x64 Native Tool Command Prompt" in ADMINISTRATOR mode
+2. Most command run in "VS2015 x64 Native Tool Command Prompt" in ADMINISTRATOR mode
    (Do not use the OS default "Command Prompt")
-4. Some command run in BASH shell on Cygwin
 
 Choose any directory for working directory
 ```
