@@ -23,21 +23,10 @@ pacman -S mingw-w64-x86_64-clang-3.8.0-3
 pacman -S mingw-w64-x86_64-icu-57.1-1
 pacman -S mingw-w64-x86_64-libxml2-2.9.4-1
 pacman -S mingw-w64-x86_64-wineditline-2.101-4
+pacman -S mingw-w64-x86_64-pkg-config-0.29.1-1
+pacman -S make-4.1-4
 pacman -S python-3.4.3-3
 pacman -S python2-2.7.11-1
-
-Install pkg-config_0.26-1
-  1) Download 3 files
-    http://ftp.gnome.org/pub/gnome/binaries/win32/dependencies/pkg-config_0.26-1_win32.zip
-    http://ftp.gnome.org/pub/gnome/binaries/win32/dependencies/gettext-runtime_0.18.1.1-2_win32.zip
-    http://ftp.gnome.org/pub/gnome/binaries/win32/glib/2.28/glib_2.28.8-1_win32.zip
-  2) Extract and check directory structure 
-		C:\pkg-config\bin\pkg-config.exe
-		C:\pkg-config\bin\libglib-2.0-0.dll
-		C:\pkg-config\bin\intl.dll
-  3) set PKG_CONFIG_PATH=c:/pkg-config/conf
-  (referenced: http://stackoverflow.com/questions/1710922/how-to-install-pkg-config-in-windows)
-
 ```
 
 Patch gcc header
@@ -139,16 +128,18 @@ cp $WORKDIR/build/NinjaMinGW/cmark/src/libcmark.dll $WORKDIR/build/NinjaMinGW/sw
 
 cd $WORKDIR/build/NinjaMinGW/swift
 
-cmake -G "MSYS Makefiles" ../../../swift -DCMAKE_BUILD_TYPE=Release -DCMAKE_C_COMPILER=clang  -DCMAKE_CXX_COMPILER=clang++ -DPKG_CONFIG_EXECUTABLE=/c/pkg-config/bin/pkg-config.exe -DICU_UC_INCLUDE_DIR=$WORKDIR/icu/include -DICU_UC_LIBRARY=$WORKDIR/icu/lib64/icuuc.lib -DICU_I18N_INCLUDE_DIR=$WORKDIR/icu/include -DICU_I18N_LIBRARY=$WORKDIR/icu/lib64/icuin.lib -DSWIFT_INCLUDE_DOCS=FALSE -DSWIFT_PATH_TO_CMARK_BUILD=$WORKDIR/build/NinjaMinGW/cmark -DSWIFT_PATH_TO_CMARK_SOURCE=$WORKDIR/cmark  ../../../swift
+// cmake -G "MSYS Makefiles" ../../../swift -DCMAKE_BUILD_TYPE=Release -DCMAKE_C_COMPILER=clang  -DCMAKE_CXX_COMPILER=clang++ -DPKG_CONFIG_EXECUTABLE=/c/pkg-config/bin/pkg-config.exe -DICU_UC_INCLUDE_DIR=$WORKDIR/icu/include -DICU_UC_LIBRARY=$WORKDIR/icu/lib64/icuuc.lib -DICU_I18N_INCLUDE_DIR=$WORKDIR/icu/include -DICU_I18N_LIBRARY=$WORKDIR/icu/lib64/icuin.lib -DSWIFT_INCLUDE_DOCS=FALSE -DSWIFT_PATH_TO_CMARK_BUILD=$WORKDIR/build/NinjaMinGW/cmark -DSWIFT_PATH_TO_CMARK_SOURCE=$WORKDIR/cmark  ../../../swift
+
+cmake -G "MSYS Makefiles" ../../../swift -DCMAKE_BUILD_TYPE=Release -DCMAKE_C_COMPILER=clang  -DCMAKE_CXX_COMPILER=clang++ -DPKG_CONFIG_EXECUTABLE=/mingw64/bin/pkg-config -DICU_UC_INCLUDE_DIR=/mingw64/include -DICU_UC_LIBRARY=/mingw64/lib/libicuuc.dll.a -DICU_I18N_INCLUDE_DIR=/mingw64/include -DICU_I18N_LIBRARY=/mingw64/lib/libicuin.dll.a -DSWIFT_INCLUDE_DOCS=FALSE -DSWIFT_PATH_TO_CMARK_BUILD=$WORKDIR/build/NinjaMinGW/cmark -DSWIFT_PATH_TO_CMARK_SOURCE=$WORKDIR/cmark  ../../../swift
 
 // patch build.ninja
-sed -e 's;swift/libcmark.a;build/NinjaMinGW/cmark/src/libcmark.a;g' \
-    -e 's;swift swiftc;swift.exe swiftc.exe;' \
-    -e 's;swift swift-autolink-extract;swift.exe swift-autolink-extract.exe;' \
-    -e 's;bin\\swift.exe;bin/swift.exe;' \
-    -e 's;-target x86_64-pc-windows-msvc ;;' \
-    -e 's;-ledit ;;g' \
-    build.ninja > tt; mv tt build.ninja
+//sed -e 's;swift/libcmark.a;build/NinjaMinGW/cmark/src/libcmark.a;g' \
+//    -e 's;swift swiftc;swift.exe swiftc.exe;' \
+//    -e 's;swift swift-autolink-extract;swift.exe swift-autolink-extract.exe;' \
+//    -e 's;bin\\swift.exe;bin/swift.exe;' \
+//    -e 's;-target x86_64-pc-windows-msvc ;;' \
+//    -e 's;-ledit ;;g' \
+//    build.ninja > tt; mv tt build.ninja
 
 Run
   cp gyb.exe %WORKDIR%\swift\utils\gyb.exe
