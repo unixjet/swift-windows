@@ -4,14 +4,12 @@ Environment
 ----------------
 
 1. Microsoft Windows 10 (64bit)
-2. Most command run in "VS2015 x64 Native Tool Command Prompt" in ADMINISTRATOR mode
+2. Run in "Msys64 MinGW64 Shell" in ADMINISTRATOR mode
    (Do not use the OS default "Command Prompt")
 
 Choose any directory for working directory
 ```
-(in MinGW64 Command Prompt)
 export WORKDIR=<Your working directory>
-
 ```
 
 Install Packages
@@ -68,9 +66,6 @@ Install utils.zip (Python invoker)
      %WORKDIR%\swift\utils\gyb.exe
      %WORKDIR%\swift\utils\line-directive.exe
      (source is included - %WORKDIR%/swift/misc/gyb.cpp)
-
-Prepare Favorate Hexa Editor.
-  - HxD will be good if you don't have other. ( https://mh-nexus.de/en/hxd )
 ```
 
 Patch cmake
