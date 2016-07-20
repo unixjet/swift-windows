@@ -29,7 +29,10 @@
 #include <link.h>
 #endif
 
-#if !defined(_MSC_VER)
+#if defined(__MINGW32__)
+#include <windows.h>
+#endif
+#if !defined(_MSC_VER) && !defined(__MINGW32__)
 #include <dlfcn.h>
 #endif
 
@@ -403,7 +406,7 @@ static int _addImageProtocolConformances(struct dl_phdr_info *info,
                                           size_t size, void *data) {
   InspectArgs *inspectArgs = (InspectArgs *)data;
   // inspectArgs contains addImage*Block function and the section name
-#if defined(_MSC_VER)
+#if defined(_MSC_VER) || defined(__MINGW32__)
   HMODULE handle;
 
   if (!info->dlpi_name || info->dlpi_name[0] == '\0')
@@ -415,11 +418,7 @@ static int _addImageProtocolConformances(struct dl_phdr_info *info,
   if (!info->dlpi_name || info->dlpi_name[0] == '\0')
     handle = dlopen(nullptr, RTLD_LAZY);
   else
-#if defined(__MINGW32__)
-    handle = dlopen(info->dlpi_name, RTLD_LAZY);
-#else
     handle = dlopen(info->dlpi_name, RTLD_LAZY | RTLD_NOLOAD);
-#endif
 #endif
 
   unsigned long conformancesSize;
@@ -430,7 +429,7 @@ static int _addImageProtocolConformances(struct dl_phdr_info *info,
   if (conformances)
     inspectArgs->fnAddImageBlock(conformances, conformancesSize);
 
-#if defined(_MSC_VER)
+#if defined(_MSC_VER) || defined(__MINGW32__)
   FreeLibrary(handle);
 #else
   dlclose(handle);

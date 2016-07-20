@@ -20,7 +20,7 @@
 #include "swift/Remote/MemoryReader.h"
 
 #include <memory>
-#if !defined(_MSC_VER)
+#if !defined(_MSC_VER) && !defined(__MINGW32__)
 #include <dlfcn.h>
 #endif
 
@@ -39,7 +39,7 @@ class InProcessMemoryReader final : public MemoryReader {
   }
 
   RemoteAddress getSymbolAddress(const std::string &name) override {
-#if defined(_MSC_VER)
+#if defined(_MSC_VER) || defined(__MINGW32__)
     return RemoteAddress(nullptr);
 #else
     auto pointer = dlsym(RTLD_DEFAULT, name.c_str());

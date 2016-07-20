@@ -23,7 +23,7 @@ swift_install_in_component(tools
 # Create a symlink for swift-api-dump.py in the bin directory
 add_custom_command(TARGET swift-ide-test POST_BUILD
     COMMAND
-      "${CMAKE_COMMAND}" "-E" "create_symlink"
+      "${CMAKE_COMMAND}" "-E" "copy"
       "${SWIFT_SOURCE_DIR}/utils/swift-api-dump.py"
       "${SWIFT_RUNTIME_OUTPUT_INTDIR}/swift-api-dump.py"
     COMMENT "Creating development symlink for swift-api-dump.py")

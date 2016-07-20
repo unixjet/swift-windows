@@ -27,6 +27,7 @@
 #include <stdlib.h>
 #include <string.h>
 #include <unistd.h>
+#include <inttypes.h>
 
 typedef struct RemoteSection {
   uintptr_t StartAddress;
@@ -326,7 +327,7 @@ int reflectHeapObject(SwiftReflectionContextRef RC,
     PipeMemoryReader_sendDoneMessage(&Pipe);
     return 0;
   }
-  printf("Instance pointer in child address space: 0x%lx\n",
+  printf("Instance pointer in child address space: 0x%" PRIxPTR "\n",
          instance);
 
   swift_typeref_t TR = swift_reflection_typeRefForInstance(RC, instance);
@@ -353,7 +354,7 @@ int reflectExistential(SwiftReflectionContextRef RC,
     PipeMemoryReader_sendDoneMessage(&Pipe);
     return 0;
   }
-  printf("Instance pointer in child address space: 0x%lx\n",
+  printf("Instance pointer in child address space: 0x%" PRIxPTR "\n",
          instance);
 
   swift_typeref_t InstanceTypeRef;

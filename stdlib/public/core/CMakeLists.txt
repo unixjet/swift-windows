@@ -169,6 +169,13 @@ if(CMAKE_SYSTEM_NAME STREQUAL "CYGWIN")
   list(APPEND swift_core_link_flags "${ENV_SYSTEMROOT}/system32/psapi.dll")
 endif()
 
+if(CMAKE_SYSTEM_NAME STREQUAL "Windows")
+  if(MINGW STREQUAL "1")
+    list(APPEND swift_core_private_link_libraries "-lpthread")
+    list(APPEND swift_core_private_link_libraries "-lpsapi")
+  endif()
+endif()
+
 if(CMAKE_SYSTEM_NAME STREQUAL "FreeBSD")
   find_library(EXECINFO_LIBRARY execinfo)
   list(APPEND swift_core_private_link_libraries

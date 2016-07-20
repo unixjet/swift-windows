@@ -37,7 +37,7 @@
 #include "llvm/Transforms/IPO.h"
 #include "llvm/Transforms/IPO/PassManagerBuilder.h"
 #include "llvm/Support/Path.h"
-#if defined(_MSC_VER)
+#if defined(_MSC_VER) || defined(__MINGW32__)
 #include "Windows.h"
 #else
 #include <dlfcn.h>
@@ -46,7 +46,7 @@ using namespace swift;
 using namespace swift::immediate;
 
 static bool loadRuntimeLib(StringRef runtimeLibPathWithName) {
-#if defined(_MSC_VER)
+#if defined(_MSC_VER) || defined(__MINGW32__)
   return LoadLibrary(runtimeLibPathWithName.str().c_str());
 #else
   return dlopen(runtimeLibPathWithName.str().c_str(), RTLD_LAZY | RTLD_GLOBAL);

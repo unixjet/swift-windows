@@ -48,4 +48,5 @@ add_swift_library(swiftIRGen STATIC
     # FIXME: Clang should really export these in some reasonable manner.
     clangCodeGen
     clangAST
+    pthread
 )

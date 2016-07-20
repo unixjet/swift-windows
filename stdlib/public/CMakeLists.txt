@@ -6,6 +6,10 @@ if(CMAKE_SYSTEM_NAME STREQUAL "CYGWIN")
   list(APPEND SWIFT_CORE_CXX_FLAGS "-mcmodel=large")
 endif()
 
+if(MINGW STREQUAL "1")
+  list(APPEND SWIFT_CORE_CXX_FLAGS "-mcmodel=large")
+endif()
+
 check_cxx_compiler_flag("-Werror -Wglobal-constructors" CXX_SUPPORTS_GLOBAL_CONSTRUCTORS_WARNING)
 if(CXX_SUPPORTS_GLOBAL_CONSTRUCTORS_WARNING)
   list(APPEND SWIFT_CORE_CXX_FLAGS "-Wglobal-constructors")

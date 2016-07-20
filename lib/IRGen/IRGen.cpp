@@ -494,6 +494,8 @@ static createTargetMachine(IRGenOptions &Opts, ASTContext &Ctx) {
     cmodel = CodeModel::Large;
   if (Triple.isKnownWindowsMSVCEnvironment())
     cmodel = CodeModel::Large;
+  if (Triple.isWindowsGNUEnvironment())
+    cmodel = CodeModel::Large;
 
   llvm::TargetMachine *TargetMachine
     = Target->createTargetMachine(Triple.str(), CPU,
