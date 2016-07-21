@@ -15,29 +15,28 @@ export WORKDIR=<Your working directory>
 Install Packages
 ----------------------
 ```
-pacman -S mingw-w64-x86_64-cmake-3.4.1-1
-pacman -S mingw-w64-x86_64-ninja-1.6.0-1
-pacman -S mingw-w64-x86_64-clang-3.8.0-3
-pacman -S mingw-w64-x86_64-icu-57.1-1
-pacman -S mingw-w64-x86_64-libxml2-2.9.4-1
-pacman -S mingw-w64-x86_64-wineditline-2.101-4
-pacman -S mingw-w64-x86_64-pkg-config-0.29.1-1
-pacman -S make-4.1-4
-pacman -S python-3.4.3-3
-pacman -S python2-2.7.11-1
+pacman -S mingw-w64-x86_64-cmake       # 3.4.1-1
+pacman -S mingw-w64-x86_64-ninja       # 1.6.0-1
+pacman -S mingw-w64-x86_64-clang       # 3.8.0-3
+pacman -S mingw-w64-x86_64-icu         # 57.1-1
+pacman -S mingw-w64-x86_64-libxml2     # 2.9.4-1
+pacman -S mingw-w64-x86_64-wineditline # 2.101-4
+pacman -S mingw-w64-x86_64-pkg-config  # 0.29.1-1
+pacman -S make                         # 4.1-4
+pacman -S python                       # 3.4.3-3
+pacman -S python2                      # 2.7.11-1
 ```
 
 Patch gcc header
 ----------------
   
- - The header file **`c++config.h`** should be modified. (insert 3 lines)
+ - Undefine _GLIBCXX_HAVE_TLS in the header file **`c++config.h`**.
 ```
-  Edit /usr/lib/gcc/x86_64-pc-msys/5.3.0/include/c++/x86_64-pc-msys/bits/c++config.h Line 980
-    Insert three lines which undefine _GLIBCXX_HAVE_TLS as follows
-      #define _GLIBCXX_HAVE_TLS 1
-->    #if defined (__clang__)
-->    #undef _GLIBCXX_HAVE_TLS
-->    #endif
+  Insert three lines below the line 980 of /usr/lib/gcc/x86_64-pc-msys/5.3.0/include/c++/x86_64-pc-msys/bits/c++config.h
+     #define _GLIBCXX_HAVE_TLS 1
++    #if defined (__clang__)
++    #undef _GLIBCXX_HAVE_TLS
++    #endif
 ``` 
 
 Download sources
@@ -48,32 +47,11 @@ Download sources
   git clone https://github.com/tinysun212/swift-clang-cygwin.git clang
   git clone https://github.com/apple/swift-cmark.git cmark
 
-  cd swift; git checkout swift-mingw-20160715 ; cd ..
-  cd llvm; git checkout swift-mingw-20160715 ; cd ..
-  cd clang; git checkout swift-mingw-20160715 ; cd ..
+# Choose the proper YYYYMMDD from the tag list of the repository. 
+  cd swift; git checkout swift-mingw-YYYYMMDD ; cd ..
+  cd llvm; git checkout swift-mingw-YYYYMMDD ; cd ..
+  cd clang; git checkout swift-mingw-YYYYMMDD ; cd ..
   cd cmark; git checkout 6873b; cd ..
-```
-
-More Install
-------------
-These installations are for interim workarounds and will be removed in future.
-```
-Install utils.zip (Python invoker)
-  1) Download
-    https://github.com/tinysun212/swift-windows/releases/tag/swift-msvc-20160418
-	Choose utils.zip
-  2) Extract and check directory structure 
-     %WORKDIR%\swift\utils\gyb.exe
-     %WORKDIR%\swift\utils\line-directive.exe
-     (source is included - %WORKDIR%/swift/misc/gyb.cpp)
-```
-
-Patch cmake
------------
-Overwrite ```Windows-Clang.cmake```
-```
-Copy  $WORKDIR/swift/misc/MinGW-Clang.cmake in repository
-  to /mingw64/share/cmake-3.4/Modules/Platform/Windows-Clang.cmake
 ```
 
 Build cmark
@@ -83,7 +61,7 @@ mkdir -p $WORKDIR/build/NinjaMinGW/cmark
 cd $WORKDIR/build/NinjaMinGW/cmark
 cmake -G Ninja -D CMAKE_BUILD_TYPE=RELEASE -DCMAKE_C_COMPILER=clang  -DCMAKE_CXX_COMPILER=clang++ ../../../cmark
 ninja
-// FIXME: REMOVE THIS
+
 cd src
 cp -p libcmark.dll.a libcmark.a
 cp -p libcmark.a  $WORKDIR/swift/libcmark.a
@@ -92,11 +70,11 @@ cp -p libcmark.a  $WORKDIR/swift/libcmark.a
 Build clang
 -----------
 ```
-// You should run "VS2015 x64 Native Tool Command Prompt" in ADMINISTRATOR mode
-// to run mklink.exe.
-
-cd $WORKDIR/llvm/tools
-mklink /d clang ..\..\clang  --> CHECK AND CHANGE THIS!! 
+// To create the symbolic link, you should use the 'MKLINK.exe'
+// Run "Command Prompt" in ADMINISTRATOR mode
+(Command Prompt) set WORKDIR=<Your working directory>
+(Command Prompt) cd %WORKDIR%/llvm/tools
+(Command Prompt) mklink /d clang ..\..\clang
 
 mkdir $WORKDIR/build/NinjaMinGW/llvm
 cd $WORKDIR/build/NinjaMinGW/llvm
@@ -123,9 +101,8 @@ cp $WORKDIR/build/NinjaMinGW/cmark/src/libcmark.dll $WORKDIR/build/NinjaMinGW/sw
 
 cd $WORKDIR/build/NinjaMinGW/swift
 
-// cmake -G "MSYS Makefiles" ../../../swift -DCMAKE_BUILD_TYPE=Release -DCMAKE_C_COMPILER=clang  -DCMAKE_CXX_COMPILER=clang++ -DPKG_CONFIG_EXECUTABLE=/c/pkg-config/bin/pkg-config.exe -DICU_UC_INCLUDE_DIR=$WORKDIR/icu/include -DICU_UC_LIBRARY=$WORKDIR/icu/lib64/icuuc.lib -DICU_I18N_INCLUDE_DIR=$WORKDIR/icu/include -DICU_I18N_LIBRARY=$WORKDIR/icu/lib64/icuin.lib -DSWIFT_INCLUDE_DOCS=FALSE -DSWIFT_PATH_TO_CMARK_BUILD=$WORKDIR/build/NinjaMinGW/cmark -DSWIFT_PATH_TO_CMARK_SOURCE=$WORKDIR/cmark  ../../../swift
-
 cmake -G "MSYS Makefiles" ../../../swift -DCMAKE_BUILD_TYPE=Release -DCMAKE_C_COMPILER=clang  -DCMAKE_CXX_COMPILER=clang++ -DPKG_CONFIG_EXECUTABLE=/mingw64/bin/pkg-config -DICU_UC_INCLUDE_DIR=/mingw64/include -DICU_UC_LIBRARY=/mingw64/lib/libicuuc.dll.a -DICU_I18N_INCLUDE_DIR=/mingw64/include -DICU_I18N_LIBRARY=/mingw64/lib/libicuin.dll.a -DSWIFT_INCLUDE_DOCS=FALSE -DSWIFT_PATH_TO_CMARK_BUILD=$WORKDIR/build/NinjaMinGW/cmark -DSWIFT_PATH_TO_CMARK_SOURCE=$WORKDIR/cmark  ../../../swift
 
-make
+make -k
 ```
+  
