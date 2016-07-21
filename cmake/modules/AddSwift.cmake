@@ -236,6 +236,8 @@ function(_add_variant_swift_compile_flags
     list(APPEND result "-D" "INTERNAL_CHECKS_ENABLED")
   endif()
 
+  list(APPEND result "-D_VERSION_MINGW")
+
   set("${result_var_name}" "${result}" PARENT_SCOPE)
 endfunction()
 

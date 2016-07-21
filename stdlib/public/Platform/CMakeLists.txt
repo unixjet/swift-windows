@@ -33,7 +33,8 @@ foreach(sdk ${SWIFT_SDKS})
   if("${sdk}" STREQUAL "LINUX" OR
      "${sdk}" STREQUAL "FREEBSD" OR
      "${sdk}" STREQUAL "ANDROID" OR
-     "${sdk}" STREQUAL "CYGWIN")
+     "${sdk}" STREQUAL "CYGWIN" OR
+	 "${sdk}" STREQUAL "MINGW")
     foreach(arch ${SWIFT_SDK_${sdk}_ARCHITECTURES})
       set(arch_subdir "${SWIFT_SDK_${sdk}_LIB_SUBDIR}/${arch}")
       set(module_dir "${SWIFTLIB_DIR}/${arch_subdir}")
