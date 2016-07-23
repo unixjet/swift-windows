@@ -1409,7 +1409,13 @@ toolchains::GenericUnix::constructInvocation(const LinkJobAction &job,
 
   // This should be the last option, for convenience in checking output.
   Arguments.push_back("-o");
-  Arguments.push_back(context.Output.getPrimaryOutputFilename().c_str());
+//FIXME: Change this macro condition to the runtime logic
+  auto OutputExeFilename = context.Output.getPrimaryOutputFilename();
+#if defined(__MINGW32__)
+  if (OutputExeFilename.find(".") == std::string::npos)
+    OutputExeFilename = OutputExeFilename + ".exe";
+#endif
+  Arguments.push_back(context.Args.MakeArgString(OutputExeFilename));
 
   return {"clang++", Arguments};
 }

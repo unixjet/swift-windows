@@ -429,9 +429,7 @@ static int _addImageProtocolConformances(struct dl_phdr_info *info,
   if (conformances)
     inspectArgs->fnAddImageBlock(conformances, conformancesSize);
 
-#if defined(_MSC_VER) || defined(__MINGW32__)
-  FreeLibrary(handle);
-#else
+#if defined(__CYGWIN__)
   dlclose(handle);
 #endif
   return 0;
