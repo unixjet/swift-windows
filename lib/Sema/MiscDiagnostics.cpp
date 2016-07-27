@@ -28,6 +28,15 @@
 #include "llvm/Support/SaveAndRestore.h"
 using namespace swift;
 
+/// Return true if this expression is an implicit promotion from T to T?.
+static Expr *isImplicitPromotionToOptional(Expr *E) {
+  if (E->isImplicit())
+    if (auto IIOE = dyn_cast<InjectIntoOptionalExpr>(
+                                               E->getSemanticsProvidingExpr()))
+      return IIOE->getSubExpr();
+  return nullptr;
+}
+
 //===----------------------------------------------------------------------===//
 // Diagnose assigning variable to itself.
 //===----------------------------------------------------------------------===//
@@ -88,6 +97,7 @@ static void diagSelfAssignment(TypeChecker &TC, const Expr *E) {
 ///     argument lists.
 ///   - 'self.init' and 'super.init' cannot be wrapped in a larger expression
 ///     or statement.
+///   - Warn about promotions to optional in specific syntactic forms.
 ///
 static void diagSyntacticUseRestrictions(TypeChecker &TC, const Expr *E,
                                          const DeclContext *DC,
@@ -172,7 +182,7 @@ static void diagSyntacticUseRestrictions(TypeChecker &TC, const Expr *E,
       if (expr->getArg()->getType()->hasInOut()) {
         // We need to apply all argument clauses.
         InvalidPartialApplications.insert({
-          fnExpr, {fn->getNaturalArgumentCount(), kind}
+          fnExpr, {fn->getNumParameterLists(), kind}
         });
       }
     }
@@ -181,7 +191,7 @@ static void diagSyntacticUseRestrictions(TypeChecker &TC, const Expr *E,
     /// methods are fully applied when they can't support partial application.
     void checkInvalidPartialApplication(Expr *E) {
       if (auto AE = dyn_cast<ApplyExpr>(E)) {
-        Expr *fnExpr = AE->getFn()->getSemanticsProvidingExpr();
+        Expr *fnExpr = AE->getSemanticFn();
         if (auto forceExpr = dyn_cast<ForceValueExpr>(fnExpr))
           fnExpr = forceExpr->getSubExpr()->getSemanticsProvidingExpr();
         if (auto dotSyntaxExpr = dyn_cast<DotSyntaxBaseIgnoredExpr>(fnExpr))
@@ -268,6 +278,9 @@ static void diagSyntacticUseRestrictions(TypeChecker &TC, const Expr *E,
       // Check function calls, looking through implicit conversions on the
       // function and inspecting the arguments directly.
       if (auto *Call = dyn_cast<ApplyExpr>(E)) {
+        // Warn about surprising implicit optional promotions.
+        checkOptionalPromotions(Call);
+        
         // Check for tuple splat.
         checkTupleSplat(Call);
 
@@ -594,6 +607,72 @@ static void diagSyntacticUseRestrictions(TypeChecker &TC, const Expr *E,
           .fixItInsert(DRE->getStartLoc(), namePlusDot);
       }
     }
+    
+    /// Return true if this is 'nil' type checked as an Optional.  This looks
+    /// like this:
+    ///   (call_expr implicit type='Int?'
+    ///     (constructor_ref_call_expr implicit
+    ///       (declref_expr implicit decl=Optional.init(nilLiteral:)
+    static bool isTypeCheckedOptionalNil(Expr *E) {
+      auto CE = dyn_cast<CallExpr>(E->getSemanticsProvidingExpr());
+      if (!CE || !CE->isImplicit())
+        return false;
+      
+      auto CRCE = dyn_cast<ConstructorRefCallExpr>(CE->getSemanticFn());
+      if (!CRCE || !CRCE->isImplicit()) return false;
+      
+      auto DRE = dyn_cast<DeclRefExpr>(CRCE->getSemanticFn());
+      
+      SmallString<32> NameBuffer;
+      auto name = DRE->getDecl()->getFullName().getString(NameBuffer);
+      return name == "init(nilLiteral:)";
+    }
+    
+    
+    /// Warn about surprising implicit optional promotions involving operands to
+    /// calls.  Specifically, we warn about these expressions when the 'x'
+    /// operand is implicitly promoted to optional:
+    ///
+    ///       x ?? y
+    ///       x == nil    // also !=
+    ///
+    void checkOptionalPromotions(ApplyExpr *call) {
+      auto DRE = dyn_cast<DeclRefExpr>(call->getSemanticFn());
+      auto args = dyn_cast<TupleExpr>(call->getArg());
+      if (!DRE || !DRE->getDecl()->isOperator() ||
+          !args || args->getNumElements() != 2)
+        return;
+      
+      auto lhs = args->getElement(0);
+      auto rhs = args->getElement(1);
+      auto calleeName = DRE->getDecl()->getName().str();
+      
+      Expr *subExpr = nullptr;
+      if (calleeName == "??" &&
+          (subExpr = isImplicitPromotionToOptional(lhs))) {
+        TC.diagnose(DRE->getLoc(), diag::use_of_qq_on_non_optional_value,
+                    subExpr->getType())
+          .highlight(lhs->getSourceRange())
+          .fixItRemove(SourceRange(DRE->getLoc(), rhs->getEndLoc()));
+        return;
+      }
+      
+      if (calleeName == "==" || calleeName == "!=" ||
+          calleeName == "===" || calleeName == "!==") {
+        if (((subExpr = isImplicitPromotionToOptional(lhs)) &&
+             isTypeCheckedOptionalNil(rhs)) ||
+            (isTypeCheckedOptionalNil(lhs) &&
+             (subExpr = isImplicitPromotionToOptional(rhs)))) {
+          bool isTrue = calleeName == "!=" || calleeName == "!==";
+              
+          TC.diagnose(DRE->getLoc(), diag::nonoptional_compare_to_nil,
+                      subExpr->getType(), isTrue)
+            .highlight(lhs->getSourceRange())
+            .highlight(rhs->getSourceRange());
+          return;
+        }
+      }
+    }
   };
 
   DiagnoseWalker Walker(TC, DC, isExprStmt);
@@ -849,7 +928,7 @@ bool swift::diagnoseArgumentLabelError(TypeChecker &TC, const Expr *expr,
     llvm::SmallString<16> str;
     // If the diagnostic is local, flush it before returning.
     // This makes sure it's emitted before 'str' is destroyed.
-    defer { diagOpt.reset(); };
+    SWIFT_DEFER { diagOpt.reset(); };
 
     if (newNames[0].empty()) {
       // This is probably a conversion from a value of labeled tuple type to
@@ -1328,6 +1407,14 @@ void swift::fixItAvailableAttrRename(TypeChecker &TC,
     return labelStr.empty() ? Identifier() : TC.Context.getIdentifier(labelStr);
   });
 
+  if (auto args = dyn_cast<TupleShuffleExpr>(argExpr)) {
+    if (!args->getVariadicArgs().empty()) {
+      // FIXME: Support variadic arguments.
+      return;
+    }
+    argExpr = args->getSubExpr();
+  }
+
   if (auto args = dyn_cast<TupleExpr>(argExpr)) {
     if (argumentLabelIDs.size() != args->getNumElements()) {
       // Mismatched lengths; give up.
@@ -1354,7 +1441,12 @@ void swift::fixItAvailableAttrRename(TypeChecker &TC,
       }
     }
 
-  } else {
+  } else if (auto args = dyn_cast<ParenExpr>(argExpr)) {
+    if (args->hasTrailingClosure()) {
+      // The argument label for a trailing closure is ignored.
+      return;
+    }
+
     if (argumentLabelIDs.size() != 1) {
       // Mismatched lengths; give up.
       return;
@@ -1364,6 +1456,8 @@ void swift::fixItAvailableAttrRename(TypeChecker &TC,
       // Already matching (no labels).
       return;
     }
+  } else {
+    llvm_unreachable("Unexpected arg expression");
   }
 
   diagnoseArgumentLabelError(TC, argExpr, argumentLabelIDs, false, &diag);
@@ -1889,10 +1983,10 @@ static bool isIntegerOrFloatingPointType(Type ty, DeclContext *DC,
                                          TypeChecker &TC) {
   auto integerType =
     TC.getProtocol(SourceLoc(),
-                   KnownProtocolKind::IntegerLiteralConvertible);
+                   KnownProtocolKind::ExpressibleByIntegerLiteral);
   auto floatingType =
     TC.getProtocol(SourceLoc(),
-                   KnownProtocolKind::FloatLiteralConvertible);
+                   KnownProtocolKind::ExpressibleByFloatLiteral);
   if (!integerType || !floatingType) return false;
 
   return
@@ -2300,7 +2394,8 @@ VarDeclUsageChecker::~VarDeclUsageChecker() {
         VarPattern *foundVP = nullptr;
         pattern->forEachNode([&](Pattern *P) {
           if (auto *VP = dyn_cast<VarPattern>(P))
-            foundVP = VP;
+            if (VP->getSingleVar() == var)
+              foundVP = VP;
         });
         
         if (foundVP && !foundVP->isLet())
@@ -2508,7 +2603,15 @@ void swift::performAbstractFuncDeclDiagnostics(TypeChecker &TC,
 
 /// Diagnose C style for loops.
 
-static Expr *endConditionValueForConvertingCStyleForLoop(const ForStmt *FS, VarDecl *loopVar) {
+namespace {
+enum class OperatorKind : char {
+  Greater,
+  Smaller,
+  NotEqual,
+};
+
+static Expr *endConditionValueForConvertingCStyleForLoop(const ForStmt *FS,
+                                        VarDecl *loopVar, OperatorKind &OpKind) {
   auto *Cond = FS->getCond().getPtrOrNull();
   if (!Cond)
     return nullptr;
@@ -2527,8 +2630,15 @@ static Expr *endConditionValueForConvertingCStyleForLoop(const ForStmt *FS, VarD
 
   // Verify that the condition is a simple != or < comparison to the loop variable.
   auto comparisonOpName = binaryFuncExpr->getDecl()->getNameStr();
-  if (comparisonOpName != "!=" && comparisonOpName != "<")
+  if (comparisonOpName == "!=")
+    OpKind = OperatorKind::NotEqual;
+  else if (comparisonOpName == "<")
+    OpKind = OperatorKind::Smaller;
+  else if (comparisonOpName == ">")
+    OpKind = OperatorKind::Greater;
+  else
     return nullptr;
+
   auto args = binaryExpr->getArg()->getElements();
   auto loadExpr = dyn_cast<LoadExpr>(args[0]);
   if (!loadExpr)
@@ -2541,7 +2651,9 @@ static Expr *endConditionValueForConvertingCStyleForLoop(const ForStmt *FS, VarD
   return args[1];
 }
 
-static bool unaryIncrementForConvertingCStyleForLoop(const ForStmt *FS, VarDecl *loopVar) {
+static bool unaryOperatorCheckForConvertingCStyleForLoop(const ForStmt *FS,
+                                                         VarDecl *loopVar,
+                                                         StringRef OpName) {
   auto *Increment = FS->getIncrement().getPtrOrNull();
   if (!Increment)
     return false;
@@ -2552,19 +2664,33 @@ static bool unaryIncrementForConvertingCStyleForLoop(const ForStmt *FS, VarDecl 
     return false;
   auto inoutExpr = dyn_cast<InOutExpr>(unaryExpr->getArg());
   if (!inoutExpr)
-   return false;
+    return false;
   auto incrementDeclRefExpr = dyn_cast<DeclRefExpr>(inoutExpr->getSubExpr());
   if (!incrementDeclRefExpr)
     return false;
   auto unaryFuncExpr = dyn_cast<DeclRefExpr>(unaryExpr->getFn());
   if (!unaryFuncExpr)
     return false;
-  if (unaryFuncExpr->getDecl()->getNameStr() != "++")
+  if (unaryFuncExpr->getDecl()->getNameStr() != OpName)
     return false;
-  return incrementDeclRefExpr->getDecl() == loopVar;    
+  return incrementDeclRefExpr->getDecl() == loopVar;
 }
 
-static bool plusEqualOneIncrementForConvertingCStyleForLoop(TypeChecker &TC, const ForStmt *FS, VarDecl *loopVar) {
+
+static bool unaryIncrementForConvertingCStyleForLoop(const ForStmt *FS,
+                                                     VarDecl *loopVar) {
+  return unaryOperatorCheckForConvertingCStyleForLoop(FS, loopVar, "++");
+}
+
+static bool unaryDecrementForConvertingCStyleForLoop(const ForStmt *FS,
+                                                     VarDecl *loopVar) {
+  return unaryOperatorCheckForConvertingCStyleForLoop(FS, loopVar, "--");
+}
+
+static bool binaryOperatorCheckForConvertingCStyleForLoop(TypeChecker &TC,
+                                                            const ForStmt *FS,
+                                                            VarDecl *loopVar,
+                                                            StringRef OpName) {
   auto *Increment = FS->getIncrement().getPtrOrNull();
   if (!Increment)
     return false;
@@ -2574,7 +2700,7 @@ static bool plusEqualOneIncrementForConvertingCStyleForLoop(TypeChecker &TC, con
   auto binaryFuncExpr = dyn_cast<DeclRefExpr>(binaryExpr->getFn());
   if (!binaryFuncExpr)
     return false;
-  if (binaryFuncExpr->getDecl()->getNameStr() != "+=")
+  if (binaryFuncExpr->getDecl()->getNameStr() != OpName)
     return false;
   auto argTupleExpr = dyn_cast<TupleExpr>(binaryExpr->getArg());
   if (!argTupleExpr)
@@ -2595,6 +2721,19 @@ static bool plusEqualOneIncrementForConvertingCStyleForLoop(TypeChecker &TC, con
   if (!declRefExpr)
     return false;
   return declRefExpr->getDecl() == loopVar;
+
+}
+
+static bool plusEqualOneIncrementForConvertingCStyleForLoop(TypeChecker &TC,
+                                                            const ForStmt *FS,
+                                                            VarDecl *loopVar) {
+  return binaryOperatorCheckForConvertingCStyleForLoop(TC, FS, loopVar, "+=");
+}
+
+static bool minusEqualOneDecrementForConvertingCStyleForLoop(TypeChecker &TC,
+                                                             const ForStmt *FS,
+                                                             VarDecl *loopVar) {
+  return binaryOperatorCheckForConvertingCStyleForLoop(TC, FS, loopVar, "-=");
 }
 
 static void checkCStyleForLoop(TypeChecker &TC, const ForStmt *FS) {
@@ -2616,13 +2755,18 @@ static void checkCStyleForLoop(TypeChecker &TC, const ForStmt *FS) {
 
   VarDecl *loopVar = dyn_cast<VarDecl>(initializers[1]);
   Expr *startValue = loopVarDecl->getInit(0);
-  Expr *endValue = endConditionValueForConvertingCStyleForLoop(FS, loopVar);
+  OperatorKind OpKind;
+  Expr *endValue = endConditionValueForConvertingCStyleForLoop(FS, loopVar, OpKind);
   bool strideByOne = unaryIncrementForConvertingCStyleForLoop(FS, loopVar) ||
                plusEqualOneIncrementForConvertingCStyleForLoop(TC, FS, loopVar);
+  bool strideBackByOne = unaryDecrementForConvertingCStyleForLoop(FS, loopVar) ||
+               minusEqualOneDecrementForConvertingCStyleForLoop(TC, FS, loopVar);
 
-  if (!loopVar || !startValue || !endValue || !strideByOne)
+  if (!loopVar || !startValue || !endValue || (!strideByOne && !strideBackByOne))
     return;
-    
+
+  assert(strideBackByOne != strideByOne && "cannot be both increment and decrement.");
+
   // Verify that the loop variable is invariant inside the body.
   VarDeclUsageChecker checker(TC, loopVar);
   checker.suppressDiagnostics();
@@ -2639,15 +2783,31 @@ static void checkCStyleForLoop(TypeChecker &TC, const ForStmt *FS) {
   SourceLoc endOfIncrementLoc =
     Lexer::getLocForEndOfToken(TC.Context.SourceMgr,
                                FS->getIncrement().getPtrOrNull()->getEndLoc());
-    
-  diagnostic
-   .fixItRemoveChars(loopVarDecl->getLoc(), loopVar->getLoc())
-   .fixItReplaceChars(loopPatternEnd, startValue->getStartLoc(), " in ")
-   .fixItReplaceChars(FS->getFirstSemicolonLoc(), endValue->getStartLoc(),
-                      " ..< ")
-   .fixItRemoveChars(FS->getSecondSemicolonLoc(), endOfIncrementLoc);
-}
 
+  if (strideByOne && OpKind != OperatorKind::Greater) {
+    diagnostic
+      .fixItRemoveChars(loopVarDecl->getLoc(), loopVar->getLoc())
+      .fixItReplaceChars(loopPatternEnd, startValue->getStartLoc(), " in ")
+      .fixItReplaceChars(FS->getFirstSemicolonLoc(), endValue->getStartLoc(),
+                       " ..< ")
+      .fixItRemoveChars(FS->getSecondSemicolonLoc(), endOfIncrementLoc);
+    return;
+  } else if (strideBackByOne && OpKind != OperatorKind::Smaller) {
+    SourceLoc startValueEnd = Lexer::getLocForEndOfToken(TC.Context.SourceMgr,
+                                                         startValue->getEndLoc());
+
+    StringRef endValueStr = CharSourceRange(TC.Context.SourceMgr, endValue->getStartLoc(),
+      Lexer::getLocForEndOfToken(TC.Context.SourceMgr, endValue->getEndLoc())).str();
+
+    diagnostic
+      .fixItRemoveChars(loopVarDecl->getLoc(), loopVar->getLoc())
+      .fixItReplaceChars(loopPatternEnd, startValue->getStartLoc(), " in ")
+      .fixItInsert(startValue->getStartLoc(), (llvm::Twine("((") + endValueStr + " + 1)...").str())
+      .fixItInsert(startValueEnd, ").reversed()")
+      .fixItRemoveChars(FS->getFirstSemicolonLoc(), endOfIncrementLoc);
+  }
+}
+}// Anonymous namespace end.
 
 // Perform MiscDiagnostics on Switch Statements.
 static void checkSwitch(TypeChecker &TC, const SwitchStmt *stmt) {
@@ -2704,6 +2864,120 @@ static void checkSwitch(TypeChecker &TC, const SwitchStmt *stmt) {
   }
 }
 
+// Perform checkStmtConditionTrailingClosure for single expression.
+static void checkStmtConditionTrailingClosure(TypeChecker &TC, const Expr *E) {
+  if (E == nullptr || isa<ErrorExpr>(E)) return;
+
+  // Shallow walker. just dig into implicit expression.
+  class DiagnoseWalker : public ASTWalker {
+    TypeChecker &TC;
+
+    void diagnoseIt(const CallExpr *E) {
+      auto argsExpr = E->getArg();
+      auto argsTy = argsExpr->getType();
+
+      // Ignore invalid argument type. Some diagnostics are already emitted.
+      if (!argsTy || argsTy->is<ErrorType>()) return;
+
+      if (auto TSE = dyn_cast<TupleShuffleExpr>(argsExpr))
+        argsExpr = TSE->getSubExpr();
+
+      SmallString<16> replacement;
+      SourceLoc lastLoc;
+      SourceRange closureRange;
+      if (auto PE = dyn_cast<ParenExpr>(argsExpr)) {
+        // Ignore non-trailing-closure.
+        if (!PE->hasTrailingClosure()) return;
+
+        closureRange = PE->getSubExpr()->getSourceRange();
+        lastLoc = PE->getLParenLoc();
+        if (lastLoc.isValid()) {
+          // Empty paren: e.g. if funcName() { 1 } { ... }
+          replacement = "";
+        } else {
+          // Bare trailing closure: e.g. if funcName { 1 } { ... }
+          replacement = "(";
+          lastLoc = E->getFn()->getEndLoc();
+        }
+      } else if (auto TE = dyn_cast<TupleExpr>(argsExpr)) {
+        // Ignore non-trailing-closure.
+        if (!TE->hasTrailingClosure()) return;
+
+        // Tuple + trailing closure: e.g. if funcName(x: 1) { 1 } { ... }
+        auto numElements = TE->getNumElements();
+        assert(numElements >= 2 && "Unexpected num of elements in TupleExpr");
+        closureRange = TE->getElement(numElements - 1)->getSourceRange();
+        lastLoc = TE->getElement(numElements - 2)->getEndLoc();
+        replacement = ", ";
+      } else {
+        // Can't be here.
+        return;
+      }
+
+      // Add argument label of the closure that is going to be enclosed in
+      // parens.
+      if (auto TT = argsTy->getAs<TupleType>()) {
+        assert(TT->getNumElements() != 0 && "Unexpected empty TupleType");
+        auto closureLabel = TT->getElement(TT->getNumElements() - 1).getName();
+        if (!closureLabel.empty()) {
+          replacement += closureLabel.str();
+          replacement += ": ";
+        }
+      }
+
+      // Emit diagnostics.
+      lastLoc = Lexer::getLocForEndOfToken(TC.Context.SourceMgr, lastLoc);
+      TC.diagnose(closureRange.Start, diag::trailing_closure_requires_parens)
+        .fixItReplaceChars(lastLoc, closureRange.Start, replacement)
+        .fixItInsertAfter(closureRange.End, ")");
+    }
+
+  public:
+    DiagnoseWalker(TypeChecker &tc) : TC(tc) { }
+
+    virtual std::pair<bool, Expr *> walkToExprPre(Expr *E) override {
+      // Dig into implicit expression.
+      if (E->isImplicit()) return { true, E };
+      // Diagnose call expression.
+      if (auto CE = dyn_cast<CallExpr>(E))
+        diagnoseIt(CE);
+      // Don't dig any further.
+      return { false, E };
+    }
+  };
+
+  DiagnoseWalker Walker(TC);
+  const_cast<Expr *>(E)->walk(Walker);
+}
+
+/// \brief Diagnose trailing closure in statement-conditions.
+///
+/// Conditional statements, including 'for' or `switch` doesn't allow ambiguous
+/// trailing closures in these conditions part. Even if the parser can recover
+/// them, we force them to disambiguate.
+//
+/// E.g.:
+///   if let _ = arr?.map {$0+1} { ... }
+///   for _ in numbers.filter {$0 > 4} { ... }
+static void checkStmtConditionTrailingClosure(TypeChecker &TC, const Stmt *S) {
+  if (auto LCS = dyn_cast<LabeledConditionalStmt>(S)) {
+    for (auto elt : LCS->getCond()) {
+      if (elt.getKind() == StmtConditionElement::CK_PatternBinding)
+        checkStmtConditionTrailingClosure(TC, elt.getInitializer());
+      else if (elt.getKind() == StmtConditionElement::CK_Boolean)
+        checkStmtConditionTrailingClosure(TC, elt.getBoolean());
+      // No trailing closure for CK_Availability: e.g. `if #available() {}`.
+    }
+  } else if (auto SS = dyn_cast<SwitchStmt>(S)) {
+    checkStmtConditionTrailingClosure(TC, SS->getSubjectExpr());
+  } else if (auto FES = dyn_cast<ForEachStmt>(S)) {
+    checkStmtConditionTrailingClosure(TC, FES->getSequence());
+    checkStmtConditionTrailingClosure(TC, FES->getWhere());
+  } else if (auto DCS = dyn_cast<DoCatchStmt>(S)) {
+    for (auto CS : DCS->getCatches())
+      checkStmtConditionTrailingClosure(TC, CS->getGuardExpr());
+  }
+}
 
 static Optional<ObjCSelector>
 parseObjCSelector(ASTContext &ctx, StringRef string) {
@@ -3117,6 +3391,45 @@ static void diagDeprecatedObjCSelectors(TypeChecker &tc, const DeclContext *dc,
   const_cast<Expr *>(expr)->walk(ObjCSelectorWalker(tc, dc, selectorTy));
 }
 
+        
+        
+/// Diagnose things like this, where 'i' is an Int, not an Int?
+///     if let x: Int = i {
+static void
+checkImplicitPromotionsInCondition(const StmtConditionElement &cond,
+                                   TypeChecker &TC) {
+  auto *p = cond.getPatternOrNull();
+  if (!p) return;
+  
+  if (auto *subExpr = isImplicitPromotionToOptional(cond.getInitializer())) {
+    // If the subexpression was actually optional, then the pattern must be
+    // checking for a type, which forced it to be promoted to a double optional
+    // type.
+    if (auto ooType = subExpr->getType()->getAnyOptionalObjectType()) {
+      if (auto TP = dyn_cast<TypedPattern>(p))
+        // Check for 'if let' to produce a tuned diagnostic.
+        if (isa<OptionalSomePattern>(TP->getSubPattern()) &&
+            TP->getSubPattern()->isImplicit()) {
+          TC.diagnose(cond.getIntroducerLoc(), diag::optional_check_promotion,
+                      subExpr->getType())
+            .highlight(subExpr->getSourceRange())
+            .fixItReplace(TP->getTypeLoc().getSourceRange(),
+                          ooType->getString());
+          return;
+        }
+      TC.diagnose(cond.getIntroducerLoc(),
+                  diag::optional_pattern_match_promotion,
+                  subExpr->getType(), cond.getInitializer()->getType())
+        .highlight(subExpr->getSourceRange());
+      return;
+    }
+    
+    TC.diagnose(cond.getIntroducerLoc(), diag::optional_check_nonoptional,
+                subExpr->getType())
+      .highlight(subExpr->getSourceRange());
+  }
+}
+        
 //===----------------------------------------------------------------------===//
 // High-level entry points.
 //===----------------------------------------------------------------------===//
@@ -3142,6 +3455,13 @@ void swift::performStmtDiagnostics(TypeChecker &TC, const Stmt *S) {
   
   if (auto switchStmt = dyn_cast<SwitchStmt>(S))
     checkSwitch(TC, switchStmt);
+
+  checkStmtConditionTrailingClosure(TC, S);
+  
+  // Check for implicit optional promotions in stmt-condition patterns.
+  if (auto *lcs = dyn_cast<LabeledConditionalStmt>(S))
+    for (const auto &elt : lcs->getCond())
+      checkImplicitPromotionsInCondition(elt, TC);
 }
 
 //===----------------------------------------------------------------------===//

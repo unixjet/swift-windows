@@ -13,6 +13,7 @@
 #include "SwiftLangSupport.h"
 #include "SwiftASTManager.h"
 #include "SourceKit/Core/Context.h"
+#include "SourceKit/SwiftLang/Factory.h"
 #include "SourceKit/Support/UIdent.h"
 
 #include "swift/AST/AST.h"
@@ -138,6 +139,7 @@ static UIdent KindStmtSwitch("source.lang.swift.stmt.switch");
 static UIdent KindStmtCase("source.lang.swift.stmt.case");
 static UIdent KindStmtBrace("source.lang.swift.stmt.brace");
 static UIdent KindExprCall("source.lang.swift.expr.call");
+static UIdent KindExprArg("source.lang.swift.expr.argument");
 static UIdent KindExprArray("source.lang.swift.expr.array");
 static UIdent KindExprDictionary("source.lang.swift.expr.dictionary");
 static UIdent KindExprObjectLiteral("source.lang.swift.expr.object_literal");
@@ -151,7 +153,7 @@ static UIdent KindStructureElemTypeRef("source.lang.swift.structure.elem.typeref
 
 
 std::unique_ptr<LangSupport>
-LangSupport::createSwiftLangSupport(SourceKit::Context &SKCtx) {
+SourceKit::createSwiftLangSupport(SourceKit::Context &SKCtx) {
   return std::unique_ptr<LangSupport>(new SwiftLangSupport(SKCtx));
 }
 
@@ -508,6 +510,8 @@ UIdent SwiftLangSupport::getUIDForSyntaxStructureKind(
       return KindExprDictionary;
     case SyntaxStructureKind::ObjectLiteralExpression:
       return KindExprObjectLiteral;
+    case SyntaxStructureKind::Argument:
+      return KindExprArg;
   }
 }
 
@@ -694,6 +698,14 @@ bool SwiftLangSupport::printDisplayName(const swift::ValueDecl *D,
 
 bool SwiftLangSupport::printUSR(const ValueDecl *D, llvm::raw_ostream &OS) {
   return ide::printDeclUSR(D, OS);
+}
+
+bool SwiftLangSupport::printDeclTypeUSR(const ValueDecl *D, llvm::raw_ostream &OS) {
+  return ide::printDeclTypeUSR(D, OS);
+}
+
+bool SwiftLangSupport::printTypeUSR(Type Ty, llvm::raw_ostream &OS) {
+  return ide::printTypeUSR(Ty, OS);
 }
 
 bool SwiftLangSupport::printAccessorUSR(const AbstractStorageDecl *D,

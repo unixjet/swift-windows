@@ -401,18 +401,24 @@ enum class ConventionsKind : uint8_t {
         
         if (clangTy->getPointeeType()->getAs<clang::RecordType>()) {
           // CF type as foreign class
-          if (substTy->getClassOrBoundGenericClass()
-              && substTy->getClassOrBoundGenericClass()->isForeign())
+          if (substTy->getClassOrBoundGenericClass() &&
+              substTy->getClassOrBoundGenericClass()->getForeignClassKind() ==
+                ClassDecl::ForeignKind::CFType) {
             return false;
+          }
           // swift_newtype-ed CF type as foreign class
           if (auto typedefTy = clangTy->getAs<clang::TypedefType>()) {
             if (typedefTy->getDecl()->getAttr<clang::SwiftNewtypeAttr>()) {
               // Make sure that we actually made the struct during import
               if (auto underlyingType =
                       substTy->getSwiftNewtypeUnderlyingType()) {
-                if (underlyingType->getClassOrBoundGenericClass() &&
-                    underlyingType->getClassOrBoundGenericClass()->isForeign())
-                  return false;
+                if (auto underlyingClass =
+                        underlyingType->getClassOrBoundGenericClass()) {
+                  if (underlyingClass->getForeignClassKind() ==
+                          ClassDecl::ForeignKind::CFType) {
+                    return false;
+                  }
+                }
               }
             }
           }
@@ -735,6 +741,18 @@ static CanSILFunctionType getSILFunctionType(SILModule &M,
     auto loweredCaptures = Types.getLoweredLocalCaptures(*function);
     
     for (auto capture : loweredCaptures.getCaptures()) {
+      if (capture.isDynamicSelfMetadata()) {
+        ParameterConvention convention = ParameterConvention::Direct_Unowned;
+        auto selfMetatype = MetatypeType::get(
+            loweredCaptures.getDynamicSelfType()->getSelfType(),
+            MetatypeRepresentation::Thick)
+                ->getCanonicalType();
+        SILParameterInfo param(selfMetatype, convention);
+        inputs.push_back(param);
+
+        continue;
+      }
+
       auto *VD = capture.getDecl();
       auto type = VD->getType()->getCanonicalType();
       
@@ -799,8 +817,7 @@ static CanSILFunctionType getSILFunctionType(SILModule &M,
   //   We should bring it back when we have those optimizations.
   auto silExtInfo = SILFunctionType::ExtInfo()
     .withRepresentation(extInfo.getSILRepresentation())
-    .withIsPseudogeneric(pseudogeneric)
-    .withIsNoReturn(extInfo.isNoReturn());
+    .withIsPseudogeneric(pseudogeneric);
   
   return SILFunctionType::get(genericSig,
                               silExtInfo, calleeConvention,
@@ -1383,6 +1400,10 @@ FOREACH_FAMILY(GET_LABEL)
 }
 
 /// Derive the ObjC selector family from an identifier.
+///
+/// Note that this will never derive the Init family, which is too dangerous
+/// to leave to chance. Swift functions starting with "init" are always
+/// emitted as if they are part of the "none" family.
 static SelectorFamily getSelectorFamily(Identifier name) {
   StringRef text = name.get();
   while (!text.empty() && text[0] == '_') text = text.substr(1);
@@ -1396,12 +1417,16 @@ static SelectorFamily getSelectorFamily(Identifier name) {
     return !islower(text[prefix.size()]);
   };
 
-  #define CHECK_PREFIX(LABEL, PREFIX) \
-    if (hasPrefix(text, PREFIX)) return SelectorFamily::LABEL;
+  auto result = SelectorFamily::None;
+  if (false) /*for #define purposes*/;
+#define CHECK_PREFIX(LABEL, PREFIX) \
+  else if (hasPrefix(text, PREFIX)) result = SelectorFamily::LABEL;
   FOREACH_FAMILY(CHECK_PREFIX)
-  #undef CHECK_PREFIX
+#undef CHECK_PREFIX
 
-  return SelectorFamily::None;
+  if (result == SelectorFamily::Init)
+    return SelectorFamily::None;
+  return result;
 }
 
 /// Get the ObjC selector family a SILDeclRef implicitly belongs to.
@@ -2400,12 +2425,6 @@ TypeConverter::getLoweredASTFunctionType(CanAnyFunctionType fnType,
     // levels and so throws if any of them do.
     if (fnType->getExtInfo().throws())
       extInfo = extInfo.withThrows();
-
-    // The @noreturn property of the uncurried function really comes
-    // from the innermost function. It is not meaningful for intermediate
-    // functions to also be @noreturn, but we don't prohibit it here.
-    if (fnType->getExtInfo().isNoReturn())
-      extInfo = extInfo.withIsNoReturn();
 
     if (uncurryLevel-- == 0)
       break;

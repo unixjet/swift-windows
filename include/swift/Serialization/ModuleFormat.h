@@ -43,7 +43,7 @@ const unsigned char MODULE_DOC_SIGNATURE[] = { 0xE2, 0x9C, 0xA8, 0x07 };
 
 /// Serialized module format major version number.
 ///
-/// Always 0 for Swift 1.x and 2.x.
+/// Always 0 for Swift 1.x - 3.x.
 const uint16_t VERSION_MAJOR = 0;
 
 /// Serialized module format minor version number.
@@ -53,7 +53,7 @@ const uint16_t VERSION_MAJOR = 0;
 /// in source control, you should also update the comment to briefly
 /// describe what change you made. The content of this comment isn't important;
 /// it just ensures a conflict if two people change the module format.
-const uint16_t VERSION_MINOR = 251; // Last change: SILFunctionType::isPseudogeneric
+const uint16_t VERSION_MINOR = 256; // Last change: remove noreturn bit
 
 using DeclID = PointerEmbeddedInt<unsigned, 31>;
 using DeclIDField = BCFixed<31>;
@@ -578,7 +578,6 @@ namespace decls_block {
     TUPLE_TYPE_ELT,
     IdentifierIDField,    // name
     TypeIDField,          // type
-    DefaultArgumentField, // default argument
     BCFixed<1>            // vararg?
   >;
 
@@ -588,8 +587,8 @@ namespace decls_block {
     TypeIDField, // output
     FunctionTypeRepresentationField, // representation
     BCFixed<1>,  // auto-closure?
-    BCFixed<1>,  // noreturn?
     BCFixed<1>,  // noescape?
+    BCFixed<1>,  // explicitlyEscaping?
     BCFixed<1>   // throws?
   >;
 
@@ -681,7 +680,6 @@ namespace decls_block {
     TypeIDField, // output
     DeclIDField, // decl that owns the generic params
     FunctionTypeRepresentationField, // representation
-    BCFixed<1>,  // noreturn?
     BCFixed<1>   // throws?
     // Trailed by its generic parameters, if the owning decl ID is 0.
   >;
@@ -691,7 +689,6 @@ namespace decls_block {
     TypeIDField,         // input
     TypeIDField,         // output
     FunctionTypeRepresentationField, // representation
-    BCFixed<1>,          // noreturn?
     BCFixed<1>,          // throws?
     BCArray<TypeIDField> // generic parameters
                          // followed by requirements
@@ -701,7 +698,6 @@ namespace decls_block {
     SIL_FUNCTION_TYPE,
     ParameterConventionField, // callee convention
     SILFunctionTypeRepresentationField, // representation
-    BCFixed<1>,            // noreturn?
     BCFixed<1>,            // pseudogeneric?
     BCFixed<1>,            // error result?
     BCFixed<30>,           // number of parameters
@@ -760,6 +756,7 @@ namespace decls_block {
     TypeIDField, // interface type
     BCFixed<1>,  // implicit flag
     AccessibilityKindField // accessibility
+    // Trailed by generic parameters (if any).
   >;
 
   using GenericTypeParamDeclLayout = BCRecordLayout<
@@ -815,7 +812,6 @@ namespace decls_block {
     BCFixed<1>,        // implicit?
     BCFixed<1>,        // explicitly objc?
     BCFixed<1>,        // requires stored property initial values
-    BCFixed<1>,        // foreign
     TypeIDField,       // superclass
     AccessibilityKindField, // accessibility
     BCVBR<4>,               // number of conformances

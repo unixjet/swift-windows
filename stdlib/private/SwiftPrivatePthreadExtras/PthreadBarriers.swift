@@ -12,7 +12,7 @@
 
 #if os(OSX) || os(iOS) || os(watchOS) || os(tvOS)
 import Darwin
-#elseif os(Linux) || os(FreeBSD) || os(Android) || os(Cygwin)
+#elseif os(Linux) || os(FreeBSD) || os(PS4) || os(Android) || CYGWIN
 import Glibc
 #endif
 
@@ -72,12 +72,12 @@ public func _stdlib_pthread_barrier_init(
     errno = EINVAL
     return -1
   }
-  barrier.pointee.mutex = UnsafeMutablePointer(allocatingCapacity: 1)
+  barrier.pointee.mutex = UnsafeMutablePointer.allocate(capacity: 1)
   if pthread_mutex_init(barrier.pointee.mutex!, nil) != 0 {
     // FIXME: leaking memory.
     return -1
   }
-  barrier.pointee.cond = UnsafeMutablePointer(allocatingCapacity: 1)
+  barrier.pointee.cond = UnsafeMutablePointer.allocate(capacity: 1)
   if pthread_cond_init(barrier.pointee.cond!, nil) != 0 {
     // FIXME: leaking memory, leaking a mutex.
     return -1
@@ -98,9 +98,9 @@ public func _stdlib_pthread_barrier_destroy(
     return -1
   }
   barrier.pointee.cond!.deinitialize()
-  barrier.pointee.cond!.deallocateCapacity(1)
+  barrier.pointee.cond!.deallocate(capacity: 1)
   barrier.pointee.mutex!.deinitialize()
-  barrier.pointee.mutex!.deallocateCapacity(1)
+  barrier.pointee.mutex!.deallocate(capacity: 1)
   return 0
 }
 

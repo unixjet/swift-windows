@@ -171,6 +171,8 @@
 // RUN: %target-swift-ide-test -code-completion -source-filename %s -code-completion-token=GENERIC_TYPEALIAS_2 | FileCheck %s -check-prefix=GENERIC_TYPEALIAS_2
 
 // RUN: %target-swift-ide-test -code-completion -source-filename %s -code-completion-token=DEPRECATED_1 | FileCheck %s -check-prefix=DEPRECATED_1
+// RUN: %target-swift-ide-test -code-completion -source-filename %s -code-completion-token=DOT_EXPR_NON_NOMINAL_1 | FileCheck %s -check-prefix=DOT_EXPR_NON_NOMINAL_1
+// RUN: %target-swift-ide-test -code-completion -source-filename %s -code-completion-token=DOT_EXPR_NON_NOMINAL_2 | FileCheck %s -check-prefix=DOT_EXPR_NON_NOMINAL_2
 
 // Test code completion of expressions that produce a value.
 
@@ -754,11 +756,11 @@ protocol BazProtocol {
   func bazInstanceFunc0() -> Double
 }
 
-typealias BarBazProtocolComposition = protocol<BarProtocol, BazProtocol>
+typealias BarBazProtocolComposition = BarProtocol & BazProtocol
 
 let fooProtocolInstance: FooProtocol = FooProtocolImpl()
-let fooBarProtocolInstance: protocol<FooProtocol, BarProtocol>
-let fooExBarExProtocolInstance: protocol<FooExProtocol, BarExProtocol>
+let fooBarProtocolInstance: FooProtocol & BarProtocol
+let fooExBarExProtocolInstance: FooExProtocol & BarExProtocol
 
 typealias FooTypealias = Int
 
@@ -1053,7 +1055,7 @@ func testLookInProto3() {
 // PROTO_MEMBERS_3-NEXT: End completions
 }
 
-func testLookInProto4(_ a: protocol<FooProtocol, BarBazProtocolComposition>) {
+func testLookInProto4(_ a: FooProtocol & BarBazProtocolComposition) {
   a.#^PROTO_MEMBERS_4^#
 // PROTO_MEMBERS_4: Begin completions
 // PROTO_MEMBERS_4-DAG: Decl[InstanceMethod]/CurrNominal: fooInstanceFunc0()[#Double#]{{; name=.+$}}
@@ -1084,7 +1086,7 @@ func testResolveFuncParam3<Foo : FooProtocol>(_ foo: Foo) {
 // RESOLVE_FUNC_PARAM_3-NEXT: End completions
 }
 
-func testResolveFuncParam4<FooBar : protocol<FooProtocol, BarProtocol>>(_ fooBar: FooBar) {
+func testResolveFuncParam4<FooBar : FooProtocol & BarProtocol>(_ fooBar: FooBar) {
   fooBar.#^RESOLVE_FUNC_PARAM_4^#
 // RESOLVE_FUNC_PARAM_4: Begin completions
 // RESOLVE_FUNC_PARAM_4-NEXT: Decl[InstanceVar]/Super:    barInstanceVar[#Int#]{{; name=.+$}}
@@ -1097,7 +1099,7 @@ func testResolveFuncParam4<FooBar : protocol<FooProtocol, BarProtocol>>(_ fooBar
 // RESOLVE_FUNC_PARAM_4-NEXT: End completions
 }
 
-func testResolveFuncParam5<FooExBarEx : protocol<FooExProtocol, BarExProtocol>>(_ a: FooExBarEx) {
+func testResolveFuncParam5<FooExBarEx : FooExProtocol & BarExProtocol>(_ a: FooExBarEx) {
   a.#^RESOLVE_FUNC_PARAM_5^#
 // RESOLVE_FUNC_PARAM_5: Begin completions
 // RESOLVE_FUNC_PARAM_5-NEXT: Decl[InstanceVar]/Super:    barInstanceVar[#Int#]{{; name=.+$}}
@@ -1890,3 +1892,26 @@ struct Deprecated {
   }
 }
 // DEPRECATED_1: Decl[InstanceMethod]/CurrNominal/NotRecommended: deprecated({#x: Deprecated#})[#Void#];
+
+struct Person {
+  var firstName: String
+}
+class Other { var nameFromOther: Int = 1 }
+class TestDotExprWithNonNominal {
+  var other: Other
+
+  func test1() {
+    let person = Person(firstName: other.#^DOT_EXPR_NON_NOMINAL_1^#)
+// DOT_EXPR_NON_NOMINAL_1-NOT: Instance
+// DOT_EXPR_NON_NOMINAL_1: Decl[InstanceVar]/CurrNominal:      nameFromOther[#Int#];
+// DOT_EXPR_NON_NOMINAL_1-NOT: Instance
+  }
+  func test2() {
+    let person = Person(firstName: 1.#^DOT_EXPR_NON_NOMINAL_2^#)
+// DOT_EXPR_NON_NOMINAL_2-NOT: other
+// DOT_EXPR_NON_NOMINAL_2-NOT: firstName
+// DOT_EXPR_NON_NOMINAL_2: Decl[InstanceVar]/CurrNominal:      hashValue[#Int#];
+// DOT_EXPR_NON_NOMINAL_2-NOT: other
+// DOT_EXPR_NON_NOMINAL_2-NOT: firstName
+  }
+}

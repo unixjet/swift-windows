@@ -157,7 +157,7 @@ public struct DateInterval : ReferenceConvertible, Comparable, Hashable {
     public var hashValue: Int {
         var buf: (UInt, UInt) = (UInt(start.timeIntervalSinceReferenceDate), UInt(end.timeIntervalSinceReferenceDate))
         return withUnsafeMutablePointer(&buf) {
-            return Int(bitPattern: CFHashBytes(unsafeBitCast($0, to: UnsafeMutablePointer<UInt8>.self), CFIndex(sizeof(UInt) * 2)))
+            return Int(bitPattern: CFHashBytes(unsafeBitCast($0, to: UnsafeMutablePointer<UInt8>.self), CFIndex(sizeof(UInt.self) * 2)))
         }
     }
     
@@ -168,16 +168,17 @@ public struct DateInterval : ReferenceConvertible, Comparable, Hashable {
     public var debugDescription: String {
         return description
     }
-}
 
-@available(OSX 10.12, iOS 10.0, watchOS 3.0, tvOS 10.0, *)
-public func ==(lhs: DateInterval, rhs: DateInterval) -> Bool {
-    return lhs.start == rhs.start && lhs.duration == rhs.duration
-}
+    @available(OSX 10.12, iOS 10.0, watchOS 3.0, tvOS 10.0, *)
+    public static func ==(lhs: DateInterval, rhs: DateInterval) -> Bool {
+        return lhs.start == rhs.start && lhs.duration == rhs.duration
+    }
 
-@available(OSX 10.12, iOS 10.0, watchOS 3.0, tvOS 10.0, *)
-public func <(lhs: DateInterval, rhs: DateInterval) -> Bool {
-    return lhs.compare(rhs) == .orderedAscending
+    @available(OSX 10.12, iOS 10.0, watchOS 3.0, tvOS 10.0, *)
+    public static func <(lhs: DateInterval, rhs: DateInterval) -> Bool {
+        return lhs.compare(rhs) == .orderedAscending
+    }
+
 }
 
 @available(OSX 10.12, iOS 10.0, watchOS 3.0, tvOS 10.0, *)

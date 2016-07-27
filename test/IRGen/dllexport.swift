@@ -1,19 +1,25 @@
 // RUN: %swift -target thumbv7--windows-itanium -emit-ir -parse-as-library -parse-stdlib -module-name dllexport %s -o - | FileCheck %s -check-prefix CHECK -check-prefix CHECK-NO-OPT
 // RUN: %swift -target thumbv7--windows-itanium -O -emit-ir -parse-as-library -parse-stdlib -module-name dllexport %s -o - | FileCheck %s -check-prefix CHECK -check-prefix CHECK-OPT
 
-@noreturn
+// REQUIRES: CODEGENERATOR=ARM
+
+enum Never {}
+
 @_silgen_name("_swift_fatalError")
-func fatalError()
+func fatalError() -> Never
 
 public protocol p {
   func f()
 }
+
 public class c {
+  public init() { }
 }
+
 public var ci : c = c()
+
 public class d {
-  @noreturn
-  private func m() {
+  private func m() -> Never {
     fatalError()
   }
 }
@@ -22,7 +28,6 @@ public class d {
 // CHECK-DAG: @_TMp9dllexport1p = dllexport constant %swift.protocol
 // CHECK-DAG: @_TMnC9dllexport1c = dllexport constant
 // CHECK-DAG: @_TMLC9dllexport1c = dllexport global %swift.type* null, align 4
-// CHECK-DAG: @_TMnC9dllexport1d = dllexport constant <{ {{.*}} }> <{ {{.*}} }>, align 4
 // CHECK-DAG: @_TMLC9dllexport1d = dllexport global %swift.type* null, align 4
 // CHECK-DAG: @_TMC9dllexport1c = dllexport alias %swift.type
 // CHECK-DAG: @_TMC9dllexport1d = dllexport alias %swift.type, bitcast ({{.*}})
@@ -30,7 +35,6 @@ public class d {
 // CHECK-DAG-OPT: @_TFC9dllexport1dcfT_S0_ = dllexport alias void (), void ()* @_swift_dead_method_stub
 // CHECK-DAG-OPT: @_TFC9dllexport1ccfT_S0_ = dllexport alias void (), void ()* @_swift_dead_method_stub
 // CHECK-DAG-OPT: @_TFC9dllexport1cCfT_S0_ = dllexport alias void (), void ()* @_swift_dead_method_stub
-// CHECK-DAG: define dllexport void @_TFC9dllexport1cD(%C9dllexport1c*) #0 {
 // CHECK-DAG: define dllexport %swift.refcounted* @_TFC9dllexport1cd(%C9dllexport1c*{{.*}})
 // CHECK-DAG-NO-OPT: define dllexport %C9dllexport1c* @_TFC9dllexport1ccfT_S0_(%C9dllexport1c*)
 // CHECK-DAG-NO-OPT: define dllexport %C9dllexport1c* @_TFC9dllexport1cCfT_S0_(%swift.type*)

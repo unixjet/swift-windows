@@ -17,7 +17,7 @@ struct Foo {
   var zmeh: Int
 }
 
-// XFAIL: broken_std_regex
+// REQUIRES: objc_interop
 // RUN: %sourcekitd-test -req=complete.open -pos=2:1 -req-opts=hidelowpriority=0 %s -- %s > %t.nopopular.top
 // RUN: %sourcekitd-test -req=complete.open -pos=3:5 %s -- %s > %t.nopopular.foo
 // RUN: FileCheck %s -check-prefix=NOPOP_TOP < %t.nopopular.top
@@ -79,17 +79,15 @@ struct OuterNominal {
 // POPULAR_STMT_0:   localColor
 // POPULAR_STMT_0:   fromDerivedColor
 // POPULAR_STMT_0:   fromSuperColor
-// POPULAR_STMT_0:   fromOuterNominalColor
 // POPULAR_STMT_0:   good()
-// POPULAR_STMT_0:   globalColor
-// POPULAR_STMT_0:   okay()
+// POPULAR_STMT_0:   fromOuterNominalColor
 // POPULAR_STMT_0:   DDModuleColor
 // POPULAR_STMT_0:   CCModuleColor
-// bad() ends up here because it's an unpopular global but that's still
-// generally better than "other module" results.
-// POPULAR_STMT_0:   bad()
 // POPULAR_STMT_0:   EEModuleColor
+// POPULAR_STMT_0:   globalColor
+// POPULAR_STMT_0:   okay()
 // POPULAR_STMT_0:   ModuleCollaborate
+// POPULAR_STMT_0:   bad()
 // POPULAR_STMT_0: ]
 // POPULAR_STMT_0-LABEL: Results for filterText: col [
 // POPULAR_STMT_0:   argColor

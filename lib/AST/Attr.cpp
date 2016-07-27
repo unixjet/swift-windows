@@ -23,6 +23,7 @@
 #include "swift/Basic/Defer.h"
 #include "llvm/ADT/SmallString.h"
 #include "llvm/Support/raw_ostream.h"
+#include "llvm/Support/ErrorHandling.h"
 #include "llvm/ADT/StringSwitch.h"
 using namespace swift;
 
@@ -46,7 +47,7 @@ TypeAttrKind TypeAttributes::getAttrKindFromString(StringRef Str) {
 /// Return the name (like "autoclosure") for an attribute ID.
 const char *TypeAttributes::getAttrName(TypeAttrKind kind) {
   switch (kind) {
-  default: assert(0 && "Invalid attribute ID");
+  default: llvm_unreachable("Invalid attribute ID");
 #define TYPE_ATTR(X) case TAK_##X: return #X;
 #include "swift/AST/Attr.def"
   }
@@ -305,6 +306,7 @@ bool DeclAttribute::printImpl(ASTPrinter &Printer, const PrintOptions &Options) 
   case DAK_ObjCBridged:
   case DAK_SynthesizedProtocol:
   case DAK_ShowInInterface:
+  case DAK_Rethrows:
     return false;
   default:
     break;
@@ -341,7 +343,9 @@ bool DeclAttribute::printImpl(ASTPrinter &Printer, const PrintOptions &Options) 
   }
 
   Printer.callPrintStructurePre(PrintStructureKind::BuiltinAttribute);
-  defer { Printer.printStructurePost(PrintStructureKind::BuiltinAttribute); };
+  SWIFT_DEFER {
+    Printer.printStructurePost(PrintStructureKind::BuiltinAttribute);
+  };
 
   switch (getKind()) {
   case DAK_Semantics:

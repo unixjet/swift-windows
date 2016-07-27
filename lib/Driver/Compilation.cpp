@@ -633,8 +633,9 @@ int Compilation::performSingleCommand(const Job *Cmd) {
 
   for (auto &envPair : Cmd->getExtraEnvironment()) {
 #if defined(_MSC_VER) || __MINGW32__
-    std::string envStr = envPair.first;
-    envStr = envStr + "=" + envPair.second;
+    llvm::SmallString<256> envStr = StringRef(envPair.first);
+    envStr.append(StringRef("="));
+    envStr.append(StringRef(envPair.second));
     _putenv(envStr.c_str());
 #else
     setenv(envPair.first, envPair.second, /*replacing=*/true);
