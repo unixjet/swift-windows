@@ -43,7 +43,7 @@ public var _stdlib_PTHREAD_BARRIER_SERIAL_THREAD: CInt {
 }
 
 public struct _stdlib_pthread_barrier_t {
-#if os(Cygwin)
+#if CYGWIN
   var mutex: UnsafeMutablePointer<pthread_mutex_t?>? = nil
   var cond: UnsafeMutablePointer<pthread_cond_t?>? = nil
 #else

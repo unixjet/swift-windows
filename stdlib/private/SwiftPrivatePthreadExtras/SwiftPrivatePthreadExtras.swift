@@ -59,7 +59,7 @@ internal func invokeBlockContext(
   return context.run()
 }
 
-#if os(Cygwin)
+#if CYGWIN
 public typealias _stdlib_pthread_attr_t = UnsafePointer<pthread_attr_t?>
 #else
 public typealias _stdlib_pthread_attr_t = UnsafePointer<pthread_attr_t>

@@ -264,7 +264,7 @@ public enum ProcessTerminationStatus : CustomStringConvertible {
 
 public func posixWaitpid(_ pid: pid_t) -> ProcessTerminationStatus {
   var status: CInt = 0
-#if os(Cygwin)
+#if CYGWIN
   final class Box<T> {
     let value: T
 
@@ -307,7 +307,7 @@ internal func _getEnviron() -> UnsafeMutablePointer<UnsafeMutablePointer<CChar>?
   return environ
 #elseif os(Android)
   return environ
-#elseif os(Cygwin)
+#elseif CYGWIN
   return environ
 #else
   return __environ

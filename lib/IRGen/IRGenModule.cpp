@@ -454,8 +454,8 @@ llvm::Constant *swift::getRuntimeFn(llvm::Module &Module,
   if (auto fn = dyn_cast<llvm::Function>(cache)) {
     fn->setCallingConv(cc);
 
-    if (llvm::Triple(Module.getTargetTriple())
-            .isKnownWindowsMSVCEnvironment() &&
+    if (llvm::Triple(Module.getTargetTriple()).isOSBinFormatCOFF() &&
+        !llvm::Triple(Module.getTargetTriple()).isOSCygMing() &&
         EnabledDllImport() &&
         (fn->getLinkage() == llvm::GlobalValue::ExternalLinkage ||
          fn->getLinkage() == llvm::GlobalValue::AvailableExternallyLinkage))
@@ -536,8 +536,8 @@ llvm::Constant *swift::getWrapperFn(llvm::Module &Module,
     auto *globalFnPtr =
         new llvm::GlobalVariable(Module, fnPtrTy, false,
                                  llvm::GlobalValue::ExternalLinkage, 0, symbol);
-    if (llvm::Triple(Module.getTargetTriple())
-            .isKnownWindowsMSVCEnvironment() &&
+    if (llvm::Triple(Module.getTargetTriple()).isOSBinFormatCOFF() &&
+        !llvm::Triple(Module.getTargetTriple()).isOSCygMing() &&
         EnabledDllImport())
       globalFnPtr->setDLLStorageClass(llvm::GlobalValue::DLLImportStorageClass);
 
@@ -656,7 +656,7 @@ llvm::Constant *IRGenModule::getEmptyTupleMetadata() {
 
   EmptyTupleMetadata =
       Module.getOrInsertGlobal("_TMT_", FullTypeMetadataStructTy);
-  if (Triple.isOSBinFormatCOFF())
+  if (Triple.isOSBinFormatCOFF() && !Triple.isOSCygMing())
     cast<llvm::GlobalVariable>(EmptyTupleMetadata)
         ->setDLLStorageClass(llvm::GlobalValue::DLLImportStorageClass);
   return EmptyTupleMetadata;
@@ -670,7 +670,7 @@ llvm::Constant *IRGenModule::getObjCEmptyCachePtr() {
     // struct objc_cache _objc_empty_cache;
     ObjCEmptyCachePtr = Module.getOrInsertGlobal("_objc_empty_cache",
                                                  OpaquePtrTy->getElementType());
-    if (Triple.isOSBinFormatCOFF())
+    if (Triple.isOSBinFormatCOFF() && !Triple.isOSCygMing())
       cast<llvm::GlobalVariable>(ObjCEmptyCachePtr)
           ->setDLLStorageClass(llvm::GlobalValue::DLLImportStorageClass);
   } else {
@@ -703,7 +703,7 @@ Address IRGenModule::getAddrOfObjCISAMask() {
   assert(TargetInfo.hasISAMasking());
   if (!ObjCISAMaskPtr) {
     ObjCISAMaskPtr = Module.getOrInsertGlobal("swift_isaMask", IntPtrTy);
-    if (Triple.isOSBinFormatCOFF())
+    if (Triple.isOSBinFormatCOFF() && !Triple.isOSCygMing())
       cast<llvm::GlobalVariable>(ObjCISAMaskPtr)
           ->setDLLStorageClass(llvm::GlobalValue::DLLImportStorageClass);
   }
@@ -869,7 +869,7 @@ void IRGenModule::addLinkLibrary(const LinkLibrary &linkLib) {
     llvm::SmallString<64> buf;
     encodeForceLoadSymbolName(buf, linkLib.getName());
     auto symbolAddr = Module.getOrInsertGlobal(buf.str(), Int1Ty);
-    if (Triple.isOSBinFormatCOFF())
+    if (Triple.isOSBinFormatCOFF() && !Triple.isOSCygMing())
       cast<llvm::GlobalVariable>(symbolAddr)
           ->setDLLStorageClass(llvm::GlobalValue::DLLImportStorageClass);
 
@@ -987,7 +987,7 @@ void IRGenModule::emitAutolinkInfo() {
                                  llvm::GlobalValue::CommonLinkage,
                                  llvm::Constant::getNullValue(Int1Ty),
                                  buf.str());
-    if (Triple.isOSBinFormatCOFF())
+    if (Triple.isOSBinFormatCOFF() && !Triple.isOSCygMing())
       symbol->setDLLStorageClass(llvm::GlobalValue::DLLExportStorageClass);
   }
 }

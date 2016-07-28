@@ -961,7 +961,7 @@ void IRGenModule::emitVTableStubs() {
     //FIXME: After having complete solution for MSVC, we will determine if 
     //the solution is applicable to all Windows environment.
     //If it is applicable, we will use the method .isOSBinFormatCOFF().
-    if (Triple.isKnownWindowsMSVCEnvironment() && EnabledDllExport())
+    if (Triple.isOSBinFormatCOFF() && !Triple.isOSCygMing() && EnabledDllExport())
       alias->setDLLStorageClass(llvm::GlobalValue::DLLExportStorageClass);
   }
 }
@@ -1269,7 +1269,6 @@ static IRLinkageTuple getIRLinkage(IRGenModule &IGM,
   
   const auto ObjFormat = IGM.TargetInfo.OutputObjectFormat;
   bool IsELFObject = ObjFormat == llvm::Triple::ELF;
-  bool IsCOFFObject = ObjFormat == llvm::Triple::COFF;
 
   // Use protected visibility for public symbols we define on ELF.  ld.so
   // doesn't support relative relocations at load time, which interferes with
@@ -1279,11 +1278,11 @@ static IRLinkageTuple getIRLinkage(IRGenModule &IGM,
       IsELFObject ? llvm::GlobalValue::ProtectedVisibility
                   : llvm::GlobalValue::DefaultVisibility;
   llvm::GlobalValue::DLLStorageClassTypes ExportedStorage =
-      IGM.Triple.isKnownWindowsMSVCEnvironment() && EnabledDllExport()
+      IGM.Triple.isOSBinFormatCOFF() && !IGM.Triple.isOSCygMing() && EnabledDllExport()
           ? llvm::GlobalValue::DLLExportStorageClass
           : llvm::GlobalValue::DefaultStorageClass;
   llvm::GlobalValue::DLLStorageClassTypes ImportedStorage =
-      IGM.Triple.isKnownWindowsMSVCEnvironment() && EnabledDllImport()
+      IGM.Triple.isOSBinFormatCOFF() && !IGM.Triple.isOSCygMing() && EnabledDllImport()
           ? llvm::GlobalValue::DLLImportStorageClass
           : llvm::GlobalValue::DefaultStorageClass;
 
