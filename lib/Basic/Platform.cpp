@@ -118,7 +118,16 @@ StringRef swift::getPlatformNameForTriple(const llvm::Triple &triple) {
   case llvm::Triple::FreeBSD:
     return "freebsd";
   case llvm::Triple::Win32:
-    return "windows";
+    switch (triple.getEnvironment()) {
+    case llvm::Triple::Cygnus:
+      return "cygwin";
+    case llvm::Triple::GNU:
+      return "mingw";
+    case llvm::Triple::MSVC:
+      return "windows";
+    default:
+      llvm_unreachable("unsupported Windows environment");
+    }
   case llvm::Triple::PS4:
     return "ps4";
   }

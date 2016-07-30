@@ -3982,7 +3982,7 @@ static void emitObjCClassSymbol(IRGenModule &IGM,
                                           metadata->getLinkage(),
                                           classSymbol.str(), metadata,
                                           IGM.getModule());
-  if (IGM.TargetInfo.OutputObjectFormat == llvm::Triple::COFF)
+  if (IGM.useDllStorage())
     alias->setDLLStorageClass(metadata->getDLLStorageClass());
 }
 

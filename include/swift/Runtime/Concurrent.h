@@ -15,7 +15,7 @@
 #include <atomic>
 #include <stdint.h>
 
-#if defined(__FreeBSD__)
+#if defined(__FreeBSD__) || defined(__CYGWIN__)
 #include <stdio.h>
 #endif
 

@@ -452,6 +452,7 @@ llvm::Constant *swift::getRuntimeFn(llvm::Module &Module,
     fn->setCallingConv(cc);
 
     if (llvm::Triple(Module.getTargetTriple()).isOSBinFormatCOFF() &&
+        !llvm::Triple(Module.getTargetTriple()).isOSCygMing() &&
         (fn->getLinkage() == llvm::GlobalValue::ExternalLinkage ||
          fn->getLinkage() == llvm::GlobalValue::AvailableExternallyLinkage))
       fn->setDLLStorageClass(llvm::GlobalValue::DLLImportStorageClass);
@@ -531,7 +532,8 @@ llvm::Constant *swift::getWrapperFn(llvm::Module &Module,
     auto *globalFnPtr =
         new llvm::GlobalVariable(Module, fnPtrTy, false,
                                  llvm::GlobalValue::ExternalLinkage, 0, symbol);
-    if (llvm::Triple(Module.getTargetTriple()).isOSBinFormatCOFF())
+    if (llvm::Triple(Module.getTargetTriple()).isOSBinFormatCOFF() &&
+        !llvm::Triple(Module.getTargetTriple()).isOSCygMing())
       globalFnPtr->setDLLStorageClass(llvm::GlobalValue::DLLImportStorageClass);
 
     // Forward all arguments.
@@ -649,7 +651,7 @@ llvm::Constant *IRGenModule::getEmptyTupleMetadata() {
 
   EmptyTupleMetadata =
       Module.getOrInsertGlobal("_TMT_", FullTypeMetadataStructTy);
-  if (Triple.isOSBinFormatCOFF())
+  if (useDllStorage())
     cast<llvm::GlobalVariable>(EmptyTupleMetadata)
         ->setDLLStorageClass(llvm::GlobalValue::DLLImportStorageClass);
   return EmptyTupleMetadata;
@@ -663,7 +665,7 @@ llvm::Constant *IRGenModule::getObjCEmptyCachePtr() {
     // struct objc_cache _objc_empty_cache;
     ObjCEmptyCachePtr = Module.getOrInsertGlobal("_objc_empty_cache",
                                                  OpaquePtrTy->getElementType());
-    if (Triple.isOSBinFormatCOFF())
+    if (useDllStorage())
       cast<llvm::GlobalVariable>(ObjCEmptyCachePtr)
           ->setDLLStorageClass(llvm::GlobalValue::DLLImportStorageClass);
   } else {
@@ -696,7 +698,7 @@ Address IRGenModule::getAddrOfObjCISAMask() {
   assert(TargetInfo.hasISAMasking());
   if (!ObjCISAMaskPtr) {
     ObjCISAMaskPtr = Module.getOrInsertGlobal("swift_isaMask", IntPtrTy);
-    if (Triple.isOSBinFormatCOFF())
+    if (useDllStorage())
       cast<llvm::GlobalVariable>(ObjCISAMaskPtr)
           ->setDLLStorageClass(llvm::GlobalValue::DLLImportStorageClass);
   }
@@ -862,7 +864,7 @@ void IRGenModule::addLinkLibrary(const LinkLibrary &linkLib) {
     llvm::SmallString<64> buf;
     encodeForceLoadSymbolName(buf, linkLib.getName());
     auto symbolAddr = Module.getOrInsertGlobal(buf.str(), Int1Ty);
-    if (Triple.isOSBinFormatCOFF())
+    if (useDllStorage())
       cast<llvm::GlobalVariable>(symbolAddr)
           ->setDLLStorageClass(llvm::GlobalValue::DLLImportStorageClass);
 
@@ -927,9 +929,9 @@ void IRGenModule::emitAutolinkInfo() {
                                        }),
                         AutolinkEntries.end());
 
-  if (TargetInfo.OutputObjectFormat == llvm::Triple::COFF ||
-      TargetInfo.OutputObjectFormat == llvm::Triple::MachO ||
-      Triple.isPS4()) {
+  if ((TargetInfo.OutputObjectFormat == llvm::Triple::COFF &&
+       !Triple.isOSCygMing()) ||
+      TargetInfo.OutputObjectFormat == llvm::Triple::MachO || Triple.isPS4()) {
     llvm::LLVMContext &ctx = Module.getContext();
 
     if (!LinkerOptions) {
@@ -946,8 +948,9 @@ void IRGenModule::emitAutolinkInfo() {
       assert(FoundOldEntry && "Could not replace old linker options entry?");
     }
   } else {
-    assert(TargetInfo.OutputObjectFormat == llvm::Triple::ELF &&
-           "expected ELF output format");
+    assert((TargetInfo.OutputObjectFormat == llvm::Triple::ELF ||
+            Triple.isOSCygMing()) &&
+           "expected ELF output format or COFF format for Cygwin/MinGW");
 
     // Merge the entries into null-separated string.
     llvm::SmallString<64> EntriesString;
@@ -980,7 +983,7 @@ void IRGenModule::emitAutolinkInfo() {
                                  llvm::GlobalValue::CommonLinkage,
                                  llvm::Constant::getNullValue(Int1Ty),
                                  buf.str());
-    if (Triple.isOSBinFormatCOFF())
+    if (useDllStorage())
       symbol->setDLLStorageClass(llvm::GlobalValue::DLLExportStorageClass);
   }
 }
