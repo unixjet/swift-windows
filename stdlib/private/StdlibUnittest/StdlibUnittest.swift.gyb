@@ -20,7 +20,7 @@ import SwiftPrivateLibcExtras
 
 #if os(OSX) || os(iOS) || os(watchOS) || os(tvOS)
 import Darwin
-#elseif os(Linux) || os(FreeBSD) || os(PS4) || os(Android)
+#elseif os(Linux) || os(FreeBSD) || os(PS4) || os(Android) || CYGWIN
 import Glibc
 #endif
 
@@ -1412,6 +1412,7 @@ public enum OSVersion : CustomStringConvertible {
   case freeBSD
   case android
   case ps4
+  case windows
 
   public var description: String {
     switch self {
@@ -1437,6 +1438,8 @@ public enum OSVersion : CustomStringConvertible {
       return "PS4"
     case .android:
       return "Android"
+    case .windows:
+      return "Windows"
     }
   }
 }
@@ -1475,6 +1478,8 @@ func _getOSVersion() -> OSVersion {
   return .ps4
 #elseif os(Android)
   return .android
+#elseif os(Windows)
+  return .windows
 #else
   let productVersion = _stdlib_getSystemVersionPlistProperty("ProductVersion")!
   let (major, minor, bugFix) = _parseDottedVersionTriple(productVersion)

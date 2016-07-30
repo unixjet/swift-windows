@@ -13,7 +13,7 @@
 import SwiftPrivate
 #if os(OSX) || os(iOS) || os(watchOS) || os(tvOS)
 import Darwin
-#elseif os(Linux) || os(FreeBSD) || os(PS4) || os(Android)
+#elseif os(Linux) || os(FreeBSD) || os(PS4) || os(Android) || CYGWIN
 import Glibc
 #endif
 
@@ -97,12 +97,21 @@ public func _stdlib_select(
         let readAddr = readfds.baseAddress
         let writeAddr = writefds.baseAddress
         let errorAddr = errorfds.baseAddress
+#if CYGWIN
+        func asFdSetPtr(
+          _ p: UnsafeMutablePointer<UInt>?
+        ) -> UnsafeMutablePointer<_types_fd_set>? {
+          return UnsafeMutableRawPointer(p)?
+            .assumingMemoryBound(to: _types_fd_set.self)
+        }
+#else
         func asFdSetPtr(
           _ p: UnsafeMutablePointer<UInt>?
         ) -> UnsafeMutablePointer<fd_set>? {
           return UnsafeMutableRawPointer(p)?
             .assumingMemoryBound(to: fd_set.self)
         }
+#endif
         return select(
           _stdlib_FD_SETSIZE,
           asFdSetPtr(readAddr),
