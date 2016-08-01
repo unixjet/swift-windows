@@ -34,7 +34,8 @@ static Expr *skipImplicitConversions(Expr *expr) {
 }
 
 /// \brief Find the declaration directly referenced by this expression.
-static ValueDecl *findReferencedDecl(Expr *expr, DeclNameLoc &loc) {
+static std::pair<ValueDecl *, FunctionRefKind>
+findReferencedDecl(Expr *expr, DeclNameLoc &loc) {
   do {
     expr = expr->getSemanticsProvidingExpr();
 
@@ -45,10 +46,10 @@ static ValueDecl *findReferencedDecl(Expr *expr, DeclNameLoc &loc) {
 
     if (auto dre = dyn_cast<DeclRefExpr>(expr)) {
       loc = dre->getNameLoc();
-      return dre->getDecl();
+      return { dre->getDecl(), dre->getFunctionRefKind() };
     }
 
-    return nullptr;
+    return { nullptr, FunctionRefKind::Unapplied };
   } while (true);
 }
 
@@ -997,7 +998,8 @@ namespace {
 
     /// \brief Add constraints for a reference to a named member of the given
     /// base type, and return the type of such a reference.
-    Type addMemberRefConstraints(Expr *expr, Expr *base, DeclName name) {
+    Type addMemberRefConstraints(Expr *expr, Expr *base, DeclName name,
+                                 FunctionRefKind functionRefKind) {
       // The base must have a member of the given name, such that accessing
       // that member through the base returns a value convertible to the type
       // of this expression.
@@ -1005,14 +1007,15 @@ namespace {
       auto tv = CS.createTypeVariable(
                   CS.getConstraintLocator(expr, ConstraintLocator::Member),
                   TVO_CanBindToLValue);
-      CS.addValueMemberConstraint(baseTy, name, tv,
+      CS.addValueMemberConstraint(baseTy, name, tv, functionRefKind,
         CS.getConstraintLocator(expr, ConstraintLocator::Member));
       return tv;
     }
 
     /// \brief Add constraints for a reference to a specific member of the given
     /// base type, and return the type of such a reference.
-    Type addMemberRefConstraints(Expr *expr, Expr *base, ValueDecl *decl) {
+    Type addMemberRefConstraints(Expr *expr, Expr *base, ValueDecl *decl,
+                                 FunctionRefKind functionRefKind) {
       // If we're referring to an invalid declaration, fail.
       if (!decl)
         return nullptr;
@@ -1025,7 +1028,8 @@ namespace {
         CS.getConstraintLocator(expr, ConstraintLocator::Member);
       auto tv = CS.createTypeVariable(memberLocator, TVO_CanBindToLValue);
       
-      OverloadChoice choice(base->getType(), decl, /*isSpecialized=*/false, CS);
+      OverloadChoice choice(base->getType(), decl, /*isSpecialized=*/false,
+                           functionRefKind);
       auto locator = CS.getConstraintLocator(expr, ConstraintLocator::Member);
       CS.addBindOverloadConstraint(tv, choice, locator);
       return tv;
@@ -1115,11 +1119,12 @@ namespace {
       // UnresolvedSubscriptExpr from SubscriptExpr.
       if (decl) {
         OverloadChoice choice(base->getType(), decl, /*isSpecialized=*/false,
-                              CS);
+                              FunctionRefKind::DoubleApply);
         CS.addBindOverloadConstraint(fnTy, choice, subscriptMemberLocator);
       } else {
         CS.addValueMemberConstraint(baseTy, Context.Id_subscript,
-                                    fnTy, subscriptMemberLocator);
+                                    fnTy, FunctionRefKind::DoubleApply,
+                                    subscriptMemberLocator);
       }
 
       // Add the constraint that the index expression's type be convertible
@@ -1204,6 +1209,7 @@ namespace {
                                             segment->getType(),
                                             segmentTyV,
                                             Identifier(),
+                                            FunctionRefKind::Compound,
                                             locator));
 
         DeclName segmentName(C, C.Id_init, { C.Id_stringInterpolationSegment });
@@ -1211,6 +1217,7 @@ namespace {
                                             tvMeta,
                                             methodTy,
                                             segmentName,
+                                            FunctionRefKind::DoubleApply,
                                             locator));
 
       }
@@ -1227,7 +1234,7 @@ namespace {
         return visitLiteralExpr(expr);
 
       case MagicIdentifierLiteralExpr::DSOHandle: {
-        // #dsohandle has type UnsafeMutablePointer<Void>.
+        // #dsohandle has type UnsafeMutableRawPointer.
         auto &tc = CS.getTypeChecker();
         if (tc.requirePointerArgumentIntrinsics(expr->getLoc()))
           return nullptr;
@@ -1314,7 +1321,8 @@ namespace {
       auto tv = CS.createTypeVariable(locator, TVO_CanBindToLValue);
       CS.resolveOverload(locator, tv,
                          OverloadChoice(Type(), E->getDecl(),
-                                        E->isSpecialized(), CS));
+                                        E->isSpecialized(),
+                                        E->getFunctionRefKind()));
       
       if (E->getDecl()->getType() &&
           !E->getDecl()->getType()->getAs<TypeVariableType>()) {
@@ -1379,7 +1387,7 @@ namespace {
 
         choices.push_back(OverloadChoice(Type(), decls[i],
                                          expr->isSpecialized(),
-                                         CS));
+                                         expr->getFunctionRefKind()));
       }
 
       // If there are no valid overloads, give up.
@@ -1391,38 +1399,6 @@ namespace {
       return tv;
     }
 
-    Type visitOverloadedMemberRefExpr(OverloadedMemberRefExpr *expr) {
-      // For a reference to an overloaded declaration, we create a type variable
-      // that will be bound to different types depending on which overload
-      // is selected.
-      auto tv = CS.createTypeVariable(CS.getConstraintLocator(expr),
-                                      TVO_CanBindToLValue);
-      ArrayRef<ValueDecl*> decls = expr->getDecls();
-      SmallVector<OverloadChoice, 4> choices;
-      auto baseTy = expr->getBase()->getType();
-      for (unsigned i = 0, n = decls.size(); i != n; ++i) {
-        // If the result is invalid, skip it.
-        // FIXME: Note this as invalid, in case we don't find a solution,
-        // so we don't let errors cascade further.
-        CS.getTypeChecker().validateDecl(decls[i], true);
-        if (decls[i]->isInvalid())
-          continue;
-
-        choices.push_back(OverloadChoice(baseTy, decls[i],
-                                         /*isSpecialized=*/false,
-                                         CS));
-      }
-
-      // If there are no valid overloads, give up.
-      if (choices.empty())
-        return nullptr;
-
-      // Record this overload set.
-      auto locator = CS.getConstraintLocator(expr, ConstraintLocator::Member);
-      CS.addOverloadSet(tv, choices, locator);
-      return tv;
-    }
-    
     Type visitUnresolvedDeclRefExpr(UnresolvedDeclRefExpr *expr) {
       // This is an error case, where we're trying to use type inference
       // to help us determine which declaration the user meant to refer to.
@@ -1433,18 +1409,24 @@ namespace {
     
     Type visitMemberRefExpr(MemberRefExpr *expr) {
       return addMemberRefConstraints(expr, expr->getBase(),
-                                     expr->getMember().getDecl());
+                                     expr->getMember().getDecl(),
+                                     /*FIXME:*/FunctionRefKind::DoubleApply);
     }
     
     Type visitDynamicMemberRefExpr(DynamicMemberRefExpr *expr) {
       return addMemberRefConstraints(expr, expr->getBase(),
-                                     expr->getMember().getDecl());
+                                     expr->getMember().getDecl(),
+                                     /*FIXME:*/FunctionRefKind::DoubleApply);
     }
     
     virtual Type visitUnresolvedMemberExpr(UnresolvedMemberExpr *expr) {
       auto baseLocator = CS.getConstraintLocator(
                             expr,
                             ConstraintLocator::MemberRefBase);
+      FunctionRefKind functionRefKind =
+        expr->getArgument() ? FunctionRefKind::DoubleApply
+                            : FunctionRefKind::Compound;
+
       auto memberLocator
         = CS.getConstraintLocator(expr, ConstraintLocator::UnresolvedMember);
       auto baseTy = CS.createTypeVariable(baseLocator, /*options=*/0);
@@ -1459,7 +1441,8 @@ namespace {
       // member, i.e., an enum case or a static variable.
       auto baseMetaTy = MetatypeType::get(baseTy);
       CS.addUnresolvedValueMemberConstraint(baseMetaTy, expr->getName(),
-                                            memberTy, memberLocator);
+                                            memberTy, functionRefKind,
+                                            memberLocator);
 
       // If there is an argument, apply it.
       if (auto arg = expr->getArgument()) {
@@ -1519,7 +1502,7 @@ namespace {
                                               /*options=*/0);
         auto methodTy = FunctionType::get(argsTy, resultTy);
         CS.addValueMemberConstraint(baseTy, expr->getName(),
-          methodTy,
+          methodTy, expr->getFunctionRefKind(),
           CS.getConstraintLocator(expr, ConstraintLocator::ConstructorMember));
 
         // The result of the expression is the partial application of the
@@ -1527,7 +1510,8 @@ namespace {
         return methodTy;
       }
 
-      return addMemberRefConstraints(expr, expr->getBase(), expr->getName());
+      return addMemberRefConstraints(expr, expr->getBase(), expr->getName(),
+                                     expr->getFunctionRefKind());
     }
     
     Type visitUnresolvedSpecializeExpr(UnresolvedSpecializeExpr *expr) {
@@ -1874,7 +1858,8 @@ namespace {
       ASTContext &context = CS.getASTContext();
       Identifier name
         = context.getIdentifier(llvm::utostr(expr->getFieldNumber()));
-      return addMemberRefConstraints(expr, expr->getBase(), name);
+      return addMemberRefConstraints(expr, expr->getBase(), name,
+                                     FunctionRefKind::Unapplied);
     }
 
     /// Give each parameter in a ClosureExpr a fresh type variable if parameter
@@ -2518,7 +2503,9 @@ namespace {
       if (CS.shouldAttemptFixes()) {
         Constraint *coerceConstraint =
           Constraint::create(CS, ConstraintKind::ExplicitConversion,
-                             fromType, toType, DeclName(), locator);
+                             fromType, toType, DeclName(),
+                             FunctionRefKind::Compound,
+                             locator);
         Constraint *downcastConstraint =
           Constraint::createFixed(CS, ConstraintKind::CheckedCast,
                                   FixKind::CoerceToCheckedCast, fromType,
@@ -2753,13 +2740,15 @@ namespace {
         // type-checked down to a call; turn it back into an overloaded
         // member reference expression.
         DeclNameLoc memberLoc;
-        if (auto member = findReferencedDecl(dotCall->getFn(), memberLoc)) {
+        auto memberAndFunctionRef = findReferencedDecl(dotCall->getFn(),
+                                                       memberLoc);
+        if (memberAndFunctionRef.first) {
           auto base = skipImplicitConversions(dotCall->getArg());
-          auto members
-            = TC.Context.AllocateCopy(ArrayRef<ValueDecl *>(&member, 1));
-          return new (TC.Context) OverloadedMemberRefExpr(base,
-                                   dotCall->getDotLoc(), members, memberLoc,
-                                   expr->isImplicit());
+          return new (TC.Context) MemberRefExpr(base,
+                                    dotCall->getDotLoc(),
+                                    memberAndFunctionRef.first,
+                                    memberLoc,
+                                    expr->isImplicit());
         }
       }
 
@@ -2769,12 +2758,13 @@ namespace {
         // actually matter; turn it back into an overloaded member reference
         // expression.
         DeclNameLoc memberLoc;
-        if (auto member = findReferencedDecl(dotIgnored->getRHS(), memberLoc)) {
+        auto memberAndFunctionRef = findReferencedDecl(dotIgnored->getRHS(),
+                                                       memberLoc);
+        if (memberAndFunctionRef.first) {
           auto base = skipImplicitConversions(dotIgnored->getLHS());
-          auto members
-            = TC.Context.AllocateCopy(ArrayRef<ValueDecl *>(&member, 1));
-          return new (TC.Context) OverloadedMemberRefExpr(base,
-                                    dotIgnored->getDotLoc(), members,
+          return new (TC.Context) MemberRefExpr(base,
+                                    dotIgnored->getDotLoc(),
+                                    memberAndFunctionRef.first,
                                     memberLoc, expr->isImplicit());
         }
       }
@@ -2886,19 +2876,9 @@ namespace {
 
     using State = ConstraintSystem::ArgumentLabelState;
 
-    void associateArgumentLabels(Expr *arg, State labels,
+    void associateArgumentLabels(Expr *fn, State labels,
                                  bool labelsArePermanent) {
-      // Our parent must be a call.
-      auto call = dyn_cast_or_null<CallExpr>(ParentMap[arg]);
-      if (!call) 
-        return;
-
-      // We must have originated at the call argument.
-      if (arg != call->getArg())
-        return;
-
       // Dig out the function, looking through, parentheses, ?, and !.
-      auto fn = call->getFn();
       do {
         fn = fn->getSemanticsProvidingExpr();
 
@@ -2922,25 +2902,16 @@ namespace {
     }
 
     std::pair<bool, Expr *> walkToExprPre(Expr *expr) override {
-      if (auto tuple = dyn_cast<TupleExpr>(expr)) {
-        if (tuple->hasElementNames())
-          associateArgumentLabels(expr,
-                                  { tuple->getElementNames(),
-                                    tuple->hasTrailingClosure() },
-                                  /*labelsArePermanent*/ true);
-        else {
-          llvm::SmallVector<Identifier, 4> names(tuple->getNumElements(),
-                                                 Identifier()); 
-          associateArgumentLabels(expr, { names, tuple->hasTrailingClosure() },
-                                  /*labelsArePermanent*/ false);
-        }
-      } else if (auto paren = dyn_cast<ParenExpr>(expr)) {
-        associateArgumentLabels(paren,
-                                { { Identifier() },
-                                  paren->hasTrailingClosure() },
-                                /*labelsArePermanent*/ false);
+      if (auto call = dyn_cast<CallExpr>(expr)) {
+        associateArgumentLabels(call->getFn(),
+                                { call->getArgumentLabels(),
+                                  call->hasTrailingClosure() },
+                                /*labelsArePermanent=*/true);
+        return { true, expr };
       }
 
+      // FIXME: other expressions have argument labels, but this is an
+      // optimization, so stage it in later.
       return { true, expr };
     }
   };
@@ -3119,9 +3090,9 @@ Type swift::checkMemberType(DeclContext &DC, Type BaseTy,
                                     TypeVariableOptions::TVO_CanBindToLValue);
     CS.addConstraint(Constraint::createDisjunction(CS, {
       Constraint::create(CS, ConstraintKind::TypeMember, Ty,
-                         TV, DeclName(Id), Loc),
+                         TV, DeclName(Id), FunctionRefKind::Compound, Loc),
       Constraint::create(CS, ConstraintKind::ValueMember, Ty,
-                         TV, DeclName(Id), Loc)
+                         TV, DeclName(Id), FunctionRefKind::DoubleApply, Loc)
     }, Loc));
     Ty = TV;
   }
@@ -3218,7 +3189,8 @@ bool swift::isExtensionApplied(DeclContext &DC, Type BaseTy,
       return;
     }
     // Add constraints accordingly.
-    CS.addConstraint(Constraint::create(CS, Kind, First, Second, DeclName(), Loc));
+    CS.addConstraint(Constraint::create(CS, Kind, First, Second, DeclName(),
+                                        FunctionRefKind::Compound, Loc));
   };
 
   // For every requirement, add a constraint.
@@ -3267,6 +3239,7 @@ static bool canSatisfy(Type T1, Type T2, DeclContext &DC, ConstraintKind Kind,
     T2 = T2.transform(Trans);
   }
   CS.addConstraint(Constraint::create(CS, Kind, T1, T2, DeclName(),
+                                      FunctionRefKind::Compound,
                                       CS.getConstraintLocator(nullptr)));
   SmallVector<Solution, 4> Solutions;
   return AllowFreeVariables ?
@@ -3298,7 +3271,8 @@ swift::resolveValueMember(DeclContext &DC, Type BaseTy, DeclName Name) {
   }
   ConstraintSystem CS(*TC, &DC, None);
   MemberLookupResult LookupResult = CS.performMemberLookup(
-    ConstraintKind::ValueMember, Name, BaseTy, nullptr, false);
+    ConstraintKind::ValueMember, Name, BaseTy, FunctionRefKind::DoubleApply,
+    nullptr, false);
   if (LookupResult.ViableCandidates.empty())
     return Result;
   ConstraintLocator *Locator = CS.getConstraintLocator(nullptr);

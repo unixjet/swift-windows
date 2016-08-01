@@ -9,10 +9,10 @@
 // CHECK-LABEL: internal var AA_defaultGlobal
 var AA_defaultGlobal = 0
 
-// CHECK: private{{(\*/)?}} var AB_privateGlobal
-// CHECK: internal{{(\*/)?}} var AC_internalGlobal
-// CHECK: public{{(\*/)?}} var AD_publicGlobal
-// CHECK: {{^}}private{{(\*/)?}} var AE_fileprivateGlobal
+// CHECK: {{^}}private{{(\*/)?}} var AB_privateGlobal
+// CHECK: {{^}}internal{{(\*/)?}} var AC_internalGlobal
+// CHECK: {{^}}public{{(\*/)?}} var AD_publicGlobal
+// CHECK: {{^}}fileprivate{{(\*/)?}} var AE_fileprivateGlobal
 private var AB_privateGlobal = 0
 internal var AC_internalGlobal = 0
 public var AD_publicGlobal = 0
@@ -29,8 +29,8 @@ struct BA_DefaultStruct {
 private struct BB_PrivateStruct {
   // CHECK: internal var x
   var x = 0
-  // CHECK: private init(x: Int)
-  // CHECK: private init()
+  // CHECK: internal init(x: Int)
+  // CHECK: internal init()
 } // CHECK: {{^[}]}}
 
 // CHECK-LABEL: internal{{(\*/)?}} struct BC_InternalStruct {
@@ -56,12 +56,12 @@ public struct BE_PublicStructPrivateMembers {
   // CHECK: internal init()
 } // CHECK: {{^[}]}}
 
-// CHECK-LABEL: {{^}}private{{(\*/)?}} struct BF_FilePrivateStruct {
+// CHECK-LABEL: {{^}}fileprivate{{(\*/)?}} struct BF_FilePrivateStruct {
 fileprivate struct BF_FilePrivateStruct {
   // CHECK: {{^}} internal var x
   var x = 0
-  // CHECK: {{^}} private init(x: Int)
-  // CHECK: {{^}} private init()
+  // CHECK: {{^}} internal init(x: Int)
+  // CHECK: {{^}} internal init()
 } // CHECK: {{^[}]}}
 
 
@@ -69,7 +69,7 @@ fileprivate struct BF_FilePrivateStruct {
 private class CA_PrivateClass {
   // CHECK: {{^}} deinit
   deinit {}
-  // CHECK: private init()
+  // CHECK: internal init()
 } // CHECK: {{^[}]}}
 
 // CHECK-LABEL: internal{{(\*/)?}} class CB_InternalClass
@@ -94,7 +94,7 @@ private enum DA_PrivateEnum {
   case Foo, Bar
   // CHECK: internal init()
   init() { self = .Foo }
-  // CHECK: private var hashValue
+  // CHECK: internal var hashValue
 } // CHECK: {{^[}]}}
 
 // CHECK-LABEL: internal{{(\*/)?}} enum DB_InternalEnum {
@@ -122,9 +122,9 @@ public enum DC_PublicEnum {
 private protocol EA_PrivateProtocol {
   // CHECK: {{^}} associatedtype Foo
   associatedtype Foo
-  // CHECK: private var Bar
+  // CHECK: internal var Bar
   var Bar: Int { get }
-  // CHECK: private func baz()
+  // CHECK: internal func baz()
   func baz()
 } // CHECK: {{^[}]}}
 
@@ -325,19 +325,52 @@ extension HC_PrivateProtocol where Assoc == HC_PrivateStruct {
   func constrained() {}
 } // CHECK: {{^[}]}}
 
+public protocol IA_PublicAssocTypeProto {
+  associatedtype PublicValue
+  var publicValue: PublicValue { get }
+}
+fileprivate protocol IB_FilePrivateAssocTypeProto {
+  associatedtype FilePrivateValue
+  var filePrivateValue: FilePrivateValue { get }
+}
+// CHECK-LABEL: public{{(\*/)?}} class IC_PublicAssocTypeImpl : IA_PublicAssocTypeProto, IB_FilePrivateAssocTypeProto {
+public class IC_PublicAssocTypeImpl: IA_PublicAssocTypeProto, IB_FilePrivateAssocTypeProto {
+  public var publicValue: Int = 0
+  public var filePrivateValue: Int = 0
+  // CHECK-DAG: {{^}} public typealias PublicValue
+  // CHECK-DAG: {{^}} public typealias FilePrivateValue
+} // CHECK: {{^[}]}}
+
+// CHECK-LABEL: private{{(\*/)?}} class ID_PrivateAssocTypeImpl : IA_PublicAssocTypeProto, IB_FilePrivateAssocTypeProto {
+private class ID_PrivateAssocTypeImpl: IA_PublicAssocTypeProto, IB_FilePrivateAssocTypeProto {
+  public var publicValue: Int = 0
+  public var filePrivateValue: Int = 0
+  // CHECK-DAG: {{^}} internal typealias PublicValue
+  // CHECK-DAG: {{^}} internal typealias FilePrivateValue
+} // CHECK: {{^[}]}}
+
 // CHECK-LABEL: class MultipleAttributes {
 class MultipleAttributes {
   // CHECK: {{^}} final {{(/\*)?private(\*/)?}} func foo()
   final private func foo() {}
-}
+} // CHECK: {{^[}]}}
 
 // CHECK-LABEL: public{{(\*/)?}} class PublicInitBase {
 public class PublicInitBase {
   // CHECK: {{^}} {{(/\*)?public(\*/)?}} init()
   public init() {}
-}
+  // CHECK: {{^}} {{(/\*)?fileprivate(\*/)?}} init(other: PublicInitBase)
+  fileprivate init(other: PublicInitBase) {}
+} // CHECK: {{^[}]}}
 
 // CHECK-LABEL: public{{(\*/)?}} class PublicInitInheritor : PublicInitBase {
 public class PublicInitInheritor : PublicInitBase {
   // CHECK: {{^}} public init()
-}
+  // CHECK: {{^}} fileprivate init(other: PublicInitBase)
+} // CHECK: {{^[}]}}
+
+// CHECK-LABEL: {{(/\*)?private(\*/)?}} class PublicInitPrivateInheritor : PublicInitBase {
+private class PublicInitPrivateInheritor : PublicInitBase {
+  // CHECK: {{^}} internal init()
+  // CHECK: {{^}} fileprivate init(other: PublicInitBase)
+} // CHECK: {{^[}]}}

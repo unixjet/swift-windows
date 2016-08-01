@@ -691,8 +691,6 @@ class infer_instanceFunc1 {
   // expected-note@-2 {{Swift structs cannot be represented in Objective-C}}
   // expected-error@-3 {{method cannot be marked @objc because the type of the parameter 2 cannot be represented in Objective-C}}
   // expected-note@-4 {{non-'@objc' enums cannot be represented in Objective-C}}
-  // expected-error@-5 {{method cannot be marked @objc because its result type cannot be represented in Objective-C}}
-  // expected-note@-6 {{'Any' is not considered '@objc'; use 'AnyObject' instead}}
 
   @objc func func_UnnamedParam1(_: Int) {} // no-error
 
@@ -971,11 +969,9 @@ class infer_instanceVar1 {
 // CHECK-LABEL: @objc var var_AnyObject2: AnyObject.Type
 
   var var_Existential0: Any
-// CHECK-LABEL: {{^}}  var var_Existential0: Any
+// CHECK-LABEL: @objc var var_Existential0: Any
 
   @objc var var_Existential0_: Any
-  // expected-error@-1 {{property cannot be marked @objc because its type cannot be represented in Objective-C}}
-  // expected-note@-2 {{'Any' is not considered '@objc'; use 'AnyObject' instead}}
 
   var var_Existential1: PlainProtocol
   // CHECK-LABEL: {{^}}  var var_Existential1: PlainProtocol
@@ -1072,8 +1068,8 @@ class infer_instanceVar1 {
   var var_UnsafeMutablePointer11: UnsafeMutablePointer<PlainProtocol>
   var var_UnsafeMutablePointer12: UnsafeMutablePointer<AnyObject>
   var var_UnsafeMutablePointer13: UnsafeMutablePointer<AnyObject.Type>
-  var var_UnsafeMutablePointer100: UnsafeMutablePointer<()>
-  var var_UnsafeMutablePointer101: UnsafeMutablePointer<Void>
+  var var_UnsafeMutablePointer100: UnsafeMutableRawPointer
+  var var_UnsafeMutablePointer101: UnsafeMutableRawPointer
   var var_UnsafeMutablePointer102: UnsafeMutablePointer<(Int, Int)>
 // CHECK-LABEL: @objc var var_UnsafeMutablePointer1: UnsafeMutablePointer<Int>
 // CHECK-LABEL: @objc var var_UnsafeMutablePointer2: UnsafeMutablePointer<Bool>
@@ -1088,8 +1084,8 @@ class infer_instanceVar1 {
 // CHECK-LABEL: {{^}}  var var_UnsafeMutablePointer11: UnsafeMutablePointer<PlainProtocol>
 // CHECK-LABEL: @objc var var_UnsafeMutablePointer12: UnsafeMutablePointer<AnyObject>
 // CHECK-LABEL: var var_UnsafeMutablePointer13: UnsafeMutablePointer<AnyObject.Type>
-// CHECK-LABEL: {{^}} @objc var var_UnsafeMutablePointer100: UnsafeMutablePointer<()>
-// CHECK-LABEL: {{^}} @objc var var_UnsafeMutablePointer101: UnsafeMutablePointer<Void>
+// CHECK-LABEL: {{^}} @objc var var_UnsafeMutablePointer100: UnsafeMutableRawPointer
+// CHECK-LABEL: {{^}} @objc var var_UnsafeMutablePointer101: UnsafeMutableRawPointer
 // CHECK-LABEL: {{^}}  var var_UnsafeMutablePointer102: UnsafeMutablePointer<(Int, Int)>
 
   var var_Optional1: Class_ObjC1?
@@ -1151,7 +1147,6 @@ class infer_instanceVar1 {
   var var_Optional_fail6: PlainEnum?
   var var_Optional_fail7: PlainEnum.Type?
   var var_Optional_fail8: PlainProtocol?
-  var var_Optional_fail9: Any?
   var var_Optional_fail10: PlainProtocol?
   var var_Optional_fail11: (PlainProtocol & Protocol_ObjC1)?
   var var_Optional_fail12: Int?
@@ -1373,10 +1368,9 @@ class infer_instanceVar1 {
   // no-error
 
   var var_ArrayType11: [Any]
-  // CHECK-LABEL: {{^}}  var var_ArrayType11: [Any]
+  // CHECK-LABEL: @objc var var_ArrayType11: [Any]
 
   @objc var var_ArrayType11_: [Any]
-  // expected-error @-1{{property cannot be marked @objc because its type cannot be represented in Objective-C}}
 
   var var_ArrayType13: [Any?]
   // CHECK-LABEL: {{^}}  var var_ArrayType13: [Any?]

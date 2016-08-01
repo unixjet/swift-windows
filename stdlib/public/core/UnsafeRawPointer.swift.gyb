@@ -27,6 +27,21 @@ public struct Unsafe${Mutable}RawPointer : Strideable, Hashable, _Pointer {
   /// Implements conformance to the public protocol `_Pointer`.
   public let _rawValue: Builtin.RawPointer
 
+  /// Construct ${a_Self} from another ${a_Self}.
+  @_transparent
+  public init(_ other: Unsafe${Mutable}RawPointer) {
+    self = other
+  }
+
+  /// Construct ${a_Self} from another ${a_Self}.
+  ///
+  /// Returns nil if `other` is nil.
+  @_transparent
+  public init?(_ other: Unsafe${Mutable}RawPointer?) {
+    guard let unwrapped = other else { return nil }
+    self = unwrapped
+  }
+
   /// Convert a builtin raw pointer to ${a_Self}.
   @_transparent
   public init(_ _rawValue: Builtin.RawPointer) {
@@ -158,6 +173,7 @@ public struct Unsafe${Mutable}RawPointer : Strideable, Hashable, _Pointer {
   /// - Warning: Binding memory to a type is potentially undefined if the
   ///   memory is ever accessed as an unrelated type.
   @_transparent
+  @discardableResult
   public func bindMemory<T>(to type: T.Type, capacity count: Int)
   -> Unsafe${Mutable}Pointer<T> {
     Builtin.bindMemory(_rawValue, count._builtinWordValue, type)
@@ -397,7 +413,7 @@ public struct Unsafe${Mutable}RawPointer : Strideable, Hashable, _Pointer {
       "storeBytes to misaligned raw pointer")
 
     var temp = value
-    withUnsafeMutablePointer(&temp) { source in
+    withUnsafeMutablePointer(to: &temp) { source in
       let rawSrc = UnsafeMutableRawPointer(source)._rawValue
       // FIXME: to be replaced by _memcpy when conversions are implemented.
       Builtin.int_memcpy_RawPointer_RawPointer_Int64(

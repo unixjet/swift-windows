@@ -49,6 +49,7 @@ namespace clang {
 
 namespace swift {
   class ASTContext;
+  enum class Associativity : unsigned char;
   class BoundGenericType;
   class ClangNode;
   class Decl;
@@ -72,6 +73,7 @@ namespace swift {
   class ModuleDecl;
   class ModuleLoader;
   class NominalTypeDecl;
+  class PrecedenceGroupDecl;
   class TupleTypeElt;
   class EnumElementDecl;
   enum OptionalTypeKind : unsigned;
@@ -361,6 +363,10 @@ public:
   /// specified string.
   Identifier getIdentifier(StringRef Str) const;
 
+  /// Decide how to interpret two precedence groups.
+  Associativity associateInfixOperators(PrecedenceGroupDecl *left,
+                                        PrecedenceGroupDecl *right) const;
+
   /// Retrieve the declaration of Swift.Error.
   NominalTypeDecl *getErrorDecl() const;
   CanType getExceptionType() const;
@@ -394,6 +400,9 @@ public:
 
   /// Retrieve the declaration of Swift.Dictionary<K, V>.
   NominalTypeDecl *getDictionaryDecl() const;
+
+  /// Retrieve the declaration of Swift.AnyHashable.
+  NominalTypeDecl *getAnyHashableDecl() const;
 
   /// Retrieve the declaration of Swift.Optional or ImplicitlyUnwrappedOptional.
   EnumDecl *getOptionalDecl(OptionalTypeKind kind) const;

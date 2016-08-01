@@ -29,7 +29,7 @@ func f4(_ x: Int) -> Int { }
 
 func f5<T : P2>(_ : T) { }
 
-func f6<T : P, U : P where T.SomeType == U.SomeType>(_ t: T, _ u: U) {}
+func f6<T : P, U : P>(_ t: T, _ u: U) where T.SomeType == U.SomeType {}
 
 var i : Int
 var d : Double
@@ -123,18 +123,17 @@ func f(_ x: Shoes, asType t: Shoes.Type) {
   return t.select(x) // expected-error{{unexpected non-void return value in void function}}
 }
 
-infix operator **** {
-  associativity left
-  precedence 200
+precedencegroup Starry {
+  associativity: left
+  higherThan: MultiplicationPrecedence
 }
+
+infix operator **** : Starry
 
 func ****(_: Int, _: String) { }
 i **** i // expected-error{{cannot convert value of type 'Int' to expected argument type 'String'}}
 
-infix operator ***~ {
-  associativity left
-  precedence 200
-}
+infix operator ***~ : Starry
 
 func ***~(_: Int, _: String) { }
 i ***~ i // expected-error{{cannot convert value of type 'Int' to expected argument type 'String'}}
@@ -319,9 +318,11 @@ func rdar19804707() {
 
   knownOps = .BinaryOperator({$1 - $0})
 
-  // FIXME: rdar://19804707 - These two statements should be accepted by the type checker.
-  knownOps = .BinaryOperator(){$1 - $0} // expected-error {{reference to member 'BinaryOperator' cannot be resolved without a contextual type}}
-  knownOps = .BinaryOperator{$1 - $0}   // expected-error {{reference to member 'BinaryOperator' cannot be resolved without a contextual type}}
+  // rdar://19804707 - trailing closures for contextual member references.
+  knownOps = .BinaryOperator(){$1 - $0}
+  knownOps = .BinaryOperator{$1 - $0}
+
+  _ = knownOps
 }
 
 
@@ -643,8 +644,8 @@ func r22470302(_ c: r22470302Class) {
 // <rdar://problem/21928143> QoI: Pointfree reference to generic initializer in generic context does not compile
 extension String {
   @available(*, unavailable, message: "calling this is unwise")
-  func unavail<T : Sequence where T.Iterator.Element == String> // expected-note 2 {{'unavail' has been explicitly marked unavailable here}}
-    (_ a : T) -> String {}
+  func unavail<T : Sequence> // expected-note 2 {{'unavail' has been explicitly marked unavailable here}}
+    (_ a : T) -> String where T.Iterator.Element == String {}
 }
 extension Array {
   func g() -> String {
@@ -701,8 +702,8 @@ _ = -UnaryOp() // expected-error {{unary operator '-' cannot be applied to an op
 
 // <rdar://problem/23433271> Swift compiler segfault in failure diagnosis
 func f23433271(_ x : UnsafePointer<Int>) {}
-func segfault23433271(_ a : UnsafeMutablePointer<Void>) {
-  f23433271(a[0])  // expected-error {{cannot convert value of type 'Void' (aka '()') to expected argument type 'UnsafePointer<Int>'}}
+func segfault23433271(_ a : UnsafeMutableRawPointer) {
+  f23433271(a[0])  // expected-error {{type 'UnsafeMutableRawPointer' has no subscript members}}
 }
 
 // <rdar://problem/22058555> crash in cs diags in withCString
@@ -803,7 +804,7 @@ func nilComparison(i: Int, o: AnyObject) {
 // FIXME: Bad diagnostic
 func secondArgumentNotLabeled(a:Int, _ b: Int) { }
 secondArgumentNotLabeled(10, 20)
-// expected-error@-1 {{unnamed parameter #1 must precede unnamed parameter #0}}
+// expected-error@-1 {{unnamed argument #2 must precede unnamed argument #1}}
 
 // <rdar://problem/23709100> QoI: incorrect ambiguity error due to implicit conversion
 func testImplConversion(a : Float?) -> Bool {}
@@ -829,11 +830,11 @@ extension Foo23752537 {
 
 
 // <rdar://problem/22276040> QoI: not great error message with "withUnsafePointer" sametype constraints
-func read2(_ p: UnsafeMutablePointer<Void>, maxLength: Int) {}
+func read2(_ p: UnsafeMutableRawPointer, maxLength: Int) {}
 func read<T : Integer>() -> T? {
   var buffer : T 
-  let n = withUnsafePointer(&buffer) { (p) in
-    read2(UnsafePointer(p), maxLength: sizeof(T)) // expected-error {{cannot convert value of type 'UnsafePointer<_>' to expected argument type 'UnsafeMutablePointer<Void>' (aka 'UnsafeMutablePointer<()>')}}
+  let n = withUnsafePointer(to: &buffer) { (p) in
+    read2(UnsafePointer(p), maxLength: sizeof(T)) // expected-error {{cannot convert value of type 'UnsafePointer<_>' to expected argument type 'UnsafeMutableRawPointer'}}
   }
 }
 

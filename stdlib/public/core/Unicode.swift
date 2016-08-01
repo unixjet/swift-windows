@@ -427,7 +427,9 @@ public struct UTF8 : UnicodeCodec {
   }
 
   public static func _nullCodeUnitOffset(in input: UnsafePointer<CodeUnit>) -> Int {
-    return Int(_swift_stdlib_strlen(UnsafePointer(input)))
+    // Relying on a permissive memory model in C.
+    let cstr = unsafeBitCast(input, to: UnsafePointer<CChar>.self)
+    return Int(_swift_stdlib_strlen(cstr))
   }
   // Support parsing C strings as-if they are UTF8 strings.
   public static func _nullCodeUnitOffset(in input: UnsafePointer<CChar>) -> Int {
@@ -1097,7 +1099,7 @@ extension UTF16 {
           return nil
         }
         isAscii = false
-        count += width(UnicodeScalar(0xfffd))
+        count += width(UnicodeScalar(0xfffd)!)
       }
     }
     return (count, isAscii)

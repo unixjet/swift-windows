@@ -16,7 +16,7 @@
 ///
 /// Measurements support a large set of operators, including `+`, `-`, `*`, `/`, and a full set of comparison operators.
 @available(OSX 10.12, iOS 10.0, watchOS 3.0, tvOS 10.0, *)
-public struct Measurement<UnitType : Unit> : ReferenceConvertible, Comparable, Equatable, CustomStringConvertible {
+public struct Measurement<UnitType : Unit> : ReferenceConvertible, Comparable, Equatable {
     public typealias ReferenceType = NSMeasurement
 
     /// The unit component of the `Measurement`.
@@ -34,7 +34,10 @@ public struct Measurement<UnitType : Unit> : ReferenceConvertible, Comparable, E
     public var hashValue: Int {
         return Int(bitPattern: __CFHashDouble(value))
     }
+}
 
+@available(OSX 10.12, iOS 10.0, watchOS 3.0, tvOS 10.0, *)
+extension Measurement : CustomStringConvertible, CustomDebugStringConvertible, CustomReflectable {
     public var description: String {
         return "\(value) \(unit.symbol)"
     }
@@ -42,7 +45,15 @@ public struct Measurement<UnitType : Unit> : ReferenceConvertible, Comparable, E
     public var debugDescription: String {
         return "\(value) \(unit.symbol)"
     }
+    
+    public var customMirror: Mirror {
+        var c: [(label: String?, value: Any)] = []
+        c.append((label: "value", value: value))
+        c.append((label: "unit", value: unit.symbol))
+        return Mirror(self, children: c, displayStyle: Mirror.DisplayStyle.struct)
+    }
 }
+
 
 /// When a `Measurement` contains a `Dimension` unit, it gains the ability to convert between the kinds of units in that dimension.
 @available(OSX 10.12, iOS 10.0, watchOS 3.0, tvOS 10.0, *)
@@ -253,10 +264,6 @@ extension Measurement {
 
 @available(OSX 10.12, iOS 10.0, watchOS 3.0, tvOS 10.0, *)
 extension Measurement : _ObjectiveCBridgeable {
-    public static func _isBridgedToObjectiveC() -> Bool {
-        return true
-    }
-    
     @_semantics("convertToObjectiveC")
     public func _bridgeToObjectiveC() -> NSMeasurement {
         return NSMeasurement(doubleValue: value, unit: unit)
@@ -280,6 +287,20 @@ extension Measurement : _ObjectiveCBridgeable {
         return Measurement(value: source!.doubleValue, unit: u)
     }
 }
+
+/*
+FIXME(id-as-any): can't write this code because of:
+<rdar://problem/27539951> "unhandled generic bridged type" when bridging NSMeasurement
+
+@available(OSX 10.12, iOS 10.0, watchOS 3.0, tvOS 10.0, *)
+extension NSMeasurement : _HasCustomAnyHashableRepresentation {
+    // Must be @nonobjc to avoid infinite recursion during bridging.
+    @nonobjc
+    public func _toCustomAnyHashable() -> AnyHashable? {
+        return AnyHashable(self as Measurement)
+    }
+}
+*/
 
 // This workaround is required for the time being, because Swift doesn't support covariance for Measurement (26607639)
 @available(OSX 10.12, iOS 10.0, watchOS 3.0, tvOS 10.0, *)

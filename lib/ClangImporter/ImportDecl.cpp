@@ -387,8 +387,8 @@ makeEnumRawValueConstructor(ClangImporter::Implementation &Impl,
     = cast<FuncDecl>(getBuiltinValueDecl(C,C.getIdentifier("reinterpretCast")));
   auto reinterpretCastRef
     = new (C) DeclRefExpr(reinterpretCast, DeclNameLoc(), /*implicit*/ true);
-  auto reinterpreted = new (C) CallExpr(reinterpretCastRef, paramRef,
-                                        /*implicit*/ true);
+  auto reinterpreted = CallExpr::createImplicit(C, reinterpretCastRef,
+                                                { paramRef }, { Identifier() });
   auto assign = new (C) AssignExpr(selfRef, SourceLoc(), reinterpreted,
                                    /*implicit*/ true);
   auto body = BraceStmt::create(C, SourceLoc(), ASTNode(assign), SourceLoc(),
@@ -451,8 +451,8 @@ static FuncDecl *makeEnumRawValueGetter(ClangImporter::Implementation &Impl,
     = cast<FuncDecl>(getBuiltinValueDecl(C, C.getIdentifier("reinterpretCast")));
   auto reinterpretCastRef
     = new (C) DeclRefExpr(reinterpretCast, DeclNameLoc(), /*implicit*/ true);
-  auto reinterpreted = new (C) CallExpr(reinterpretCastRef, selfRef,
-                                        /*implicit*/ true);
+  auto reinterpreted = CallExpr::createImplicit(C, reinterpretCastRef,
+                                                { selfRef }, { Identifier() });
   auto ret = new (C) ReturnStmt(SourceLoc(), reinterpreted);
   auto body = BraceStmt::create(C, SourceLoc(), ASTNode(ret), SourceLoc(),
                                 /*implicit*/ true);
@@ -643,8 +643,9 @@ makeUnionFieldAccessors(ClangImporter::Implementation &Impl,
         C, C.getIdentifier("reinterpretCast")));
     auto reinterpretCastRef
       = new (C) DeclRefExpr(reinterpretCast, DeclNameLoc(), /*implicit*/ true);
-    auto reinterpreted = new (C) CallExpr(reinterpretCastRef, selfRef,
-                                          /*implicit*/ true);
+    auto reinterpreted = CallExpr::createImplicit(C, reinterpretCastRef,
+                                                  { selfRef },
+                                                  { Identifier() });
     auto ret = new (C) ReturnStmt(SourceLoc(), reinterpreted);
     auto body = BraceStmt::create(C, SourceLoc(), ASTNode(ret), SourceLoc(),
                                   /*implicit*/ true);
@@ -670,17 +671,16 @@ makeUnionFieldAccessors(ClangImporter::Implementation &Impl,
       C, C.getIdentifier("addressof")));
     auto addressofFnRef
       = new (C) DeclRefExpr(addressofFn, DeclNameLoc(), /*implicit*/ true);
-    auto selfPointer = new (C) CallExpr(addressofFnRef, inoutSelf,
-                                          /*implicit*/ true);
+    auto selfPointer = CallExpr::createImplicit(C, addressofFnRef,
+                                                { inoutSelf },
+                                                { Identifier() });
     auto initializeFn = cast<FuncDecl>(getBuiltinValueDecl(
       C, C.getIdentifier("initialize")));
     auto initializeFnRef
       = new (C) DeclRefExpr(initializeFn, DeclNameLoc(), /*implicit*/ true);
-    auto initializeArgs = TupleExpr::createImplicit(C,
-                                                   { newValueRef, selfPointer },
-                                                   {});
-    auto initialize = new (C) CallExpr(initializeFnRef, initializeArgs,
-                                       /*implicit*/ true);
+    auto initialize = CallExpr::createImplicit(C, initializeFnRef,
+                                               { newValueRef, selfPointer },
+                                               { Identifier(), Identifier() });
     auto body = BraceStmt::create(C, SourceLoc(), { initialize }, SourceLoc(),
                                   /*implicit*/ true);
     setterDecl->setBody(body);
@@ -1540,7 +1540,10 @@ namespace {
           if (!DC) return nullptr;
 
           auto loc = Impl.importSourceLoc(Decl->getLocStart());
-          auto Result = Impl.createDeclWithClangNode<TypeAliasDecl>(
+          
+          // Leave behind a typealias for 'id' marked unavailable, to instruct
+          // people to use Any instead.
+          auto unavailableAlias = Impl.createDeclWithClangNode<TypeAliasDecl>(
                           Decl, loc, Name, loc,
                           TypeLoc::withoutLoc(Impl.SwiftContext.TheAnyType),
                           /*genericparams*/nullptr, DC);
@@ -1549,8 +1552,8 @@ namespace {
                         Impl.SwiftContext, "'id' is not available in Swift; use 'Any'",
                         "", UnconditionalAvailabilityKind::UnavailableInSwift);
 
-          Result->getAttrs().add(attr);
-          return Result;
+          unavailableAlias->getAttrs().add(attr);
+          return nullptr;
         }
       
         bool IsError;
@@ -1767,11 +1770,8 @@ namespace {
         auto zeroInitializerRef = new (context) DeclRefExpr(zeroInitializerFunc,
                                                             DeclNameLoc(),
                                                             /*implicit*/ true);
-        auto emptyTuple = TupleExpr::createEmpty(context, SourceLoc(),
-                                                 SourceLoc(),
-                                                 /*implicit*/ true);
-        auto call = new (context) CallExpr(zeroInitializerRef, emptyTuple,
-                                           /*implicit*/ true);
+        auto call = CallExpr::createImplicit(context, zeroInitializerRef,
+                                             { }, { });
 
         auto assign = new (context) AssignExpr(lhs, SourceLoc(), call,
                                                /*implicit*/ true);
@@ -6064,9 +6064,35 @@ namespace {
 
     Decl *
     VisitObjCCompatibleAliasDecl(const clang::ObjCCompatibleAliasDecl *decl) {
-      // Like C++ using declarations, name lookup simply looks through
-      // Objective-C compatibility aliases. They are not imported directly.
-      return nullptr;
+      // Import Objective-C’s @compatibility_alias as typealias.
+      EffectiveClangContext effectiveContext(decl->getDeclContext()->getRedeclContext());
+      auto dc = Impl.importDeclContextOf(decl, effectiveContext);
+      if (!dc) return nullptr;
+
+      Optional<ImportedName> swift3Name;
+      auto importedName = importFullName(decl, swift3Name);
+      auto name = importedName.Imported.getBaseName();
+
+      if (name.empty()) return nullptr;
+
+      auto importedDecl = Impl.importDecl(decl->getClassInterface(),
+                                          /*useSwift2Name=*/false);
+      auto typeDecl = dyn_cast_or_null<TypeDecl>(importedDecl);
+      if (!typeDecl) return nullptr;
+
+      // Create typealias.
+      TypeAliasDecl *typealias = nullptr;
+      typealias = Impl.createDeclWithClangNode<TypeAliasDecl>(
+                    decl,
+                    Impl.importSourceLoc(decl->getLocStart()),
+                    name,
+                    Impl.importSourceLoc(decl->getLocation()),
+                    TypeLoc::withoutLoc(typeDecl->getDeclaredType()),
+                    /*genericparams=*/nullptr, dc);
+
+      typealias->computeType();
+
+      return typealias;
     }
 
     Decl *VisitLinkageSpecDecl(const clang::LinkageSpecDecl *decl) {
@@ -7075,12 +7101,7 @@ ClangImporter::Implementation::createConstant(Identifier name, DeclContext *dc,
     case ConstantConvertKind::ConstructionWithUnwrap: {
       auto typeRef = TypeExpr::createImplicit(type, C);
       
-      // make a "(rawValue: <subexpr>)" tuple.
-      expr = TupleExpr::create(C, SourceLoc(), expr,
-                               C.Id_rawValue, SourceLoc(),
-                               SourceLoc(), /*trailingClosure*/false,
-                               /*implicit*/true);
-      expr = new (C) CallExpr(typeRef, expr, /*Implicit=*/true);
+      expr = CallExpr::createImplicit(C, typeRef, { expr }, { C.Id_rawValue });
       if (convertKind == ConstantConvertKind::ConstructionWithUnwrap)
         expr = new (C) ForceValueExpr(expr, SourceLoc());
       break;

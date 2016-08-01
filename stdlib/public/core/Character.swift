@@ -183,7 +183,7 @@ public struct Character :
     }
     else {
       if let native = s._core.nativeBuffer,
-         native.start == UnsafeMutablePointer(s._core._baseAddress!) {
+         native.start == s._core._baseAddress! {
         _representation = .large(native._storage)
         return
       }
@@ -352,6 +352,14 @@ public struct Character :
   @_versioned
   internal var _representation: Representation
 }
+
+extension Character : CustomStringConvertible {
+  public var description: String {
+    return String(describing: self)
+  }
+}
+
+extension Character : LosslessStringConvertible {}
 
 extension Character : CustomDebugStringConvertible {
   /// A textual representation of the character, suitable for debugging.

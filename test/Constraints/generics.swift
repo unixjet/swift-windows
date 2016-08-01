@@ -1,6 +1,6 @@
 // RUN: %target-parse-verify-swift
 
-infix operator +++ {}
+infix operator +++
 
 protocol ConcatToAnything {
   static func +++ <T>(lhs: Self, other: T)
@@ -106,9 +106,9 @@ protocol BinaryMethodWorkaround {
 protocol Squigglable : BinaryMethodWorkaround {
 }
 
-infix operator ~~~ { }
+infix operator ~~~
 
-func ~~~ <T : Squigglable where T.MySelf == T>(lhs: T, rhs: T) -> Bool {
+func ~~~ <T : Squigglable>(lhs: T, rhs: T) -> Bool where T.MySelf == T {
   return true
 }
 
@@ -120,11 +120,9 @@ var rdar14005696 : UInt8
 _ = rdar14005696 ~~~ 5
 
 // <rdar://problem/15168483>
-public struct SomeIterator<
-  C: Collection, Indices: Sequence
-  where
-  C.Index == Indices.Iterator.Element
-> : IteratorProtocol, Sequence {
+public struct SomeIterator<C: Collection, Indices: Sequence>
+  : IteratorProtocol, Sequence
+  where C.Index == Indices.Iterator.Element {
   var seq : C
   var indices : Indices.Iterator
 
@@ -170,8 +168,8 @@ class MyArrayBuffer<Element>: r22409190ManagedBuffer<UInt, Element> {
 
 // <rdar://problem/22459135> error: 'print' is unavailable: Please wrap your tuple argument in parentheses: 'print((...))'
 func r22459135() {
-  func h<S : Sequence where S.Iterator.Element : Integer>
-    (_ sequence: S) -> S.Iterator.Element {
+  func h<S : Sequence>(_ sequence: S) -> S.Iterator.Element
+    where S.Iterator.Element : Integer {
     return 0
   }
 

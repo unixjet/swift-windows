@@ -606,8 +606,8 @@ struct d0200_EscapedIdentifiers {
 // PASS_COMMON-NEXT: {{^}}    {{(override )?}}init(){{$}}
 // PASS_COMMON-NEXT: {{^}}  }{{$}}
 
-  func `func`<`let`: `protocol`, `where` where `where` : `protocol`>(
-      class: Int, struct: `protocol`, foo: `let`, bar: `where`) {}
+  func `func`<`let`: `protocol`, `where`>(
+      class: Int, struct: `protocol`, foo: `let`, bar: `where`) where `where` : `protocol` {}
 // PASS_COMMON-NEXT: {{^}}  func `func`<`let` : `protocol`, `where` where `where` : `protocol`>(class: Int, struct: `protocol`, foo: `let`, bar: `where`){{$}}
 
   var `var`: `struct` = `struct`()
@@ -1087,10 +1087,9 @@ enum d2400_EnumDeclWithValues2 : Double {
 //===--- Custom operator printing.
 //===---
 
-postfix operator <*> {}
+postfix operator <*>
 
-// PASS_2500-LABEL: {{^}}postfix operator <*> {{{$}}
-// PASS_2500-NEXT: {{^}}}{{$}}
+// PASS_2500-LABEL: {{^}}postfix operator <*>{{$}}
 
 protocol d2600_ProtocolWithOperator1 {
   static postfix func <*>(_: Int)
@@ -1100,40 +1099,40 @@ protocol d2600_ProtocolWithOperator1 {
 // PASS_2500-NEXT: {{^}}}{{$}}
 
 struct d2601_TestAssignment {}
-infix operator %%% { }
+infix operator %%%
 func %%%(lhs: inout d2601_TestAssignment, rhs: d2601_TestAssignment) -> Int {
   return 0
 }
-// PASS_2500-LABEL: {{^}}infix operator %%% {
-// PASS_2500-NOT: associativity
-// PASS_2500-NOT: precedence
-// PASS_2500-NOT: assignment
+// PASS_2500-LABEL: {{^}}infix operator %%%{{$}}
 // PASS_2500: {{^}}func %%%(lhs: inout d2601_TestAssignment, rhs: d2601_TestAssignment) -> Int{{$}}
 
-infix operator %%< {
-// PASS_2500-LABEL: {{^}}infix operator %%< {{{$}}
-  associativity left
-// PASS_2500-NEXT: {{^}}  associativity left{{$}}
-  precedence 47
-// PASS_2500-NEXT: {{^}}  precedence 47{{$}}
+precedencegroup BoringPrecedence {
+// PASS_2500-LABEL: {{^}}precedencegroup BoringPrecedence {{{$}}
+  associativity: left
+// PASS_2500-NEXT: {{^}}  associativity: left{{$}}
+  higherThan: AssignmentPrecedence
+// PASS_2500-NEXT: {{^}}  higherThan: AssignmentPrecedence{{$}}
 // PASS_2500-NOT:         assignment
+// PASS_2500-NOT:         lowerThan
 }
 
-infix operator %%> {
-// PASS_2500-LABEL: {{^}}infix operator %%> {{{$}}
-  associativity right
-// PASS_2500-NEXT: {{^}}  associativity right{{$}}
-// PASS_2500-NOT: precedence
+precedencegroup ReallyBoringPrecedence {
+// PASS_2500-LABEL: {{^}}precedencegroup ReallyBoringPrecedence {{{$}}
+  associativity: right
+// PASS_2500-NEXT: {{^}}  associativity: right{{$}}
+// PASS_2500-NOT: higherThan
+// PASS_2500-NOT: lowerThan
 // PASS_2500-NOT: assignment
 }
 
-infix operator %%<> {
-// PASS_2500-LABEL: {{^}}infix operator %%<> {{{$}}
-  precedence 47
-  assignment
-// PASS_2500-NEXT: {{^}}  precedence 47{{$}}
-// PASS_2500-NEXT: {{^}}  assignment{{$}}
+precedencegroup BoringAssignmentPrecedence {
+// PASS_2500-LABEL: {{^}}precedencegroup BoringAssignmentPrecedence {{{$}}
+  lowerThan: AssignmentPrecedence
+  assignment: true
+// PASS_2500-NEXT: {{^}}  assignment: true{{$}}
+// PASS_2500-NEXT: {{^}}  lowerThan: AssignmentPrecedence{{$}}
 // PASS_2500-NOT: associativity
+// PASS_2500-NOT: higherThan
 }
 // PASS_2500: {{^}}}{{$}}
 
@@ -1201,22 +1200,22 @@ struct GenericParams1<
 // PASS_ONE_LINE_TYPEREPR-DAG: {{^}}  func genericParams1<GenericFoo : FooProtocol, GenericFooX : FooClass, GenericBar : FooProtocol & BarProtocol, GenericBaz>(a: StructGenericFoo, b: StructGenericBar, c: StructGenericBaz, d: GenericFoo, e: GenericFooX, f: GenericBar, g: GenericBaz){{$}}
 }
 
-struct GenericParams2<T : FooProtocol where T : BarProtocol> {}
+struct GenericParams2<T : FooProtocol> where T : BarProtocol {}
 // PASS_ONE_LINE-DAG: {{^}}struct GenericParams2<T : FooProtocol where T : BarProtocol> {{{$}}
 
-struct GenericParams3<T : FooProtocol where T : BarProtocol, T : QuxProtocol> {}
+struct GenericParams3<T : FooProtocol> where T : BarProtocol, T : QuxProtocol {}
 // PASS_ONE_LINE-DAG: {{^}}struct GenericParams3<T : FooProtocol where T : BarProtocol, T : QuxProtocol> {{{$}}
 
-struct GenericParams4<T : QuxProtocol where T.Qux : FooProtocol> {}
+struct GenericParams4<T : QuxProtocol> where T.Qux : FooProtocol {}
 // PASS_ONE_LINE-DAG: {{^}}struct GenericParams4<T : QuxProtocol where T.Qux : FooProtocol> {{{$}}
 
-struct GenericParams5<T : QuxProtocol where T.Qux : FooProtocol & BarProtocol> {}
+struct GenericParams5<T : QuxProtocol> where T.Qux : FooProtocol & BarProtocol {}
 // PREFER_TYPE_PRINTING: {{^}}struct GenericParams5<T : QuxProtocol where T.Qux : BarProtocol & FooProtocol> {{{$}}
 // FIXME: in protocol compositions protocols are listed in reverse order.
 //
 // PREFER_TYPE_REPR_PRINTING: {{^}}struct GenericParams5<T : QuxProtocol where T.Qux : FooProtocol & BarProtocol> {{{$}}
 
-struct GenericParams6<T : QuxProtocol, U : QuxProtocol where T.Qux == U.Qux> {}
+struct GenericParams6<T : QuxProtocol, U : QuxProtocol> where T.Qux == U.Qux {}
 // Because of the same type conformance, 'T.Qux' and 'U.Qux' types are
 // identical, so they are printed exactly the same way.  Printing a TypeRepr
 // allows us to recover the original spelling.
@@ -1224,7 +1223,7 @@ struct GenericParams6<T : QuxProtocol, U : QuxProtocol where T.Qux == U.Qux> {}
 // PREFER_TYPE_PRINTING: {{^}}struct GenericParams6<T : QuxProtocol, U : QuxProtocol where T.Qux == T.Qux> {{{$}}
 // PREFER_TYPE_REPR_PRINTING: {{^}}struct GenericParams6<T : QuxProtocol, U : QuxProtocol where T.Qux == U.Qux> {{{$}}
 
-struct GenericParams7<T : QuxProtocol, U : QuxProtocol where T.Qux : QuxProtocol, U.Qux : QuxProtocol, T.Qux.Qux == U.Qux.Qux> {}
+struct GenericParams7<T : QuxProtocol, U : QuxProtocol> where T.Qux : QuxProtocol, U.Qux : QuxProtocol, T.Qux.Qux == U.Qux.Qux {}
 // PREFER_TYPE_PRINTING: {{^}}struct GenericParams7<T : QuxProtocol, U : QuxProtocol where T.Qux : QuxProtocol, U.Qux : QuxProtocol, T.Qux.Qux == T.Qux.Qux> {{{$}}
 // PREFER_TYPE_REPR_PRINTING: {{^}}struct GenericParams7<T : QuxProtocol, U : QuxProtocol where T.Qux : QuxProtocol, U.Qux : QuxProtocol, T.Qux.Qux == U.Qux.Qux> {{{$}}
 

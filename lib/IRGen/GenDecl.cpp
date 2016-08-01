@@ -1591,6 +1591,7 @@ void IRGenModule::emitGlobalDecl(Decl *D) {
   case DeclKind::InfixOperator:
   case DeclKind::PrefixOperator:
   case DeclKind::PostfixOperator:
+  case DeclKind::PrecedenceGroup:
     return;
 
   case DeclKind::Module:
@@ -2823,6 +2824,7 @@ void IRGenModule::emitNestedTypeDecls(DeclRange members) {
     case DeclKind::PostfixOperator:
     case DeclKind::Param:
     case DeclKind::Module:
+    case DeclKind::PrecedenceGroup:
       llvm_unreachable("decl not allowed in type context");
 
     case DeclKind::IfConfig:

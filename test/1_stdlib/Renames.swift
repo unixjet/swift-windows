@@ -31,7 +31,8 @@ func _Arrays<T>(e: T) {
 }
 
 func _Builtin(o: AnyObject, oo: AnyObject?) {
-  _ = unsafeAddressOf(o) // expected-error {{'unsafeAddressOf' has been renamed to 'unsafeAddress(of:)'}} {{7-22=unsafeAddress}} {{23-23=of: }} {{none}}
+  _ = unsafeAddressOf(o) // expected-error {{Removed in Swift 3. Use Unmanaged.passUnretained(x).toOpaque() instead.}} {{none}}
+  _ = unsafeAddress(of: o) // expected-error {{Removed in Swift 3. Use Unmanaged.passUnretained(x).toOpaque() instead.}} {{none}}
   _ = unsafeUnwrap(oo) // expected-error {{Removed in Swift 3. Please use Optional.unsafelyUnwrapped instead.}} {{none}}
 }
 
@@ -462,9 +463,15 @@ func _StringCharacterView<S, C>(x: String.CharacterView, s: S, c: C, i: String.C
   x.appendContentsOf(s) // expected-error {{'appendContentsOf' has been renamed to 'append(contentsOf:)'}} {{5-21=append}} {{22-22=contentsOf: }} {{none}}
 }
 
+func _StringAppend(s: inout String, u: UnicodeScalar) {
+  s.append(u) // expected-error {{'append' is unavailable: Replaced by append(_: String)}} {{none}}
+}
+
 func _StringLegacy(c: Character, u: UnicodeScalar) {
   _ = String(count: 1, repeatedValue: c) // expected-error {{'init(count:repeatedValue:)' is unavailable: Renamed to init(repeating:count:) and reordered parameters}} {{none}}
   _ = String(count: 1, repeatedValue: u) // expected-error {{'init(count:repeatedValue:)' is unavailable: Renamed to init(repeating:count:) and reordered parameters}} {{none}}
+  _ = String(repeating: c, count: 1) // expected-error {{'init(repeating:count:)' is unavailable: Replaced by init(repeating: String, count: Int)}} {{none}}
+  _ = String(repeating: u, count: 1) // expected-error {{'init(repeating:count:)' is unavailable: Replaced by init(repeating: String, count: Int)}} {{none}}
 }
 
 func _Unicode() {
@@ -481,8 +488,8 @@ func _UnicodeScalar(s: UnicodeScalar) {
 }
 
 func _Unmanaged<T>(x: Unmanaged<T>, p: OpaquePointer) {
-  _ = Unmanaged<T>.fromOpaque(p) // expected-error {{'fromOpaque' is unavailable: use 'fromOpaque(_: UnsafePointer<Void>)' instead}} {{none}}
-  let _: OpaquePointer = x.toOpaque() // expected-error {{'toOpaque()' is unavailable: use 'toOpaque() -> UnsafePointer<Void>' instead}} {{none}}
+  _ = Unmanaged<T>.fromOpaque(p) // expected-error {{'fromOpaque' is unavailable: use 'fromOpaque(_: UnsafeRawPointer)' instead}} {{none}}
+  let _: OpaquePointer = x.toOpaque() // expected-error {{'toOpaque()' is unavailable: use 'toOpaque() -> UnsafeRawPointer' instead}} {{none}}
 }
 
 func _UnsafeBufferPointer() {

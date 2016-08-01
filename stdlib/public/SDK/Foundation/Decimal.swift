@@ -73,7 +73,7 @@ extension Decimal {
 
     public mutating func divide(by other: Decimal) {
         var rhs = other
-        NSDecimalMultiply(&self, &self, &rhs, .plain)
+        NSDecimalDivide(&self, &self, &rhs, .plain)
     }
 
     public mutating func negate() {
@@ -436,10 +436,6 @@ extension Decimal : CustomStringConvertible {
 }
 
 extension Decimal : _ObjectiveCBridgeable {
-    public static func _isBridgedToObjectiveC() -> Bool {
-        return true
-    }
-    
     @_semantics("convertToObjectiveC")
     public func _bridgeToObjectiveC() -> NSDecimalNumber {
         return NSDecimalNumber(decimal: self)

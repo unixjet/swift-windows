@@ -118,7 +118,7 @@ public func spawnChild(_ args: [String])
     // parent write pipe.
     let errnoSize = sizeof(errno.dynamicType)
     var execveErrno = errno
-    let writtenBytes = withUnsafePointer(&execveErrno) {
+    let writtenBytes = withUnsafePointer(to: &execveErrno) {
       write(childToParentPipe.writeFD, UnsafePointer($0), errnoSize)
     }
 
@@ -265,19 +265,12 @@ public enum ProcessTerminationStatus : CustomStringConvertible {
 public func posixWaitpid(_ pid: pid_t) -> ProcessTerminationStatus {
   var status: CInt = 0
 #if CYGWIN
-  final class Box<T> {
-    let value: T
-
-    init(_ value: T) {
-      self.value = value
+  withUnsafeMutablePointer(to: &status) {
+    statusPtr in
+    let statusPtrWrapper = __wait_status_ptr_t(__int_ptr: statusPtr)
+    if waitpid(pid, statusPtrWrapper, 0) < 0 {
+      preconditionFailure("waitpid() failed")
     }
-  }
-
-  let unmanaged = Unmanaged.passRetained(Box<Int32>(status))
-  let statusPtr = __wait_status_ptr_t(__int_ptr: UnsafeMutablePointer<Int32>(unmanaged.toOpaque()))
-
-  if waitpid(pid, statusPtr, 0) < 0 {
-    preconditionFailure("waitpid() failed")
   }
 #else
   if waitpid(pid, &status, 0) < 0 {

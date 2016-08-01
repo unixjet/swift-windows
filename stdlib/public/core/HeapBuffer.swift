@@ -40,8 +40,8 @@ internal func _swift_bufferAllocate(
 /// either in a derived class, or it can be in some manager object
 /// that owns the _HeapBuffer.
 public // @testable (test/Prototypes/MutableIndexableDict.swift)
-class _HeapBufferStorage<Value, Element> : NonObjectiveCBase {
-  public override init() {}
+class _HeapBufferStorage<Value, Element> {
+  public init() {}
 
   /// The type used to actually manage instances of
   /// `_HeapBufferStorage<Value, Element>`.
@@ -92,19 +92,20 @@ struct _HeapBuffer<Value, Element> : Equatable {
             : (heapAlign < elementAlign ? elementAlign : heapAlign))
   }
 
-  internal var _address: UnsafeMutablePointer<Int8> {
-    return UnsafeMutablePointer(
+  internal var _address: UnsafeMutableRawPointer {
+    return UnsafeMutableRawPointer(
       Builtin.bridgeToRawPointer(self._nativeObject))
   }
 
   internal var _value: UnsafeMutablePointer<Value> {
-    return UnsafeMutablePointer(
-      _HeapBuffer._valueOffset() + _address)
+    return (_HeapBuffer._valueOffset() + _address).assumingMemoryBound(
+      to: Value.self)
   }
 
   public // @testable
   var baseAddress: UnsafeMutablePointer<Element> {
-    return UnsafeMutablePointer(_HeapBuffer._elementOffset() + _address)
+    return (_HeapBuffer._elementOffset() + _address).assumingMemoryBound(
+      to: Element.self)
   }
 
   internal func _allocatedSize() -> Int {

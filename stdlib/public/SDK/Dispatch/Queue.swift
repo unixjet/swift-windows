@@ -33,7 +33,7 @@ public extension DispatchQueue {
 		@available(OSX 10.12, iOS 10.0, tvOS 10.0, watchOS 3.0, *)
 		public static let initiallyInactive = Attributes(rawValue: 1<<2)
 
-		private func _attr() -> __OS_dispatch_queue_attr? {
+		fileprivate func _attr() -> __OS_dispatch_queue_attr? {
 			var attr: __OS_dispatch_queue_attr? = nil
 
 			if self.contains(.concurrent) {
@@ -333,7 +333,7 @@ public extension DispatchQueue {
 	}
 }
 
-private func _destructDispatchSpecificValue(ptr: UnsafeMutablePointer<Void>?) {
+private func _destructDispatchSpecificValue(ptr: UnsafeMutableRawPointer?) {
 	if let p = ptr {
 		Unmanaged<AnyObject>.fromOpaque(p).release()
 	}

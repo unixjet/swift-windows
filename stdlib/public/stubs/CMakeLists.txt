@@ -6,6 +6,7 @@ if(SWIFT_HOST_VARIANT MATCHES "${SWIFT_DARWIN_VARIANTS}")
       Availability.mm
       DispatchShims.mm
       FoundationHelpers.mm
+      Reflection.mm
       SwiftNativeNSXXXBase.mm.gyb)
   set(LLVM_OPTIONAL_SOURCES
       UnicodeNormalization.cpp)
@@ -16,6 +17,7 @@ else()
 endif()
 
 add_swift_library(swiftStdlibStubs OBJECT_LIBRARY TARGET_LIBRARY
+  AnyHashableSupport.cpp
   Assert.cpp
   CommandLine.cpp
   GlobalObjects.cpp

@@ -115,7 +115,8 @@ final class _ContiguousArrayStorage<Element> : _ContiguousArrayStorage1 {
   ) rethrows {
     if _isBridgedVerbatimToObjectiveC(Element.self) {
       let count = __manager.header.count
-      let elements = UnsafePointer<AnyObject>(__manager._elementPointer)
+      let elements = UnsafeMutableRawPointer(__manager._elementPointer)
+        .assumingMemoryBound(to: AnyObject.self)
       defer { _fixLifetime(__manager) }
       try body(UnsafeBufferPointer(start: elements, count: count))
     }
@@ -145,7 +146,7 @@ final class _ContiguousArrayStorage<Element> : _ContiguousArrayStorage1 {
     let resultPtr = result.baseAddress
     let p = __manager._elementPointer
     for i in 0..<count {
-      (resultPtr + i).initialize(to: _bridgeToObjectiveCUnconditional(p[i]))
+      (resultPtr + i).initialize(to: _bridgeAnythingToObjectiveC(p[i]))
     }
     _fixLifetime(__manager)
     return result
@@ -411,14 +412,14 @@ struct _ContiguousArrayBuffer<Element> : _ArrayBufferProtocol {
   ///   may need to be considered, such as whether the buffer could be
   ///   some immutable Cocoa container.
   public mutating func isUniquelyReferenced() -> Bool {
-    return __bufferPointer.holdsUniqueReference()
+    return __bufferPointer.isUniqueReference()
   }
 
   /// Returns `true` iff this buffer's storage is either
   /// uniquely-referenced or pinned.  NOTE: this does not mean
   /// the buffer is mutable; see the comment on isUniquelyReferenced.
   public mutating func isUniquelyReferencedOrPinned() -> Bool {
-    return __bufferPointer.holdsUniqueOrPinnedReference()
+    return __bufferPointer._isUniqueOrPinnedReference()
   }
 
 #if _runtime(_ObjC)
@@ -428,9 +429,6 @@ struct _ContiguousArrayBuffer<Element> : _ArrayBufferProtocol {
   ///
   /// - Complexity: O(1).
   public func _asCocoaArray() -> _NSArrayCore {
-    _sanityCheck(
-        _isBridgedToObjectiveC(Element.self),
-        "Array element type is not bridged to Objective-C")
     if count == 0 {
       return _emptyArrayStorage
     }
@@ -455,8 +453,8 @@ struct _ContiguousArrayBuffer<Element> : _ArrayBufferProtocol {
   ///
   /// Two buffers address the same elements when they have the same
   /// identity and count.
-  public var identity: UnsafePointer<Void> {
-    return UnsafePointer(firstElementAddress)
+  public var identity: UnsafeRawPointer {
+    return UnsafeRawPointer(firstElementAddress)
   }
   
   /// Returns `true` iff we have storage for elements of the given

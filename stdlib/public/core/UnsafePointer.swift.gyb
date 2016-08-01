@@ -69,57 +69,62 @@ public struct ${Self}<Pointee>
   }
 
   /// Construct ${a_Self} with a given pattern of bits.
+  ///
+  /// Returns nil if `bitPattern` is zero.
   @_transparent
   public init?(bitPattern: UInt) {
     if bitPattern == 0 { return nil }
     self._rawValue = Builtin.inttoptr_Word(bitPattern._builtinWordValue)
   }
 
-  /// Convert from any `UnsafeMutablePointer`, possibly with a
-  /// different `Pointee`.
-  ///
-  /// - Warning: the behavior of accesses to pointee as a type
-  ///   different from that to which it was initialized is undefined.
+  /// Construct ${a_Self} from another ${a_Self}.
   @_transparent
-  public init<U>(_ from : UnsafeMutablePointer<U>) {
-    _rawValue = from._rawValue
+  public init(_ other: ${Self}<Pointee>) {
+    self = other
   }
 
-  /// Convert from any `UnsafeMutablePointer`, possibly with a
-  /// different `Pointee`.
+  /// Construct ${a_Self} from another ${a_Self}.
+  ///
+  /// Returns nil if `other` is nil.
+  @_transparent
+  public init?(_ other: ${Self}<Pointee>?) {
+    guard let unwrapped = other else { return nil }
+    self = unwrapped
+  }
+
+%  if mutable:
+  /// Convert from `UnsafePointer` to `UnsafeMutablePointer` of the same
+  /// `Pointee`.
+  @_transparent
+  public init(mutating other: UnsafePointer<Pointee>) {
+    self._rawValue = other._rawValue
+  }
+
+  /// Convert from `UnsafePointer` to `UnsafeMutablePointer` of the same
+  /// `Pointee`.
+  ///
+  /// Returns nil if `bitPattern` is zero.
+  @_transparent
+  public init?(mutating other: UnsafePointer<Pointee>?) {
+    guard let unwrapped = other else { return nil }
+    self.init(mutating: unwrapped)
+  }
+% else:
+  /// Convert from `UnsafeMutablePointer` to ${a_Self} of the same `Pointee`.
+  @_transparent
+  public init(_ other: UnsafeMutablePointer<Pointee>) {
+    self._rawValue = other._rawValue
+  }
+
+  /// Convert from `UnsafeMutablePointer` to ${a_Self} of the same `Pointee`.
   ///
   /// Returns nil if `from` is nil.
-  ///
-  /// - Warning: the behavior of accesses to pointee as a type
-  ///   different from that to which it was initialized is undefined.
   @_transparent
-  public init?<U>(_ from : UnsafeMutablePointer<U>?) {
-    guard let unwrapped = from else { return nil }
+  public init?(_ other: UnsafeMutablePointer<Pointee>?) {
+    guard let unwrapped = other else { return nil }
     self.init(unwrapped)
   }
-
-  /// Convert from any `UnsafePointer`, possibly with a
-  /// different `Pointee`.
-  ///
-  /// - Warning: the behavior of accesses to pointee as a type
-  ///   different from that to which it was initialized is undefined.
-  @_transparent
-  public init<U>(_ from : UnsafePointer<U>) {
-    _rawValue = from._rawValue
-  }
-
-  /// Convert from any `UnsafePointer`, possibly with a
-  /// different `Pointee`.
-  ///
-  /// Returns nil if `from` is nil.
-  ///
-  /// - Warning: the behavior of accesses to pointee as a type
-  ///   different from that to which it was initialized is undefined.
-  @_transparent
-  public init?<U>(_ from : UnsafePointer<U>?) {
-    guard let unwrapped = from else { return nil }
-    self.init(unwrapped)
-  }
+%  end
 
 %  if mutable:
   /// Allocate and point at uninitialized aligned memory for `count`
@@ -628,16 +633,6 @@ extension UInt {
   }
 }
 % end # for mutable
-
-/// A byte-sized thing that isn't designed to interoperate with
-/// any other types; it makes a decent parameter to
-/// `UnsafeMutablePointer<Pointee>` when you just want to do bytewise
-/// pointer arithmetic.
-@_fixed_layout
-public // @testable
-struct _RawByte {
-  let _inaccessible: UInt8
-}
 
 // ${'Local Variables'}:
 // eval: (read-only-mode 1)

@@ -36,15 +36,15 @@ public struct URLThumbnailSizeKey : RawRepresentable, Hashable {
  As a convenience, volume resource values can be requested from any file system URL. The value returned will reflect the property value for the volume on which the resource is located.
 */
 public struct URLResourceValues {
-    private var _values: [URLResourceKey: AnyObject]
-    private var _keys: Set<URLResourceKey>
+    fileprivate var _values: [URLResourceKey: Any]
+    fileprivate var _keys: Set<URLResourceKey>
     
     public init() {
         _values = [:]
         _keys = []
     }
     
-    private init(keys: Set<URLResourceKey>, values: [URLResourceKey: AnyObject]) {
+    fileprivate init(keys: Set<URLResourceKey>, values: [URLResourceKey: Any]) {
         _values = values
         _keys = keys
     }
@@ -63,7 +63,7 @@ public struct URLResourceValues {
         return (_values[key] as? NSNumber)?.intValue
     }
     
-    private mutating func _set(_ key : URLResourceKey, newValue : AnyObject?) {
+    private mutating func _set(_ key : URLResourceKey, newValue : Any?) {
         _keys.insert(key)
         _values[key] = newValue
     }
@@ -103,7 +103,7 @@ public struct URLResourceValues {
     /// A loosely-typed dictionary containing all keys and values.
     ///
     /// If you have set temporary keys or non-standard keys, you can find them in here.
-    public var allValues : [URLResourceKey : AnyObject] {
+    public var allValues : [URLResourceKey : Any] {
         return _values
     }
     
@@ -286,7 +286,7 @@ public struct URLResourceValues {
 #if os(OSX)
     /// The quarantine properties as defined in LSQuarantine.h. To remove quarantine information from a file, pass `nil` as the value when setting this property.
     @available(OSX 10.10, *)
-    public var quarantineProperties: [String : AnyObject]? {
+    public var quarantineProperties: [String : Any]? {
         get { return _get(.quarantinePropertiesKey) }
         set { _set(.quarantinePropertiesKey, newValue: newValue as NSObject?) }
     }
@@ -475,9 +475,9 @@ public struct URLResourceValues {
  
  URLs are the preferred way to refer to local files. Most objects that read data from or write data to a file have methods that accept a URL instead of a pathname as the file reference. For example, you can get the contents of a local file URL as `String` by calling `func init(contentsOf:encoding) throws`, or as a `Data` by calling `func init(contentsOf:options) throws`.
 */
-public struct URL : ReferenceConvertible, CustomStringConvertible, Equatable {
+public struct URL : ReferenceConvertible, Equatable {
     public typealias ReferenceType = NSURL
-    private var _url : NSURL
+    fileprivate var _url : NSURL
     
     public typealias BookmarkResolutionOptions = NSURL.BookmarkResolutionOptions
     public typealias BookmarkCreationOptions = NSURL.BookmarkCreationOptions
@@ -572,16 +572,6 @@ public struct URL : ReferenceConvertible, CustomStringConvertible, Equatable {
         _url = URL._converted(from: NSURL(fileURLWithFileSystemRepresentation: path, isDirectory: isDirectory, relativeTo: baseURL))
     }
     
-    // MARK: -
-    
-    public var description: String {
-        return _url.description
-    }
-
-    public var debugDescription: String {
-        return _url.debugDescription
-    }
-
     public var hashValue: Int {
         return _url.hash
     }
@@ -1025,7 +1015,7 @@ public struct URL : ReferenceConvertible, CustomStringConvertible, Equatable {
     /// Temporary resource values are for client use. Temporary resource values exist only in memory and are never written to the resource's backing store. Once set, a temporary resource value can be copied from the URL object with `func resourceValues(forKeys:)`. The values are stored in the loosely-typed `allValues` dictionary property.
     ///
     /// To remove a temporary resource value from the URL object, use `func removeCachedResourceValue(forKey:)`. Care should be taken to ensure the key that identifies a temporary resource value is unique and does not conflict with system defined keys (using reverse domain name notation in your temporary resource value keys is recommended). This method is currently applicable only to URLs for file system resources.
-    public mutating func setTemporaryResourceValue(_ value : AnyObject, forKey key: URLResourceKey) {
+    public mutating func setTemporaryResourceValue(_ value : Any, forKey key: URLResourceKey) {
         _url.setTemporaryResourceValue(value, forKey: key)
     }
     
@@ -1058,6 +1048,26 @@ public struct URL : ReferenceConvertible, CustomStringConvertible, Equatable {
     @available(OSX 10.10, iOS 8.0, *)
     public func promisedItemResourceValues(forKeys keys: Set<URLResourceKey>) throws -> URLResourceValues {
         return URLResourceValues(keys: keys, values: try _url.promisedItemResourceValues(forKeys: Array(keys)))
+    }
+    
+    @available(*, unavailable, message: "Use struct URLResourceValues and URL.setResourceValues(_:) instead")
+    public func setResourceValue(_ value: AnyObject?, forKey key: URLResourceKey) throws {
+        fatalError()
+    }
+    
+    @available(*, unavailable, message: "Use struct URLResourceValues and URL.setResourceValues(_:) instead")
+    public func setResourceValues(_ keyedValues: [URLResourceKey : AnyObject]) throws {
+        fatalError()
+    }
+    
+    @available(*, unavailable, message: "Use struct URLResourceValues and URL.resourceValues(forKeys:) instead")
+    public func resourceValues(forKeys keys: [URLResourceKey]) throws -> [URLResourceKey : AnyObject] {
+        fatalError()
+    }
+    
+    @available(*, unavailable, message: "Use struct URLResourceValues and URL.setResourceValues(_:) instead")
+    public func getResourceValue(_ value: AutoreleasingUnsafeMutablePointer<AnyObject?>, forKey key: URLResourceKey) throws {
+        fatalError()
     }
     
     // MARK: - Bookmarks and Alias Files
@@ -1104,13 +1114,13 @@ public struct URL : ReferenceConvertible, CustomStringConvertible, Equatable {
         // Future readers: file reference URL here is not the same as playgrounds "file reference"
         if url.isFileReferenceURL() {
             // Convert to a file path URL, or use an invalid scheme
-            return url.filePathURL ?? URL(string: "com-apple-unresolvable-file-reference-url:")!
+            return (url.filePathURL ?? URL(string: "com-apple-unresolvable-file-reference-url:")!) as NSURL
         } else {
             return url
         }
     }
     
-    private init(reference: NSURL) {
+    fileprivate init(reference: NSURL) {
         _url = URL._converted(from: reference).copy() as! NSURL
     }
     
@@ -1124,10 +1134,6 @@ public struct URL : ReferenceConvertible, CustomStringConvertible, Equatable {
 }
 
 extension URL : _ObjectiveCBridgeable {
-    public static func _isBridgedToObjectiveC() -> Bool {
-        return true
-    }
-    
     @_semantics("convertToObjectiveC")
     public func _bridgeToObjectiveC() -> NSURL {
         return _url
@@ -1148,6 +1154,24 @@ extension URL : _ObjectiveCBridgeable {
         var result: URL? = nil
         _forceBridgeFromObjectiveC(source!, result: &result)
         return result!
+    }
+}
+
+extension URL : CustomStringConvertible, CustomDebugStringConvertible {
+    public var description: String {
+        return _url.description
+    }
+    
+    public var debugDescription: String {
+        return _url.debugDescription
+    }
+}
+
+extension NSURL : _HasCustomAnyHashableRepresentation {
+    // Must be @nonobjc to avoid infinite recursion during bridging.
+    @nonobjc
+    public func _toCustomAnyHashable() -> AnyHashable? {
+        return AnyHashable(self as URL)
     }
 }
 

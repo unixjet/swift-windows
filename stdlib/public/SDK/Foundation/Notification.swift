@@ -31,7 +31,7 @@ public struct Notification : ReferenceConvertible, Equatable, Hashable {
     /// An object that the poster wishes to send to observers.
     ///
     /// Typically this is the object that posted the notification.
-    public var object: AnyObject?
+    public var object: Any?
     
     /// Storage for values or objects related to this notification.
     public var userInfo: [String : Any]?
@@ -39,7 +39,7 @@ public struct Notification : ReferenceConvertible, Equatable, Hashable {
     /// Initialize a new `Notification`.
     ///
     /// The default value for `userInfo` is nil.
-    public init(name: Name, object: AnyObject? = nil, userInfo: [String : Any]? = nil) {
+    public init(name: Name, object: Any? = nil, userInfo: [String : Any]? = nil) {
         self.name = name
         self.object = object
         self.userInfo = userInfo
@@ -69,7 +69,7 @@ public struct Notification : ReferenceConvertible, Equatable, Hashable {
         }
         if let lhsObj = lhs.object {
             if let rhsObj = rhs.object {
-                if lhsObj !== rhsObj {
+                if lhsObj as AnyObject !== rhsObj as AnyObject {
                     return false
                 }
             } else {
@@ -94,11 +94,22 @@ public struct Notification : ReferenceConvertible, Equatable, Hashable {
     }
 }
 
-extension Notification : _ObjectiveCBridgeable {
-    public static func _isBridgedToObjectiveC() -> Bool {
-        return true
+extension Notification: CustomReflectable {
+    public var customMirror: Mirror {
+        var children: [(label: String?, value: Any)] = []
+        children.append((label: "name", value: self.name.rawValue))
+        if let o = self.object {
+            children.append((label: "object", value: o))
+        }
+        if let u = self.userInfo {
+            children.append((label: "userInfo", value: u))
+        }
+        let m = Mirror(self, children:children, displayStyle: Mirror.DisplayStyle.class)
+        return m
     }
-    
+}
+
+extension Notification : _ObjectiveCBridgeable {
     public static func _getObjectiveCType() -> Any.Type {
         return NSNotification.self
     }
@@ -106,7 +117,7 @@ extension Notification : _ObjectiveCBridgeable {
     @_semantics("convertToObjectiveC")
     public func _bridgeToObjectiveC() -> NSNotification {
         if let info = userInfo {
-            return __NSNotificationCreate(name.rawValue as NSString, object, _NSUserInfoDictionary.bridgeValue(from: info))
+            return __NSNotificationCreate(name.rawValue as NSString, object.map { $0 as AnyObject }, _NSUserInfoDictionary.bridgeValue(from: info))
         }
 
         return NSNotification(name: name, object: object, userInfo: nil)    
@@ -140,3 +151,12 @@ extension Notification : _ObjectiveCBridgeable {
         return result!
     }
 }
+
+extension NSNotification : _HasCustomAnyHashableRepresentation {
+    // Must be @nonobjc to avoid infinite recursion during bridging.
+    @nonobjc
+    public func _toCustomAnyHashable() -> AnyHashable? {
+        return AnyHashable(self as Notification)
+    }
+}
+

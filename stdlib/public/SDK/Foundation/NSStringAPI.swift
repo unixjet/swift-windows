@@ -387,12 +387,10 @@ extension String {
         outputArray in
         // FIXME: completePath(...) is incorrectly annotated as requiring
         // non-optional output parameters. rdar://problem/25494184
-        let outputNonOptionalName = AutoreleasingUnsafeMutablePointer<NSString?>(
-          UnsafeMutablePointer<NSString>(outputName)
-        )
-        let outputNonOptionalArray = AutoreleasingUnsafeMutablePointer<NSArray?>(
-          UnsafeMutablePointer<NSArray>(outputArray)
-        )
+        let outputNonOptionalName = unsafeBitCast(
+          outputName, to: AutoreleasingUnsafeMutablePointer<NSString?>.self)
+        let outputNonOptionalArray = unsafeBitCast(
+          outputArray, to: AutoreleasingUnsafeMutablePointer<NSArray?>.self)
         return self._ns.completePath(
           into: outputNonOptionalName,
           caseSensitive: caseSensitive,
@@ -505,7 +503,7 @@ extension String {
       var stop_ = false
       body(line: line, stop: &stop_)
       if stop_ {
-        UnsafeMutablePointer<ObjCBool>(stop).pointee = true
+        stop.pointee = true
       }
     }
   }
@@ -541,7 +539,7 @@ extension String {
       var stop_ = false
       body($0, self._range($1), self._range($2), &stop_)
       if stop_ {
-        UnsafeMutablePointer($3).pointee = true
+        $3.pointee = true
       }
     }
   }
@@ -782,7 +780,7 @@ extension String {
   /// in a given encoding, and optionally frees the buffer.  WARNING:
   /// this initializer is not memory-safe!
   public init?(
-    bytesNoCopy bytes: UnsafeMutablePointer<Void>, length: Int,
+    bytesNoCopy bytes: UnsafeMutableRawPointer, length: Int,
     encoding: Encoding, freeWhenDone flag: Bool
   ) {
     if let ns = NSString(
@@ -823,7 +821,7 @@ extension String {
     freeWhenDone flag: Bool
   ) {
     self = NSString(
-      charactersNoCopy: UnsafeMutablePointer(utf16CodeUnitsNoCopy),
+      charactersNoCopy: UnsafeMutablePointer(mutating: utf16CodeUnitsNoCopy),
       length: count,
       freeWhenDone: flag) as String
   }
@@ -1170,7 +1168,7 @@ extension String {
   /// Parses the `String` as a text representation of a
   /// property list, returning an NSString, NSData, NSArray, or
   /// NSDictionary object, according to the topmost element.
-  public func propertyList() -> AnyObject {
+  public func propertyList() -> Any {
     return _ns.propertyList()
   }
 
@@ -1180,7 +1178,8 @@ extension String {
   /// values found in the `String`.
   public
   func propertyListFromStringsFileFormat() -> [String : String] {
-    return _ns.propertyListFromStringsFileFormat() as! [String : String]
+    return _ns.propertyListFromStringsFileFormat()! as [NSObject : AnyObject]
+      as! [String : String]
   }
 
   // - (NSRange)rangeOfCharacterFromSet:(NSCharacterSet *)aSet

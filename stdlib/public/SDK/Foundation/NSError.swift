@@ -41,7 +41,7 @@ internal func NS_Swift_performErrorRecoverySelector(
   delegate: AnyObject?,
   selector: Selector,
   success: ObjCBool,
-  contextInfo: UnsafeMutablePointer<Void>?)
+  contextInfo: UnsafeMutableRawPointer?)
 
 /// Class that implements the informal protocol
 /// NSErrorRecoveryAttempting, which is used by NSError when it
@@ -52,7 +52,7 @@ class _NSErrorRecoveryAttempter {
                        optionIndex recoveryOptionIndex: Int,
                        delegate: AnyObject?,
                        didRecoverSelector: Selector,
-                       contextInfo: UnsafeMutablePointer<Void>?) {
+                       contextInfo: UnsafeMutableRawPointer?) {
     let error = nsError as Error as! RecoverableError
     error.attemptRecovery(optionIndex: recoveryOptionIndex) { success in
       NS_Swift_performErrorRecoverySelector(
@@ -118,7 +118,7 @@ public protocol CustomNSError : Error {
   var errorCode: Int { get }
 
   /// The user-info dictionary.
-  var errorUserInfo: [String : AnyObject] { get }
+  var errorUserInfo: [String : Any] { get }
 }
 
 public extension Error where Self : CustomNSError {
@@ -191,7 +191,7 @@ public func _swift_Foundation_getErrorDefaultUserInfo(_ error: Error)
   }
 
   // Populate the user-info dictionary 
-  var result: [String : AnyObject]
+  var result: [String : Any]
 
   // Initialize with custom user-info.
   if let customNSError = error as? CustomNSError {
@@ -205,19 +205,19 @@ public func _swift_Foundation_getErrorDefaultUserInfo(_ error: Error)
   if !hasUserInfoValueProvider,
      let localizedError = error as? LocalizedError {
     if let description = localizedError.errorDescription {
-      result[NSLocalizedDescriptionKey] = description as AnyObject
+      result[NSLocalizedDescriptionKey] = description
     }
     
     if let reason = localizedError.failureReason {
-      result[NSLocalizedFailureReasonErrorKey] = reason as AnyObject
+      result[NSLocalizedFailureReasonErrorKey] = reason
     }
     
     if let suggestion = localizedError.recoverySuggestion {   
-      result[NSLocalizedRecoverySuggestionErrorKey] = suggestion as AnyObject
+      result[NSLocalizedRecoverySuggestionErrorKey] = suggestion
     }
     
     if let helpAnchor = localizedError.helpAnchor {   
-      result[NSHelpAnchorErrorKey] = helpAnchor as AnyObject
+      result[NSHelpAnchorErrorKey] = helpAnchor
     }
   }
 
@@ -226,7 +226,7 @@ public func _swift_Foundation_getErrorDefaultUserInfo(_ error: Error)
   if !hasUserInfoValueProvider,
      let recoverableError = error as? RecoverableError {
     result[NSLocalizedRecoveryOptionsErrorKey] =
-      recoverableError.recoveryOptions as AnyObject
+      recoverableError.recoveryOptions
     result[NSRecoveryAttempterErrorKey] = _NSErrorRecoveryAttempter()
   }
 
@@ -240,7 +240,7 @@ public func _swift_Foundation_getErrorDefaultUserInfo(_ error: Error)
 extension NSError : Error {
   public var _domain: String { return domain }
   public var _code: Int { return code }
-  public var _userInfo: AnyObject? { return userInfo as AnyObject }
+  public var _userInfo: Any? { return userInfo }
 }
 
 extension CFError : Error {
@@ -252,8 +252,8 @@ extension CFError : Error {
     return CFErrorGetCode(self)
   }
 
-  public var _userInfo: AnyObject? {
-    return CFErrorCopyUserInfo(self) as AnyObject?
+  public var _userInfo: Any? {
+    return CFErrorCopyUserInfo(self) as Any
   }
 }
 
@@ -388,6 +388,16 @@ public protocol _BridgedStoredNSError :
   init(_nsError error: NSError)
 }
 
+/// TODO: Better way to do this?
+internal func _stringDictToAnyHashableDict(_ input: [String : Any])
+    -> [AnyHashable : Any] {
+  var result = [AnyHashable : Any](minimumCapacity: input.count)
+  for (k, v) in input {
+    result[k] = v
+  }
+  return result
+}
+
 /// Various helper implementations for _BridgedStoredNSError
 public extension _BridgedStoredNSError
     where Code: RawRepresentable, Code.RawValue: SignedInteger {
@@ -398,15 +408,15 @@ public extension _BridgedStoredNSError
 
   /// Initialize an error within this domain with the given ``code``
   /// and ``userInfo``.
-  public init(_ code: Code, userInfo: [String : AnyObject] = [:]) {
+  public init(_ code: Code, userInfo: [String : Any] = [:]) {
     self.init(_nsError: NSError(domain: Self._nsErrorDomain,
                                 code: numericCast(code.rawValue),
-                                userInfo: userInfo))
+                                userInfo: _stringDictToAnyHashableDict(userInfo)))
   }
 
   /// The user-info dictionary for an error that was bridged from
   /// NSError.
-  var userInfo: [String : AnyObject] { return errorUserInfo }
+  var userInfo: [String : Any] { return errorUserInfo }
 }
 
 /// Various helper implementations for _BridgedStoredNSError
@@ -419,10 +429,10 @@ public extension _BridgedStoredNSError
 
   /// Initialize an error within this domain with the given ``code``
   /// and ``userInfo``.
-  public init(_ code: Code, userInfo: [String : AnyObject] = [:]) {
+  public init(_ code: Code, userInfo: [String : Any] = [:]) {
     self.init(_nsError: NSError(domain: Self._nsErrorDomain,
                                 code: numericCast(code.rawValue),
-                                userInfo: userInfo))
+                                userInfo: _stringDictToAnyHashableDict(userInfo)))
   }
 }
 
@@ -448,10 +458,10 @@ public extension _BridgedStoredNSError {
 
   var errorCode: Int { return _nsError.code }
 
-  var errorUserInfo: [String : AnyObject] {
-    var result: [String : AnyObject] = [:]
+  var errorUserInfo: [String : Any] {
+    var result: [String : Any] = [:]
     for (key, value) in _nsError.userInfo {
-      guard let stringKey = key as? String else { continue }
+      guard let stringKey = key.base as? String else { continue }
       result[stringKey] = value
     }
     return result
@@ -518,29 +528,29 @@ public struct CocoaError : _BridgedStoredNSError {
 }
 
 public extension CocoaError {
-  private var _userInfo: [NSObject : AnyObject] {
+  private var _nsUserInfo: [AnyHashable : Any] {
     return (self as NSError).userInfo
   }
 
   /// The file path associated with the error, if any.
   var filePath: String? {
-    return _userInfo[NSFilePathErrorKey] as? String
+    return _nsUserInfo[NSFilePathErrorKey as NSString] as? String
   }
 
   /// The string encoding associated with this error, if any.
   var stringEncoding: String.Encoding? {
-    return (_userInfo[NSStringEncodingErrorKey] as? NSNumber)
+    return (_nsUserInfo[NSStringEncodingErrorKey as NSString] as? NSNumber)
              .map { String.Encoding(rawValue: $0.uintValue) }
   }
 
   /// The underlying error behind this error, if any.
   var underlying: Error? {
-    return _userInfo[NSUnderlyingErrorKey] as? Error
+    return _nsUserInfo[NSUnderlyingErrorKey as NSString] as? Error
   }
 
   /// The URL associated with this error, if any.
   var url: URL? {
-    return _userInfo[NSURLErrorKey] as? URL
+    return _nsUserInfo[NSURLErrorKey as NSString] as? URL
   }
 }
 
@@ -1319,23 +1329,23 @@ public struct URLError : _BridgedStoredNSError {
 }
 
 public extension URLError {
-  private var _userInfo: [NSObject : AnyObject] {
+  private var _nsUserInfo: [AnyHashable : Any] {
     return (self as NSError).userInfo
   }
 
   /// The URL which caused a load to fail.
   public var failingURL: URL? {
-    return _userInfo[NSURLErrorFailingURLErrorKey] as? URL
+    return _nsUserInfo[NSURLErrorFailingURLErrorKey as NSString] as? URL
   }
 
   /// The string for the URL which caused a load to fail. 
   public var failureURLString: String? {
-    return _userInfo[NSURLErrorFailingURLStringErrorKey] as? String
+    return _nsUserInfo[NSURLErrorFailingURLStringErrorKey as NSString] as? String
   }
 
   /// The state of a failed SSL handshake.
   public var failureURLPeerTrust: SecTrust? {
-    if let secTrust = _userInfo[NSURLErrorFailingURLPeerTrustErrorKey] {
+    if let secTrust = _nsUserInfo[NSURLErrorFailingURLPeerTrustErrorKey as NSString] {
       return (secTrust as! SecTrust)
     }
 

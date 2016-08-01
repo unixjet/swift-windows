@@ -95,6 +95,9 @@ namespace swift {
     /// was not compiled with -enable-testing.
     bool EnableTestableAttrRequiresTestableModule = true;
 
+    /// Whether to implement SE-0111, the removal of argument labels in types.
+    bool SuppressArgumentLabelsInTypes = false;
+
     ///
     /// Flags for developers
     ///
@@ -144,11 +147,15 @@ namespace swift {
     bool EnableExperimentalNestedGenericTypes = false;
 
     /// \brief Enable generalized collection casting.
-    bool EnableExperimentalCollectionCasts = false;
+    bool EnableExperimentalCollectionCasts = true;
 
     /// Should we check the target OSs of serialized modules to see that they're
     /// new enough?
     bool EnableTargetOSChecking = true;
+
+    /// Should 'private' use Swift 3's lexical scoping, or the Swift 2 behavior
+    /// of 'fileprivate'?
+    bool EnableSwift3Private = true;
 
     /// Whether to use the import as member inference system
     ///
@@ -161,13 +168,10 @@ namespace swift {
     bool StripNSPrefix = true;
 
     /// Should 'id' in Objective-C be imported as 'Any' in Swift?
-    bool EnableIdAsAny = false;
+    bool EnableIdAsAny = true;
 
     /// Enable the Swift 3 migration via Fix-Its.
     bool Swift3Migration = false;
-
-    /// Enable typealiases in protocols.
-    bool EnableProtocolTypealiases = false;
 
     /// Sets the target we are building for and updates platform conditions
     /// to match.
