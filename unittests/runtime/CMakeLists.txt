@@ -20,6 +20,10 @@ if(("${SWIFT_HOST_VARIANT_SDK}" STREQUAL "${SWIFT_PRIMARY_VARIANT_SDK}") AND
     list(APPEND PLATFORM_TARGET_LINK_LIBRARIES
       ${EXECINFO_LIBRARY}
       )
+  elseif(SWIFT_HOST_VARIANT STREQUAL "cygwin")
+    list(APPEND PLATFORM_TARGET_LINK_LIBRARIES
+      "-lpsapi"
+      )
   endif()
 
   add_swift_unittest(SwiftRuntimeTests

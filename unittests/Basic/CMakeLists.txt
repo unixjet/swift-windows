@@ -22,6 +22,7 @@ add_swift_unittest(SwiftBasicTests
   ThreadSafeRefCntPointerTests.cpp
   TreeScopedHashTableTests.cpp
   Unicode.cpp
+  CygMingOnceF.cpp
   ${generated_tests}
   )
 
